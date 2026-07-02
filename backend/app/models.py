@@ -1,0 +1,28 @@
+from datetime import date, datetime
+
+from pydantic import BaseModel, Field
+
+from app.schemas import PriorityOption, ReminderCategory, RepeatOption
+
+
+class Reminder(BaseModel):
+    id: str
+    title: str
+    category: ReminderCategory
+    due_date: date
+    repeat: RepeatOption = RepeatOption.NONE
+    priority: PriorityOption = PriorityOption.MEDIUM
+    notes: str | None = None
+    completed: bool = False
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+
+class ReminderPatch(BaseModel):
+    title: str | None = None
+    category: ReminderCategory | None = None
+    due_date: date | None = None
+    repeat: RepeatOption | None = None
+    priority: PriorityOption | None = None
+    notes: str | None = Field(default=None)

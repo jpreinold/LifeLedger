@@ -1,0 +1,66 @@
+import type { Reminder, ReminderInput } from '../types/reminder'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  let response: Response
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    })
+  } catch {
+    throw new Error('Unable to reach the LifeLedger API. Make sure the Python backend is running.')
+  }
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}.`
+
+    try {
+      const body = await response.json()
+      message = typeof body.detail === 'string' ? body.detail : message
+    } catch {
+      message = response.statusText || message
+    }
+
+    throw new Error(message)
+  }
+
+  if (response.status === 204) {
+    return undefined as T
+  }
+
+  return response.json() as Promise<T>
+}
+
+export const remindersApi = {
+  list: () => request<Reminder[]>('/reminders'),
+
+  get: (id: string) => request<Reminder>(`/reminders/${id}`),
+
+  create: (input: ReminderInput) =>
+    request<Reminder>('/reminders', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  update: (id: string, input: Partial<ReminderInput>) =>
+    request<Reminder>(`/reminders/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+
+  complete: (id: string) =>
+    request<Reminder>(`/reminders/${id}/complete`, {
+      method: 'POST',
+    }),
+
+  remove: (id: string) =>
+    request<void>(`/reminders/${id}`, {
+      method: 'DELETE',
+    }),
+}
