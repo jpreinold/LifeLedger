@@ -82,6 +82,47 @@ cd D:\CodingProjects\LifeLedger
 npm run frontend
 ```
 
+## Cloudflare Pages Frontend Deployment
+
+LifeLedger uses Cloudflare Pages for the deployed React/Vite frontend. Do not deploy the frontend to Vercel or Netlify for this project.
+
+Cloudflare Pages settings:
+
+| Setting | Value |
+| --- | --- |
+| Project source | GitHub repository: `LifeLedger` |
+| Root directory | `frontend` |
+| Framework preset | `Vite` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Environment variable | `VITE_API_BASE_URL=https://your-aws-api-gateway-url` |
+
+`VITE_API_BASE_URL` is public frontend configuration. It should contain the public AWS API Gateway base URL only. Do not put API keys, tokens, passwords, AWS credentials, or private values in Vite environment variables.
+
+Local frontend API configuration:
+
+- `frontend/.env.local` can point to Uvicorn local backend: `VITE_API_BASE_URL=http://localhost:8000`
+- `frontend/.env.local` can point to SAM local: `VITE_API_BASE_URL=http://127.0.0.1:3000`
+- `frontend/.env.local` is ignored by git and should not be committed.
+- `frontend/.env.example` shows the required variable with a placeholder value.
+
+Deployed frontend flow:
+
+- Cloudflare Pages injects `VITE_API_BASE_URL` at build time.
+- The React app calls the deployed AWS API Gateway URL.
+- API Gateway invokes Lambda.
+- Lambda runs FastAPI through Mangum.
+- DynamoDB stores deployed reminders.
+
+Before deploying the frontend:
+
+- AWS backend is deployed.
+- `/health` works on the AWS API Gateway URL.
+- `/reminders` works on the AWS API Gateway URL.
+- Cloudflare Pages has `VITE_API_BASE_URL` set.
+- `npm run check` passes.
+- `frontend/.env.local` is not committed.
+
 ## API Routes
 
 - `GET /health`

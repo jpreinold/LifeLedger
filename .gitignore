@@ -23,6 +23,7 @@ backend/samconfig.toml
 
 # Local frontend env
 frontend/.env.local
+frontend/.env.*.local
 
 # AWS SAM build output
 backend/.aws-sam/
