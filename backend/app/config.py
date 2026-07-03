@@ -5,10 +5,14 @@ from pathlib import Path
 from typing import Mapping
 
 
+LOCAL_AUTH_MODE = "local"
+COGNITO_AUTH_MODE = "cognito"
+SUPPORTED_AUTH_MODES = {LOCAL_AUTH_MODE, COGNITO_AUTH_MODE}
 LOCAL_PERSISTENCE = "local"
 DYNAMODB_PERSISTENCE = "dynamodb"
 SUPPORTED_PERSISTENCE_MODES = {LOCAL_PERSISTENCE, DYNAMODB_PERSISTENCE}
 LAMBDA_LOCAL_DATA_FILE = "/tmp/lifeledger-reminders.json"
+DEFAULT_LOCAL_DEV_USER_ID = "local-dev-user"
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -16,13 +20,16 @@ DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "https://lifeledger.jpreinold.com",
 ]
+DEFAULT_REMINDERS_TABLE_NAME = "lifeledger-reminders-auth"
 
 
 @dataclass(frozen=True)
 class Settings:
     app_env: str = "local"
+    auth_mode: str = LOCAL_AUTH_MODE
+    local_dev_user_id: str = DEFAULT_LOCAL_DEV_USER_ID
     persistence_mode: str = LOCAL_PERSISTENCE
-    reminders_table_name: str = "lifeledger-reminders"
+    reminders_table_name: str = DEFAULT_REMINDERS_TABLE_NAME
     aws_region: str = "us-east-1"
     local_data_file: str = ""
     cors_allowed_origins: list[str] | None = None
@@ -30,7 +37,12 @@ class Settings:
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     source = os.environ if env is None else env
+    auth_mode = source.get("AUTH_MODE", LOCAL_AUTH_MODE).strip().lower()
     persistence_mode = source.get("PERSISTENCE_MODE", LOCAL_PERSISTENCE).strip().lower()
+
+    if auth_mode not in SUPPORTED_AUTH_MODES:
+        supported = ", ".join(sorted(SUPPORTED_AUTH_MODES))
+        raise ValueError(f"Unsupported AUTH_MODE '{auth_mode}'. Expected one of: {supported}.")
 
     if persistence_mode not in SUPPORTED_PERSISTENCE_MODES:
         supported = ", ".join(sorted(SUPPORTED_PERSISTENCE_MODES))
@@ -38,9 +50,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
     return Settings(
         app_env=source.get("APP_ENV", "local").strip() or "local",
+        auth_mode=auth_mode,
+        local_dev_user_id=source.get("LOCAL_DEV_USER_ID", DEFAULT_LOCAL_DEV_USER_ID).strip()
+        or DEFAULT_LOCAL_DEV_USER_ID,
         persistence_mode=persistence_mode,
-        reminders_table_name=source.get("REMINDERS_TABLE_NAME", "lifeledger-reminders").strip()
-        or "lifeledger-reminders",
+        reminders_table_name=source.get("REMINDERS_TABLE_NAME", DEFAULT_REMINDERS_TABLE_NAME).strip()
+        or DEFAULT_REMINDERS_TABLE_NAME,
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
         cors_allowed_origins=parse_csv_list(source.get("CORS_ALLOWED_ORIGINS", ""))

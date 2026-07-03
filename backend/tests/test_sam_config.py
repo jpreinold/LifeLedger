@@ -10,16 +10,34 @@ def test_sam_template_defaults_to_local_persistence():
 
     assert "PersistenceMode:" in template
     assert "Default: local" in template
+    assert "UseCognitoAuth: !Equals [!Ref AuthMode, cognito]" in template
+    assert "UseLocalAuth: !Not [!Condition UseCognitoAuth]" in template
+    assert "LifeLedgerLocalHttpApi:" in template
+    assert "LifeLedgerCognitoHttpApi:" in template
+    assert "Condition: UseLocalAuth" in template
+    assert "Condition: UseCognitoAuth" in template
     assert "PERSISTENCE_MODE: !Ref PersistenceMode" in template
+    assert "AUTH_MODE: !Ref AuthMode" in template
+    assert "DefaultAuthorizer: CognitoJwtAuthorizer" in template
+    assert "HealthLocal:" in template
+    assert "ApiProxyLocal:" in template
+    assert "HealthCognito:" in template
+    assert "ApiProxyCognito:" in template
+    assert "AdminCreateUserConfig:" in template
+    assert "AllowAdminCreateUserOnly: true" in template
     assert "LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json" in template
     assert "CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins" in template
     assert "https://lifeledger.jpreinold.com" in template
+    assert "DeletionPolicy: Retain" in template
+    assert "AttributeName: user_id" in template
 
 
 def test_sam_local_env_file_uses_local_persistence():
     env_file = json.loads((BACKEND_ROOT / "env.local.json").read_text(encoding="utf-8"))
 
     function_env = env_file["LifeLedgerApiFunction"]
+    assert function_env["AUTH_MODE"] == "local"
+    assert function_env["LOCAL_DEV_USER_ID"] == "local-dev-user"
     assert function_env["PERSISTENCE_MODE"] == "local"
     assert function_env["LOCAL_DATA_FILE"] == "/tmp/lifeledger-reminders.json"
     assert "https://lifeledger.jpreinold.com" in function_env["CORS_ALLOWED_ORIGINS"]

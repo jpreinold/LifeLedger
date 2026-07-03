@@ -3,6 +3,8 @@ from datetime import date, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from app.auth import UserContext, get_current_user
+from app.config import get_settings
 from app.main import app, get_repository
 from app.repository import LocalReminderRepository
 
@@ -37,11 +39,51 @@ def create_reminder(client: TestClient, **overrides):
     return response.json()
 
 
+def set_auth_user(user_id: str):
+    app.dependency_overrides[get_current_user] = lambda: UserContext(user_id=user_id)
+
+
 def test_health(client):
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_health_stays_public_in_cognito_mode(client, monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "cognito")
+    get_settings.cache_clear()
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+    get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body"),
+    [
+        ("get", "/reminders", None),
+        ("post", "/reminders", make_payload()),
+        ("get", "/reminders/example-id", None),
+        ("put", "/reminders/example-id", {"title": "Updated"}),
+        ("delete", "/reminders/example-id", None),
+        ("post", "/reminders/example-id/complete", None),
+    ],
+)
+def test_cognito_mode_rejects_unauthenticated_reminder_routes(client, monkeypatch, method, path, json_body):
+    monkeypatch.setenv("AUTH_MODE", "cognito")
+    get_settings.cache_clear()
+
+    request = getattr(client, method)
+    kwargs = {"json": json_body} if json_body is not None else {}
+    response = request(path, **kwargs)
+
+    assert response.status_code == 401
+
+    get_settings.cache_clear()
 
 
 def test_cors_allows_cloudflare_frontend(client):
@@ -68,6 +110,8 @@ def test_cors_preflight_allows_cloudflare_frontend(client):
 def test_create_and_fetch_reminder(client):
     created = create_reminder(client)
 
+    assert "user_id" not in created
+
     list_response = client.get("/reminders")
     assert list_response.status_code == 200
     assert len(list_response.json()) == 1
@@ -75,6 +119,49 @@ def test_create_and_fetch_reminder(client):
     get_response = client.get(f"/reminders/{created['id']}")
     assert get_response.status_code == 200
     assert get_response.json()["title"] == "Renew car tag"
+
+
+def test_authenticated_user_can_crud_own_reminders(client):
+    set_auth_user("user-a")
+
+    created = create_reminder(client)
+    response = client.put(
+        f"/reminders/{created['id']}",
+        json={"title": "User scoped update"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "User scoped update"
+
+    complete_response = client.post(f"/reminders/{created['id']}/complete")
+    assert complete_response.status_code == 200
+    assert complete_response.json()["completed"] is True
+
+    delete_response = client.delete(f"/reminders/{created['id']}")
+    assert delete_response.status_code == 204
+
+
+def test_user_cannot_access_another_users_reminder(client):
+    set_auth_user("user-a")
+    created = create_reminder(client)
+
+    set_auth_user("user-b")
+
+    list_response = client.get("/reminders")
+    assert list_response.status_code == 200
+    assert list_response.json() == []
+
+    get_response = client.get(f"/reminders/{created['id']}")
+    assert get_response.status_code == 404
+
+    update_response = client.put(f"/reminders/{created['id']}", json={"title": "Blocked update"})
+    assert update_response.status_code == 404
+
+    complete_response = client.post(f"/reminders/{created['id']}/complete")
+    assert complete_response.status_code == 404
+
+    delete_response = client.delete(f"/reminders/{created['id']}")
+    assert delete_response.status_code == 404
 
 
 def test_update_reminder(client):
@@ -125,7 +212,7 @@ def test_local_json_repository_persists_across_instances(tmp_path):
     first_repo.create_reminder(created)
 
     second_repo = LocalReminderRepository(data_file)
-    loaded = second_repo.get_reminder(created.id)
+    loaded = second_repo.get_reminder("local-dev-user", created.id)
 
     assert loaded is not None
     assert loaded.id == created.id

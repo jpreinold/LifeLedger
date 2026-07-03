@@ -4,6 +4,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import UserContext, get_current_user
 from app.config import get_settings
 from app.models import Reminder
 from app.recurrence import advance_due_date, calculate_status, get_next_due_date
@@ -35,8 +36,11 @@ def health() -> dict[str, str]:
 
 
 @app.get("/reminders", response_model=list[ReminderResponse])
-def list_reminders(repo: ReminderRepository = Depends(get_repository)) -> list[ReminderResponse]:
-    reminders = repo.list_reminders()
+def list_reminders(
+    current_user: UserContext = Depends(get_current_user),
+    repo: ReminderRepository = Depends(get_repository),
+) -> list[ReminderResponse]:
+    reminders = repo.list_reminders(current_user.user_id)
     sorted_reminders = sorted(reminders, key=lambda item: (item.completed, item.due_date, item.created_at))
     return [to_response(reminder) for reminder in sorted_reminders]
 
@@ -44,11 +48,13 @@ def list_reminders(repo: ReminderRepository = Depends(get_repository)) -> list[R
 @app.post("/reminders", response_model=ReminderResponse, status_code=status.HTTP_201_CREATED)
 def create_reminder(
     payload: ReminderCreate,
+    current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
 ) -> ReminderResponse:
     now = utc_now()
     reminder = Reminder(
         id=str(uuid4()),
+        user_id=current_user.user_id,
         title=payload.title,
         category=payload.category,
         due_date=payload.due_date,
@@ -67,18 +73,20 @@ def create_reminder(
 @app.get("/reminders/{reminder_id}", response_model=ReminderResponse)
 def get_reminder(
     reminder_id: str,
+    current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
 ) -> ReminderResponse:
-    return to_response(require_reminder(repo, reminder_id))
+    return to_response(require_reminder(repo, current_user.user_id, reminder_id))
 
 
 @app.put("/reminders/{reminder_id}", response_model=ReminderResponse)
 def update_reminder(
     reminder_id: str,
     payload: ReminderUpdate,
+    current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
 ) -> ReminderResponse:
-    reminder = require_reminder(repo, reminder_id)
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
     updates = payload.model_dump(exclude_unset=True)
 
     updated = reminder.model_copy(update={**updates, "updated_at": utc_now()})
@@ -88,9 +96,10 @@ def update_reminder(
 @app.delete("/reminders/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_reminder(
     reminder_id: str,
+    current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
 ) -> Response:
-    deleted = repo.delete_reminder(reminder_id)
+    deleted = repo.delete_reminder(current_user.user_id, reminder_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")
 
@@ -100,9 +109,10 @@ def delete_reminder(
 @app.post("/reminders/{reminder_id}/complete", response_model=ReminderResponse)
 def complete_reminder(
     reminder_id: str,
+    current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
 ) -> ReminderResponse:
-    reminder = require_reminder(repo, reminder_id)
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
 
     if reminder.repeat == RepeatOption.NONE:
@@ -127,8 +137,8 @@ def complete_reminder(
     return to_response(repo.update_reminder(advanced_reminder))
 
 
-def require_reminder(repo: ReminderRepository, reminder_id: str) -> Reminder:
-    reminder = repo.get_reminder(reminder_id)
+def require_reminder(repo: ReminderRepository, user_id: str, reminder_id: str) -> Reminder:
+    reminder = repo.get_reminder(user_id, reminder_id)
     if reminder is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")
 

@@ -7,6 +7,7 @@ from app.schemas import PriorityOption, ReminderCategory, RepeatOption
 
 class Reminder(BaseModel):
     id: str
+    user_id: str = "local-dev-user"
     title: str
     category: ReminderCategory
     due_date: date

@@ -18,4 +18,4 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 region = "us-east-1"
-parameter_overrides = "AppEnv=\"production\" PersistenceMode=\"dynamodb\" RemindersTableName=\"lifeledger-reminders\" CorsAllowedOrigins=\"http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com\""
+parameter_overrides = "AppEnv=\"production\" AuthMode=\"cognito\" PersistenceMode=\"dynamodb\" RemindersTableName=\"lifeledger-reminders-auth\" CorsAllowedOrigins=\"http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com\""

@@ -9,6 +9,15 @@ Parameters:
     AllowedValues:
       - local
       - production
+  AuthMode:
+    Type: String
+    Default: local
+    AllowedValues:
+      - local
+      - cognito
+  LocalDevUserId:
+    Type: String
+    Default: local-dev-user
   PersistenceMode:
     Type: String
     Default: local
@@ -17,10 +26,14 @@ Parameters:
       - dynamodb
   RemindersTableName:
     Type: String
-    Default: lifeledger-reminders
+    Default: lifeledger-reminders-auth
   CorsAllowedOrigins:
     Type: String
     Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com
+
+Conditions:
+  UseCognitoAuth: !Equals [!Ref AuthMode, cognito]
+  UseLocalAuth: !Not [!Condition UseCognitoAuth]
 
 Globals:
   Function:
@@ -29,6 +42,92 @@ Globals:
     MemorySize: 512
 
 Resources:
+  LifeLedgerUserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: UseCognitoAuth
+    Properties:
+      UserPoolName: !Sub "${AWS::StackName}-users"
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+
+  LifeLedgerUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: UseCognitoAuth
+    Properties:
+      ClientName: !Sub "${AWS::StackName}-web-client"
+      UserPoolId: !Ref LifeLedgerUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      SupportedIdentityProviders:
+        - COGNITO
+
+  LifeLedgerLocalHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Condition: UseLocalAuth
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: !Split [",", !Ref CorsAllowedOrigins]
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowCredentials: true
+
+  LifeLedgerCognitoHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Condition: UseCognitoAuth
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: !Split [",", !Ref CorsAllowedOrigins]
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowCredentials: true
+      Auth:
+        DefaultAuthorizer: CognitoJwtAuthorizer
+        Authorizers:
+          CognitoJwtAuthorizer:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${LifeLedgerUserPool}"
+              audience:
+                - !Ref LifeLedgerUserPoolClient
+
   LifeLedgerApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -38,6 +137,8 @@ Resources:
       Environment:
         Variables:
           APP_ENV: !Ref AppEnv
+          AUTH_MODE: !Ref AuthMode
+          LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
@@ -46,33 +147,70 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref RemindersTable
       Events:
-        ApiRoot:
+        HealthLocal:
           Type: HttpApi
+          Condition: UseLocalAuth
           Properties:
-            Path: /
+            ApiId: !Ref LifeLedgerLocalHttpApi
+            Path: /health
+            Method: GET
+        ApiProxyLocal:
+          Type: HttpApi
+          Condition: UseLocalAuth
+          Properties:
+            ApiId: !Ref LifeLedgerLocalHttpApi
+            Path: /{proxy+}
             Method: ANY
-        ApiProxy:
+        HealthCognito:
           Type: HttpApi
+          Condition: UseCognitoAuth
           Properties:
+            ApiId: !Ref LifeLedgerCognitoHttpApi
+            Path: /health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        ApiProxyCognito:
+          Type: HttpApi
+          Condition: UseCognitoAuth
+          Properties:
+            ApiId: !Ref LifeLedgerCognitoHttpApi
             Path: /{proxy+}
             Method: ANY
 
   RemindersTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Ref RemindersTableName
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
         - AttributeName: id
           AttributeType: S
       KeySchema:
-        - AttributeName: id
+        - AttributeName: user_id
           KeyType: HASH
+        - AttributeName: id
+          KeyType: RANGE
 
 Outputs:
   ApiUrl:
     Description: HTTP API endpoint for the LifeLedger backend.
-    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
+    Value: !If
+      - UseCognitoAuth
+      - !Sub "https://${LifeLedgerCognitoHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
+      - !Sub "https://${LifeLedgerLocalHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
   RemindersTable:
     Description: DynamoDB reminders table name.
     Value: !Ref RemindersTable
+  UserPoolId:
+    Condition: UseCognitoAuth
+    Description: Cognito User Pool ID.
+    Value: !Ref LifeLedgerUserPool
+  UserPoolClientId:
+    Condition: UseCognitoAuth
+    Description: Cognito User Pool app client ID for the frontend.
+    Value: !Ref LifeLedgerUserPoolClient
