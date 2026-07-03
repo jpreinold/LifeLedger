@@ -1,0 +1,12 @@
+{
+  "name": "lifeledger",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "backend": "powershell -ExecutionPolicy Bypass -File ./scripts/backend.ps1",
+    "frontend": "powershell -ExecutionPolicy Bypass -File ./scripts/frontend.ps1",
+    "test:backend": "powershell -ExecutionPolicy Bypass -File ./scripts/test-backend.ps1",
+    "sam:local": "powershell -ExecutionPolicy Bypass -File ./scripts/sam-local.ps1",
+    "check": "powershell -ExecutionPolicy Bypass -File ./scripts/check.ps1"
+  }
+}

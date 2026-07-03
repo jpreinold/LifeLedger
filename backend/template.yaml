@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: LifeLedger FastAPI backend running on AWS Lambda with local or DynamoDB persistence.
+
+Parameters:
+  AppEnv:
+    Type: String
+    Default: local
+    AllowedValues:
+      - local
+      - production
+  PersistenceMode:
+    Type: String
+    Default: local
+    AllowedValues:
+      - local
+      - dynamodb
+  RemindersTableName:
+    Type: String
+    Default: lifeledger-reminders
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 30
+    MemorySize: 512
+
+Resources:
+  LifeLedgerApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-api"
+      CodeUri: .
+      Handler: lambda_handler.handler
+      Environment:
+        Variables:
+          APP_ENV: !Ref AppEnv
+          PERSISTENCE_MODE: !Ref PersistenceMode
+          REMINDERS_TABLE_NAME: !Ref RemindersTable
+          LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RemindersTable
+      Events:
+        ApiRoot:
+          Type: HttpApi
+          Properties:
+            Path: /
+            Method: ANY
+        ApiProxy:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+  RemindersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref RemindersTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+Outputs:
+  ApiUrl:
+    Description: HTTP API endpoint for the LifeLedger backend.
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
+  RemindersTable:
+    Description: DynamoDB reminders table name.
+    Value: !Ref RemindersTable

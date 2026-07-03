@@ -1,8 +1,12 @@
 # LifeLedger
 
-LifeLedger is a Phase 1 full-stack reminder MVP: a React/TypeScript PWA-style frontend backed by a Python FastAPI API.
+LifeLedger is a personal life-admin PWA with a React frontend and Python backend for tracking reminders like car tag renewals, oil changes, annual checkups, birthdays, subscriptions, insurance renewals, and home maintenance.
 
-## Run the backend
+Phase 2 keeps the working Phase 1 reminder app intact while making the backend easier to explain as an AWS/serverless Python project.
+
+## Run Locally
+
+Backend:
 
 ```powershell
 cd backend
@@ -12,9 +16,15 @@ python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
-API docs are available at `http://localhost:8000/docs`.
+If you are using Git Bash:
 
-## Run the frontend
+```bash
+cd /d/CodingProjects/LifeLedger/backend
+source .venv/Scripts/activate
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+Frontend:
 
 ```powershell
 cd frontend
@@ -22,9 +32,57 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-The frontend runs at `http://localhost:5173` and calls `http://localhost:8000` by default. Set `VITE_API_BASE_URL` to point at a different backend.
+The frontend runs at `http://localhost:5173` and calls `http://localhost:8000` by default. API docs are available at `http://localhost:8000/docs`.
 
-## Routes
+## Common Dev Commands
+
+Preferred flow: run these from the repo root with npm.
+
+```powershell
+npm run backend
+```
+
+Starts the FastAPI backend on `http://localhost:8000`.
+
+```powershell
+npm run frontend
+```
+
+Starts the Vite frontend on `http://localhost:5173`.
+
+```powershell
+npm run test:backend
+```
+
+Runs the backend pytest suite.
+
+```powershell
+npm run sam:local
+```
+
+Sets `AWS_PROFILE=lifeledger`, sets `AWS_REGION=us-east-1`, builds SAM, and starts the SAM local API with `env.local.json`.
+
+```powershell
+npm run check
+```
+
+Runs backend tests, frontend build, and frontend lint when the lint script exists.
+
+Daily startup:
+
+```powershell
+cd D:\CodingProjects\LifeLedger
+npm run backend
+```
+
+In a second terminal:
+
+```powershell
+cd D:\CodingProjects\LifeLedger
+npm run frontend
+```
+
+## API Routes
 
 - `GET /health`
 - `GET /reminders`
@@ -34,10 +92,57 @@ The frontend runs at `http://localhost:5173` and calls `http://localhost:8000` b
 - `DELETE /reminders/{id}`
 - `POST /reminders/{id}/complete`
 
-## Reminder flow
+## Backend Architecture
 
-React components call `frontend/src/api/remindersApi.ts` for loading, creating, completing, and deleting reminders. That client sends JSON to the FastAPI routes in `backend/app/main.py`. The backend validates the request with Pydantic schemas, persists reminders through the repository layer, calculates response-only fields, and returns the updated reminder list data to React.
+- FastAPI owns the routes in `backend/app/main.py`.
+- Pydantic validates request and response models in `backend/app/schemas.py`.
+- Status, recurrence, and `next_due_date` logic live in `backend/app/recurrence.py`.
+- Route handlers depend on a repository abstraction, not a concrete storage backend.
+- Local mode uses JSON-file persistence at `backend/data/reminders.json`.
+- DynamoDB mode uses `DynamoReminderRepository` for AWS deployment.
+- Config in `backend/app/config.py` chooses the persistence mode.
+- Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
+- `backend/template.yaml` describes the SAM serverless deployment shape.
 
-## Backend logic
+## Environment Variables
 
-Validation and API shapes live in `backend/app/schemas.py`. Persistence lives behind `backend/app/repository.py`, currently using `backend/data/reminders.json`, so reminders survive page refreshes and backend restarts. Status calculation, `next_due_date`, and recurrence helpers live in `backend/app/recurrence.py`; completion behavior is coordinated by the FastAPI route and those utilities.
+Local development works without setting any variables.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `APP_ENV` | `local` | Names the runtime environment. |
+| `PERSISTENCE_MODE` | `local` | Use `local` for JSON or `dynamodb` for DynamoDB. |
+| `REMINDERS_TABLE_NAME` | `lifeledger-reminders` | DynamoDB table name when DynamoDB mode is enabled. |
+| `AWS_REGION` | `us-east-1` | Region used by the DynamoDB repository. Lambda also provides this automatically. |
+| `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
+
+## Serverless Notes
+
+The backend can still run locally with Uvicorn. Lambda support is additive: `backend/lambda_handler.py` imports the same FastAPI app and wraps it with Mangum.
+
+The SAM template defines a Lambda function, HTTP API events, a DynamoDB table with `id` as the partition key, and DynamoDB permissions for the function. The template defaults to `PERSISTENCE_MODE=local`, so `sam local start-api` can serve `/health` and `/reminders` without AWS credentials or DynamoDB calls. In Lambda/SAM local mode, local JSON persistence writes to `/tmp/lifeledger-reminders.json` because the function code directory may be read-only.
+
+For this single-user MVP, `id` is acceptable as the DynamoDB partition key. A future multi-user version should likely use `user_id` as the partition key and reminder id as the sort key after authentication exists.
+
+High-level SAM commands:
+
+```powershell
+cd backend
+sam build
+sam local start-api
+sam deploy --guided
+```
+
+To test SAM local with explicit environment variables:
+
+```powershell
+sam local start-api --env-vars env.local.json
+```
+
+To deploy with DynamoDB persistence, explicitly override `PersistenceMode=dynamodb` during `sam deploy --guided` or with SAM parameter overrides.
+
+Deployment is not required for Phase 2 completion.
+
+## Not In Phase 2
+
+Phase 2 does not add AI, RAG, Google Calendar sync, OAuth, authentication, secure vault storage, credit card storage, insurance documents, multiple users, push notifications, or a frontend redesign.

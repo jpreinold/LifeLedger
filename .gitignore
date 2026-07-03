@@ -18,6 +18,9 @@ dist/
 .env.*
 !.env.example
 
+# AWS SAM build output
+backend/.aws-sam/
+
 # Editor / OS
 .DS_Store
 Thumbs.db

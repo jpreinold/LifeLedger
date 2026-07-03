@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import Reminder
 from app.recurrence import advance_due_date, calculate_status, get_next_due_date
-from app.repository import LocalReminderRepository, ReminderRepository, default_data_file
+from app.repository import ReminderRepository
+from app.repository_factory import create_repository
 from app.schemas import ReminderCreate, ReminderResponse, ReminderUpdate, RepeatOption
 
 app = FastAPI(title="LifeLedger API", version="0.1.0")
@@ -24,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-repository = LocalReminderRepository(default_data_file())
+repository = create_repository()
 
 
 def get_repository() -> ReminderRepository:
