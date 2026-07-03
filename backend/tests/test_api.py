@@ -44,6 +44,27 @@ def test_health(client):
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_cloudflare_frontend(client):
+    response = client.get("/reminders", headers={"Origin": "https://lifeledger.jpreinold.com"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://lifeledger.jpreinold.com"
+
+
+def test_cors_preflight_allows_cloudflare_frontend(client):
+    response = client.options(
+        "/reminders",
+        headers={
+            "Origin": "https://lifeledger.jpreinold.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://lifeledger.jpreinold.com"
+    assert "GET" in response.headers["access-control-allow-methods"]
+
+
 def test_create_and_fetch_reminder(client):
     created = create_reminder(client)
 

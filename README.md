@@ -156,6 +156,7 @@ Local development works without setting any variables.
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders` | DynamoDB table name when DynamoDB mode is enabled. |
 | `AWS_REGION` | `us-east-1` | Region used by the DynamoDB repository. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
 ## Serverless Notes
 
@@ -181,6 +182,12 @@ sam local start-api --env-vars env.local.json
 ```
 
 To deploy with DynamoDB persistence, explicitly override `PersistenceMode=dynamodb` during `sam deploy --guided` or with SAM parameter overrides.
+
+The deployed Lambda must include `CORS_ALLOWED_ORIGINS` with the Cloudflare Pages domain, for example:
+
+```text
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com
+```
 
 SAM guided deploy creates `backend/samconfig.toml` for your machine/account. That file is ignored by git because it can contain local deployment choices. Use `backend/samconfig.example.toml` as a safe reference, then run:
 

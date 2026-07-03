@@ -9,6 +9,13 @@ LOCAL_PERSISTENCE = "local"
 DYNAMODB_PERSISTENCE = "dynamodb"
 SUPPORTED_PERSISTENCE_MODES = {LOCAL_PERSISTENCE, DYNAMODB_PERSISTENCE}
 LAMBDA_LOCAL_DATA_FILE = "/tmp/lifeledger-reminders.json"
+DEFAULT_CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://lifeledger.jpreinold.com",
+]
 
 
 @dataclass(frozen=True)
@@ -18,6 +25,7 @@ class Settings:
     reminders_table_name: str = "lifeledger-reminders"
     aws_region: str = "us-east-1"
     local_data_file: str = ""
+    cors_allowed_origins: list[str] | None = None
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -35,6 +43,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or "lifeledger-reminders",
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
+        cors_allowed_origins=parse_csv_list(source.get("CORS_ALLOWED_ORIGINS", ""))
+        or DEFAULT_CORS_ALLOWED_ORIGINS,
     )
 
 
@@ -46,6 +56,10 @@ def default_local_data_file(env: Mapping[str, str] | None = None) -> str:
 
     backend_root = Path(__file__).resolve().parents[1]
     return str(backend_root / "data" / "reminders.json")
+
+
+def parse_csv_list(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 @lru_cache(maxsize=1)

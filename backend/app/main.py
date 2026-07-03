@@ -4,22 +4,19 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import get_settings
 from app.models import Reminder
 from app.recurrence import advance_due_date, calculate_status, get_next_due_date
 from app.repository import ReminderRepository
 from app.repository_factory import create_repository
 from app.schemas import ReminderCreate, ReminderResponse, ReminderUpdate, RepeatOption
 
+settings = get_settings()
 app = FastAPI(title="LifeLedger API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
+    allow_origins=settings.cors_allowed_origins or [],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -12,6 +12,8 @@ def test_sam_template_defaults_to_local_persistence():
     assert "Default: local" in template
     assert "PERSISTENCE_MODE: !Ref PersistenceMode" in template
     assert "LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json" in template
+    assert "CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins" in template
+    assert "https://lifeledger.jpreinold.com" in template
 
 
 def test_sam_local_env_file_uses_local_persistence():
@@ -20,3 +22,4 @@ def test_sam_local_env_file_uses_local_persistence():
     function_env = env_file["LifeLedgerApiFunction"]
     assert function_env["PERSISTENCE_MODE"] == "local"
     assert function_env["LOCAL_DATA_FILE"] == "/tmp/lifeledger-reminders.json"
+    assert "https://lifeledger.jpreinold.com" in function_env["CORS_ALLOWED_ORIGINS"]

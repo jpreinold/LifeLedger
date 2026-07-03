@@ -1,6 +1,12 @@
 import pytest
 
-from app.config import DYNAMODB_PERSISTENCE, LAMBDA_LOCAL_DATA_FILE, LOCAL_PERSISTENCE, load_settings
+from app.config import (
+    DEFAULT_CORS_ALLOWED_ORIGINS,
+    DYNAMODB_PERSISTENCE,
+    LAMBDA_LOCAL_DATA_FILE,
+    LOCAL_PERSISTENCE,
+    load_settings,
+)
 
 
 def test_config_defaults_are_local_safe():
@@ -13,6 +19,7 @@ def test_config_defaults_are_local_safe():
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
     )
+    assert settings.cors_allowed_origins == DEFAULT_CORS_ALLOWED_ORIGINS
 
 
 def test_config_reads_environment_values():
@@ -22,6 +29,7 @@ def test_config_reads_environment_values():
             "PERSISTENCE_MODE": "dynamodb",
             "REMINDERS_TABLE_NAME": "custom-table",
             "AWS_REGION": "us-west-2",
+            "CORS_ALLOWED_ORIGINS": "https://example.com, http://localhost:5173",
         }
     )
 
@@ -32,6 +40,7 @@ def test_config_reads_environment_values():
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
     )
+    assert settings.cors_allowed_origins == ["https://example.com", "http://localhost:5173"]
 
 
 def test_config_allows_explicit_local_data_file():
