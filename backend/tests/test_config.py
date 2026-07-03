@@ -26,6 +26,8 @@ def test_config_defaults_are_local_safe():
         "backend/data/reminders.json"
     )
     assert settings.cors_allowed_origins == DEFAULT_CORS_ALLOWED_ORIGINS
+    assert "https://lifeledger.jpreinold.com" in settings.cors_allowed_origins
+    assert "https://www.lifeledger.jpreinold.com" in settings.cors_allowed_origins
 
 
 def test_config_reads_environment_values():

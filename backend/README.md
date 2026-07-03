@@ -64,7 +64,7 @@ Local development does not require environment variables.
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name. |
 | `AWS_REGION` | `us-east-1` | DynamoDB region. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
 ## Authentication Modes
 
@@ -116,7 +116,7 @@ Reminder records are scoped by `user_id`. The deployed DynamoDB table uses `user
 handler = Mangum(app)
 ```
 
-SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, a retained DynamoDB table, and CRUD permissions for the Lambda function.
+SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, a retained DynamoDB table, and CRUD permissions for the Lambda function.
 
 SAM local uses `backend/env.local.json`, which sets local auth and local persistence:
 
@@ -149,7 +149,7 @@ Use these parameter values for deployed auth:
 AuthMode=cognito
 PersistenceMode=dynamodb
 RemindersTableName=lifeledger-reminders-auth
-CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com
+CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 ```
 
 `sam deploy --guided` creates `samconfig.toml` for your local AWS account and deployment choices. That file is ignored by git. Use `samconfig.example.toml` as a safe reference that does not include credentials, account IDs, or local profile names.

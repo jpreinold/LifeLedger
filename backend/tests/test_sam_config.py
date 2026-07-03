@@ -18,12 +18,15 @@ def test_sam_template_defaults_to_local_persistence():
     assert "DefaultAuthorizer: CognitoJwtAuthorizer" in template
     assert "Health:" in template
     assert "Authorizer: NONE" in template
+    assert "OptionsProxy:" in template
+    assert "Method: OPTIONS" in template
     assert "ApiProxy:" in template
     assert "AdminCreateUserConfig:" in template
     assert "AllowAdminCreateUserOnly: true" in template
     assert "LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json" in template
     assert "CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins" in template
     assert "https://lifeledger.jpreinold.com" in template
+    assert "https://www.lifeledger.jpreinold.com" in template
     assert "DeletionPolicy: Retain" in template
     assert "AttributeName: user_id" in template
 
@@ -37,3 +40,4 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["PERSISTENCE_MODE"] == "local"
     assert function_env["LOCAL_DATA_FILE"] == "/tmp/lifeledger-reminders.json"
     assert "https://lifeledger.jpreinold.com" in function_env["CORS_ALLOWED_ORIGINS"]
+    assert "https://www.lifeledger.jpreinold.com" in function_env["CORS_ALLOWED_ORIGINS"]

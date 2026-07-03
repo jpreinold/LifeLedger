@@ -170,7 +170,7 @@ Backend local development works without setting any variables.
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name when DynamoDB mode is enabled. |
 | `AWS_REGION` | `us-east-1` | Region used by the DynamoDB repository. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
 ## Serverless Notes
 
@@ -181,6 +181,7 @@ The SAM template defines:
 - A Cognito user pool with public sign-up disabled.
 - A Cognito web app client without a client secret.
 - An HTTP API with CORS and a Cognito JWT authorizer.
+- An unauthenticated `OPTIONS /{proxy+}` route so browser preflight requests can complete before authenticated reminder calls.
 - A Lambda function running FastAPI through Mangum.
 - A DynamoDB table named `lifeledger-reminders-auth` with `user_id` partition key and `id` sort key.
 - `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain` on the reminders table.
@@ -202,7 +203,7 @@ For deployed auth and DynamoDB, use these SAM parameter values during deploy:
 AuthMode=cognito
 PersistenceMode=dynamodb
 RemindersTableName=lifeledger-reminders-auth
-CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com
+CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 ```
 
 SAM guided deploy creates `backend/samconfig.toml` for your machine/account. That file is ignored by git because it can contain local deployment choices. Use `backend/samconfig.example.toml` as a safe reference, then run:

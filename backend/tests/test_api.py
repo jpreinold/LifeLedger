@@ -86,25 +86,41 @@ def test_cognito_mode_rejects_unauthenticated_reminder_routes(client, monkeypatc
     get_settings.cache_clear()
 
 
-def test_cors_allows_cloudflare_frontend(client):
-    response = client.get("/reminders", headers={"Origin": "https://lifeledger.jpreinold.com"})
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://lifeledger.jpreinold.com",
+        "https://www.lifeledger.jpreinold.com",
+    ],
+)
+def test_cors_allows_cloudflare_frontend(client, origin):
+    response = client.get("/reminders", headers={"Origin": origin})
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "https://lifeledger.jpreinold.com"
+    assert response.headers["access-control-allow-origin"] == origin
 
 
-def test_cors_preflight_allows_cloudflare_frontend(client):
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://lifeledger.jpreinold.com",
+        "https://www.lifeledger.jpreinold.com",
+    ],
+)
+def test_cors_preflight_allows_cloudflare_frontend(client, origin):
     response = client.options(
         "/reminders",
         headers={
-            "Origin": "https://lifeledger.jpreinold.com",
+            "Origin": origin,
             "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
         },
     )
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "https://lifeledger.jpreinold.com"
+    assert response.headers["access-control-allow-origin"] == origin
     assert "GET" in response.headers["access-control-allow-methods"]
+    assert "Authorization" in response.headers["access-control-allow-headers"]
 
 
 def test_create_and_fetch_reminder(client):

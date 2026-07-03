@@ -29,7 +29,7 @@ Parameters:
     Default: lifeledger-reminders-auth
   CorsAllowedOrigins:
     Type: String
-    Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com
+    Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 
 Globals:
   Function:
@@ -129,6 +129,14 @@ Resources:
             ApiId: !Ref LifeLedgerHttpApi
             Path: /health
             Method: GET
+            Auth:
+              Authorizer: NONE
+        OptionsProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LifeLedgerHttpApi
+            Path: /{proxy+}
+            Method: OPTIONS
             Auth:
               Authorizer: NONE
         ApiProxy:

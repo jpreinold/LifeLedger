@@ -19,6 +19,7 @@ DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://lifeledger.jpreinold.com",
+    "https://www.lifeledger.jpreinold.com",
 ]
 DEFAULT_REMINDERS_TABLE_NAME = "lifeledger-reminders-auth"
 
