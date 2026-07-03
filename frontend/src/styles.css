@@ -75,7 +75,9 @@ textarea:focus-visible {
 
 .app-header h1,
 .form-panel h2,
+.template-dialog h2,
 .list-panel h2,
+.template-card h3,
 .reminder-card h3 {
   margin: 0;
 }
@@ -145,6 +147,180 @@ textarea:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 18px;
+}
+
+.form-helper {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.browse-template-button {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(23, 32, 42, 0.42);
+}
+
+.template-dialog {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 24px);
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(23, 32, 42, 0.22);
+  overflow: hidden;
+}
+
+.template-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.template-dialog-header p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.dialog-close-button {
+  flex: 0 0 auto;
+  min-width: 92px;
+}
+
+.template-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px;
+  padding: 0 12px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: var(--text-soft);
+}
+
+.template-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #17202a;
+}
+
+.template-filters {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.template-filter {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.template-filter.active {
+  border-color: var(--primary);
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+
+.template-results {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.template-count {
+  padding: 12px 14px 0;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  font-weight: 760;
+}
+
+.template-grid {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.template-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.template-card svg {
+  color: var(--primary);
+  flex: 0 0 auto;
+}
+
+.template-card h3 {
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.template-card p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+}
+
+.template-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.template-meta div {
+  min-height: 52px;
+  padding: 9px;
+  border-radius: 8px;
+  background: #f5f7f4;
+}
+
+.template-meta dt {
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.template-meta dd {
+  margin: 2px 0 0;
+  font-weight: 790;
+}
+
+.template-use-button {
+  width: 100%;
 }
 
 .stat-card {
@@ -277,8 +453,18 @@ textarea:focus-visible {
 
 .empty-state {
   margin: 0;
+  display: grid;
+  gap: 12px;
   padding: 24px 18px;
   color: var(--text-muted);
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+.empty-template-button {
+  width: min(220px, 100%);
 }
 
 .reminder-list {
@@ -425,11 +611,19 @@ textarea:focus-visible {
   .form-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .template-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (min-width: 960px) {
   .workspace {
     align-items: start;
     grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  }
+
+  .template-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

@@ -6,9 +6,10 @@ interface ReminderListProps {
   isLoading: boolean
   onComplete: (id: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
+  onBrowseTemplates: () => void
 }
 
-export function ReminderList({ reminders, isLoading, onComplete, onDelete }: ReminderListProps) {
+export function ReminderList({ reminders, isLoading, onComplete, onDelete, onBrowseTemplates }: ReminderListProps) {
   return (
     <section className="list-panel" aria-labelledby="reminders-heading">
       <div className="section-heading">
@@ -18,7 +19,14 @@ export function ReminderList({ reminders, isLoading, onComplete, onDelete }: Rem
 
       {isLoading ? <p className="empty-state">Loading reminders...</p> : null}
 
-      {!isLoading && reminders.length === 0 ? <p className="empty-state">No reminders yet.</p> : null}
+      {!isLoading && reminders.length === 0 ? (
+        <div className="empty-state">
+          <p>Start with a life admin template like vehicle registration, annual checkup, or subscription review.</p>
+          <button type="button" className="secondary-button empty-template-button" onClick={onBrowseTemplates}>
+            Browse templates
+          </button>
+        </div>
+      ) : null}
 
       <div className="reminder-list">
         {reminders.map((reminder) => (

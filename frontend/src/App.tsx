@@ -5,7 +5,9 @@ import { AlertCircle, LogOut, RefreshCcw } from 'lucide-react'
 import { remindersApi } from './api/remindersApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { Dashboard } from './components/Dashboard'
+import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { ReminderForm } from './components/ReminderForm'
+import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
 import type { Reminder, ReminderInput } from './types/reminder'
 
@@ -30,6 +32,8 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
 
   async function loadReminders() {
     setIsLoading(true)
@@ -87,6 +91,17 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
     }
   }
 
+  function handleUseTemplate(input: ReminderInput) {
+    setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
+
+    window.requestAnimationFrame(() => {
+      document.getElementById('add-reminder-heading')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -117,14 +132,26 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
       <Dashboard reminders={reminders} />
 
       <section className="workspace">
-        <ReminderForm onCreate={handleCreate} isSaving={isSaving} />
+        <ReminderForm
+          onCreate={handleCreate}
+          isSaving={isSaving}
+          onBrowseTemplates={() => setIsTemplateModalOpen(true)}
+          templateDraft={templateDraft}
+        />
         <ReminderList
           reminders={reminders}
           isLoading={isLoading}
           onComplete={handleComplete}
           onDelete={handleDelete}
+          onBrowseTemplates={() => setIsTemplateModalOpen(true)}
         />
       </section>
+
+      <LifeAdminTemplates
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        onUseTemplate={handleUseTemplate}
+      />
     </main>
   )
 }
