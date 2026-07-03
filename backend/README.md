@@ -127,4 +127,6 @@ sam deploy --guided
 
 To deploy with DynamoDB persistence, explicitly set `PersistenceMode=dynamodb` during guided deploy or with SAM parameter overrides.
 
+`sam deploy --guided` creates `samconfig.toml` for your local AWS account and deployment choices. That file is ignored by git. Use `samconfig.example.toml` as a safe reference that does not include credentials, account IDs, or local profile names.
+
 Deployment is optional for Phase 2; the local Uvicorn workflow remains the primary development path.

@@ -141,6 +141,13 @@ sam local start-api --env-vars env.local.json
 
 To deploy with DynamoDB persistence, explicitly override `PersistenceMode=dynamodb` during `sam deploy --guided` or with SAM parameter overrides.
 
+SAM guided deploy creates `backend/samconfig.toml` for your machine/account. That file is ignored by git because it can contain local deployment choices. Use `backend/samconfig.example.toml` as a safe reference, then run:
+
+```powershell
+cd backend
+sam deploy --guided
+```
+
 Deployment is not required for Phase 2 completion.
 
 ## Not In Phase 2

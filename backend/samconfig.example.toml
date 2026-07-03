@@ -1,0 +1,21 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "lifeledger-dev"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.local_start_api.parameters]
+env_vars = "env.local.json"
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+region = "us-east-1"
+parameter_overrides = "AppEnv=\"production\" PersistenceMode=\"dynamodb\" RemindersTableName=\"lifeledger-reminders\""

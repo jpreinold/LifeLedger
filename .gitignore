@@ -18,6 +18,12 @@ dist/
 .env.*
 !.env.example
 
+# Local SAM deployment config
+backend/samconfig.toml
+
+# Local frontend env
+frontend/.env.local
+
 # AWS SAM build output
 backend/.aws-sam/
 
