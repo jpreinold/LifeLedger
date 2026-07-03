@@ -180,7 +180,7 @@ The SAM template defines:
 
 - A Cognito user pool with public sign-up disabled.
 - A Cognito web app client without a client secret.
-- An HTTP API with CORS and a conditional Cognito JWT authorizer.
+- An HTTP API with CORS and a Cognito JWT authorizer.
 - A Lambda function running FastAPI through Mangum.
 - A DynamoDB table named `lifeledger-reminders-auth` with `user_id` partition key and `id` sort key.
 - `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain` on the reminders table.

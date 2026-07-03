@@ -118,7 +118,7 @@ handler = Mangum(app)
 
 SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, a retained DynamoDB table, and CRUD permissions for the Lambda function.
 
-SAM local defaults to local auth and local persistence:
+SAM local uses `backend/env.local.json`, which sets local auth and local persistence:
 
 ```powershell
 cd backend

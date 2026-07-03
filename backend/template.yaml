@@ -31,10 +31,6 @@ Parameters:
     Type: String
     Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com
 
-Conditions:
-  UseCognitoAuth: !Equals [!Ref AuthMode, cognito]
-  UseLocalAuth: !Not [!Condition UseCognitoAuth]
-
 Globals:
   Function:
     Runtime: python3.13
@@ -44,7 +40,6 @@ Globals:
 Resources:
   LifeLedgerUserPool:
     Type: AWS::Cognito::UserPool
-    Condition: UseCognitoAuth
     Properties:
       UserPoolName: !Sub "${AWS::StackName}-users"
       UsernameAttributes:
@@ -72,7 +67,6 @@ Resources:
 
   LifeLedgerUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
-    Condition: UseCognitoAuth
     Properties:
       ClientName: !Sub "${AWS::StackName}-web-client"
       UserPoolId: !Ref LifeLedgerUserPool
@@ -85,26 +79,8 @@ Resources:
       SupportedIdentityProviders:
         - COGNITO
 
-  LifeLedgerLocalHttpApi:
+  LifeLedgerHttpApi:
     Type: AWS::Serverless::HttpApi
-    Condition: UseLocalAuth
-    Properties:
-      CorsConfiguration:
-        AllowOrigins: !Split [",", !Ref CorsAllowedOrigins]
-        AllowMethods:
-          - GET
-          - POST
-          - PUT
-          - DELETE
-          - OPTIONS
-        AllowHeaders:
-          - Content-Type
-          - Authorization
-        AllowCredentials: true
-
-  LifeLedgerCognitoHttpApi:
-    Type: AWS::Serverless::HttpApi
-    Condition: UseCognitoAuth
     Properties:
       CorsConfiguration:
         AllowOrigins: !Split [",", !Ref CorsAllowedOrigins]
@@ -147,34 +123,18 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref RemindersTable
       Events:
-        HealthLocal:
+        Health:
           Type: HttpApi
-          Condition: UseLocalAuth
           Properties:
-            ApiId: !Ref LifeLedgerLocalHttpApi
-            Path: /health
-            Method: GET
-        ApiProxyLocal:
-          Type: HttpApi
-          Condition: UseLocalAuth
-          Properties:
-            ApiId: !Ref LifeLedgerLocalHttpApi
-            Path: /{proxy+}
-            Method: ANY
-        HealthCognito:
-          Type: HttpApi
-          Condition: UseCognitoAuth
-          Properties:
-            ApiId: !Ref LifeLedgerCognitoHttpApi
+            ApiId: !Ref LifeLedgerHttpApi
             Path: /health
             Method: GET
             Auth:
               Authorizer: NONE
-        ApiProxyCognito:
+        ApiProxy:
           Type: HttpApi
-          Condition: UseCognitoAuth
           Properties:
-            ApiId: !Ref LifeLedgerCognitoHttpApi
+            ApiId: !Ref LifeLedgerHttpApi
             Path: /{proxy+}
             Method: ANY
 
@@ -199,18 +159,13 @@ Resources:
 Outputs:
   ApiUrl:
     Description: HTTP API endpoint for the LifeLedger backend.
-    Value: !If
-      - UseCognitoAuth
-      - !Sub "https://${LifeLedgerCognitoHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
-      - !Sub "https://${LifeLedgerLocalHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
+    Value: !Sub "https://${LifeLedgerHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
   RemindersTable:
     Description: DynamoDB reminders table name.
     Value: !Ref RemindersTable
   UserPoolId:
-    Condition: UseCognitoAuth
     Description: Cognito User Pool ID.
     Value: !Ref LifeLedgerUserPool
   UserPoolClientId:
-    Condition: UseCognitoAuth
     Description: Cognito User Pool app client ID for the frontend.
     Value: !Ref LifeLedgerUserPoolClient

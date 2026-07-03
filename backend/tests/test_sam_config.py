@@ -10,19 +10,15 @@ def test_sam_template_defaults_to_local_persistence():
 
     assert "PersistenceMode:" in template
     assert "Default: local" in template
-    assert "UseCognitoAuth: !Equals [!Ref AuthMode, cognito]" in template
-    assert "UseLocalAuth: !Not [!Condition UseCognitoAuth]" in template
-    assert "LifeLedgerLocalHttpApi:" in template
-    assert "LifeLedgerCognitoHttpApi:" in template
-    assert "Condition: UseLocalAuth" in template
-    assert "Condition: UseCognitoAuth" in template
+    assert "LifeLedgerHttpApi:" in template
+    assert "LifeLedgerLocalHttpApi" not in template
+    assert "LifeLedgerCognitoHttpApi" not in template
     assert "PERSISTENCE_MODE: !Ref PersistenceMode" in template
     assert "AUTH_MODE: !Ref AuthMode" in template
     assert "DefaultAuthorizer: CognitoJwtAuthorizer" in template
-    assert "HealthLocal:" in template
-    assert "ApiProxyLocal:" in template
-    assert "HealthCognito:" in template
-    assert "ApiProxyCognito:" in template
+    assert "Health:" in template
+    assert "Authorizer: NONE" in template
+    assert "ApiProxy:" in template
     assert "AdminCreateUserConfig:" in template
     assert "AllowAdminCreateUserOnly: true" in template
     assert "LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json" in template
