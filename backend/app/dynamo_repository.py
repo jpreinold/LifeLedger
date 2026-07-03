@@ -9,19 +9,22 @@ class DynamoReminderRepository:
         self.region_name = region_name
         self.table = table or self._build_table(table_name, region_name)
 
-    def list_reminders(self) -> list[Reminder]:
+    def list_reminders(self, user_id: str) -> list[Reminder]:
         items: list[dict[str, Any]] = []
-        scan_kwargs: dict[str, Any] = {}
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "user_id = :user_id",
+            "ExpressionAttributeValues": {":user_id": user_id},
+        }
 
         while True:
-            response = self.table.scan(**scan_kwargs)
+            response = self.table.query(**query_kwargs)
             items.extend(response.get("Items", []))
 
             last_key = response.get("LastEvaluatedKey")
             if not last_key:
                 break
 
-            scan_kwargs["ExclusiveStartKey"] = last_key
+            query_kwargs["ExclusiveStartKey"] = last_key
 
         return [self._from_item(item) for item in items]
 
@@ -29,8 +32,8 @@ class DynamoReminderRepository:
         self.table.put_item(Item=self._to_item(reminder))
         return reminder
 
-    def get_reminder(self, reminder_id: str) -> Reminder | None:
-        response = self.table.get_item(Key={"id": reminder_id})
+    def get_reminder(self, user_id: str, reminder_id: str) -> Reminder | None:
+        response = self.table.get_item(Key={"user_id": user_id, "id": reminder_id})
         item = response.get("Item")
         if item is None:
             return None
@@ -41,8 +44,8 @@ class DynamoReminderRepository:
         self.table.put_item(Item=self._to_item(reminder))
         return reminder
 
-    def delete_reminder(self, reminder_id: str) -> bool:
-        response = self.table.delete_item(Key={"id": reminder_id}, ReturnValues="ALL_OLD")
+    def delete_reminder(self, user_id: str, reminder_id: str) -> bool:
+        response = self.table.delete_item(Key={"user_id": user_id, "id": reminder_id}, ReturnValues="ALL_OLD")
         return "Attributes" in response
 
     def _build_table(self, table_name: str, region_name: str) -> Any:

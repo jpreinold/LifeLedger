@@ -8,19 +8,19 @@ from app.models import Reminder
 
 
 class ReminderRepository(Protocol):
-    def list_reminders(self) -> list[Reminder]:
+    def list_reminders(self, user_id: str) -> list[Reminder]:
         ...
 
     def create_reminder(self, reminder: Reminder) -> Reminder:
         ...
 
-    def get_reminder(self, reminder_id: str) -> Reminder | None:
+    def get_reminder(self, user_id: str, reminder_id: str) -> Reminder | None:
         ...
 
     def update_reminder(self, reminder: Reminder) -> Reminder:
         ...
 
-    def delete_reminder(self, reminder_id: str) -> bool:
+    def delete_reminder(self, user_id: str, reminder_id: str) -> bool:
         ...
 
 
@@ -33,9 +33,9 @@ class LocalReminderRepository:
         if not self.file_path.exists():
             self._write_all_unlocked([])
 
-    def list_reminders(self) -> list[Reminder]:
+    def list_reminders(self, user_id: str) -> list[Reminder]:
         with self._lock:
-            return self._read_all_unlocked()
+            return [reminder for reminder in self._read_all_unlocked() if reminder.user_id == user_id]
 
     def create_reminder(self, reminder: Reminder) -> Reminder:
         with self._lock:
@@ -44,9 +44,16 @@ class LocalReminderRepository:
             self._write_all_unlocked(reminders)
             return reminder
 
-    def get_reminder(self, reminder_id: str) -> Reminder | None:
+    def get_reminder(self, user_id: str, reminder_id: str) -> Reminder | None:
         with self._lock:
-            return next((reminder for reminder in self._read_all_unlocked() if reminder.id == reminder_id), None)
+            return next(
+                (
+                    reminder
+                    for reminder in self._read_all_unlocked()
+                    if reminder.user_id == user_id and reminder.id == reminder_id
+                ),
+                None,
+            )
 
     def update_reminder(self, reminder: Reminder) -> Reminder:
         with self._lock:
@@ -61,10 +68,14 @@ class LocalReminderRepository:
             self._write_all_unlocked(reminders)
             return reminder
 
-    def delete_reminder(self, reminder_id: str) -> bool:
+    def delete_reminder(self, user_id: str, reminder_id: str) -> bool:
         with self._lock:
             reminders = self._read_all_unlocked()
-            next_reminders = [reminder for reminder in reminders if reminder.id != reminder_id]
+            next_reminders = [
+                reminder
+                for reminder in reminders
+                if not (reminder.user_id == user_id and reminder.id == reminder_id)
+            ]
 
             if len(next_reminders) == len(reminders):
                 return False
