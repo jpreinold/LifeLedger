@@ -1,15 +1,18 @@
 import type { Reminder, ReminderInput } from '../types/reminder'
+import { getAuthorizationHeaders } from '../auth/session'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response
+  const authorizationHeaders = await getAuthorizationHeaders()
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...authorizationHeaders,
         ...options.headers,
       },
     })

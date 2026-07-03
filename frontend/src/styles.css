@@ -65,6 +65,14 @@ textarea:focus-visible {
   margin-bottom: 18px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .app-header h1,
 .form-panel h2,
 .list-panel h2,
@@ -394,6 +402,10 @@ textarea:focus-visible {
 .secondary-button {
   color: var(--primary-strong);
   background: var(--primary-soft);
+}
+
+.sign-out-button {
+  min-width: 112px;
 }
 
 .danger-button {

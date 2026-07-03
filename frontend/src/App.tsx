@@ -1,13 +1,31 @@
 import { useEffect, useState } from 'react'
-import { AlertCircle, RefreshCcw } from 'lucide-react'
+import { Authenticator } from '@aws-amplify/ui-react'
+import { AlertCircle, LogOut, RefreshCcw } from 'lucide-react'
 
 import { remindersApi } from './api/remindersApi'
+import { isCognitoAuthEnabled } from './auth/config'
 import { Dashboard } from './components/Dashboard'
 import { ReminderForm } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
 import type { Reminder, ReminderInput } from './types/reminder'
 
 function App() {
+  if (!isCognitoAuthEnabled) {
+    return <ReminderApp />
+  }
+
+  return (
+    <Authenticator hideSignUp>
+      {({ signOut }) => <ReminderApp onSignOut={signOut} />}
+    </Authenticator>
+  )
+}
+
+interface ReminderAppProps {
+  onSignOut?: () => void
+}
+
+function ReminderApp({ onSignOut }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -76,9 +94,17 @@ function App() {
           <p className="eyebrow">LifeLedger</p>
           <h1>Reminder Hub</h1>
         </div>
-        <button type="button" className="icon-button" onClick={loadReminders} aria-label="Refresh reminders">
-          <RefreshCcw size={18} aria-hidden="true" />
-        </button>
+        <div className="header-actions">
+          <button type="button" className="icon-button" onClick={loadReminders} aria-label="Refresh reminders">
+            <RefreshCcw size={18} aria-hidden="true" />
+          </button>
+          {onSignOut ? (
+            <button type="button" className="secondary-button sign-out-button" onClick={onSignOut}>
+              <LogOut size={17} aria-hidden="true" />
+              Sign out
+            </button>
+          ) : null}
+        </div>
       </header>
 
       {error ? (
