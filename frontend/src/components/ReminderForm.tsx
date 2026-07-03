@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Plus } from 'lucide-react'
+import { LayoutTemplate, Plus } from 'lucide-react'
 
 import {
   priorityOptions,
@@ -12,9 +12,16 @@ import {
 interface ReminderFormProps {
   isSaving: boolean
   onCreate: (input: ReminderInput) => Promise<boolean>
+  onBrowseTemplates: () => void
+  templateDraft: TemplateDraft | null
 }
 
 const today = new Date().toISOString().slice(0, 10)
+
+export interface TemplateDraft {
+  id: string
+  input: ReminderInput
+}
 
 const initialForm: ReminderInput = {
   title: '',
@@ -25,8 +32,19 @@ const initialForm: ReminderInput = {
   notes: null,
 }
 
-export function ReminderForm({ isSaving, onCreate }: ReminderFormProps) {
+export function ReminderForm({ isSaving, onCreate, onBrowseTemplates, templateDraft }: ReminderFormProps) {
   const [form, setForm] = useState<ReminderInput>(initialForm)
+
+  useEffect(() => {
+    if (!templateDraft) {
+      return
+    }
+
+    setForm((current) => ({
+      ...templateDraft.input,
+      due_date: current.due_date || new Date().toISOString().slice(0, 10),
+    }))
+  }, [templateDraft])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -45,6 +63,11 @@ export function ReminderForm({ isSaving, onCreate }: ReminderFormProps) {
   return (
     <section className="form-panel" aria-labelledby="add-reminder-heading">
       <h2 id="add-reminder-heading">Add Reminder</h2>
+      <p className="form-helper">Choose or confirm the due date before saving.</p>
+      <button type="button" className="secondary-button browse-template-button" onClick={onBrowseTemplates}>
+        <LayoutTemplate size={17} aria-hidden="true" />
+        Browse templates
+      </button>
 
       <form className="reminder-form" onSubmit={handleSubmit}>
         <label>

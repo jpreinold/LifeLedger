@@ -19,7 +19,14 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-The app expects the API at `http://localhost:8000` by default. Override with `VITE_API_BASE_URL` when needed.
+For local testing, use `frontend/.env.local` with:
+
+```text
+VITE_AUTH_MODE=local
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Restart `npm run frontend` after changing `.env.local`; Vite reads env values at startup. Use deployed API Gateway URLs only for Cloudflare production builds.
 
 Use `npm.cmd run build` to verify the production bundle.
 
@@ -34,6 +41,12 @@ Deployed mode uses Cognito:
 - The app shows a minimal sign-in/sign-out flow.
 - Public sign-up is hidden; users should be created by an admin in Cognito.
 - API requests attach `Authorization: Bearer <access token>` from the Cognito session.
+
+## Life Admin Templates
+
+`src/templates/lifeAdminTemplates.ts` contains safe starter templates for common reminders. The app opens them in a searchable modal from the reminder form or empty state. Selecting a template fills the existing reminder form, and the user still chooses or confirms the due date before saving.
+
+Templates create normal reminders through `src/api/remindersApi.ts`. They do not include sensitive fields, do not send `user_id`, and do not bypass Cognito-protected reminder APIs.
 
 ## Cloudflare Pages
 

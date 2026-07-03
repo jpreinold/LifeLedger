@@ -1,8 +1,8 @@
 # LifeLedger
 
-LifeLedger is a personal life-admin PWA with a React frontend and Python backend for tracking reminders like car tag renewals, oil changes, annual checkups, birthdays, subscriptions, insurance renewals, and home maintenance.
+LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-Phase 3 adds authentication while keeping the Phase 1 reminder workflow and Phase 2 deployment shape intact. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+Phase 4 adds Life Admin Templates while keeping the authenticated reminder workflow intact. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -67,6 +67,14 @@ Phase 3 uses Amazon Cognito for deployed authentication:
 
 Local development uses `AUTH_MODE=local` and `LOCAL_DEV_USER_ID=local-dev-user`, so no Cognito login is needed for `npm run backend`, `npm run frontend`, or `npm run sam:local`.
 
+## Life Admin Templates
+
+The frontend includes a Life Admin Templates modal for common reminders such as vehicle registration, annual checkups, HVAC filters, subscription reviews, birthdays, warranty expirations, and personal admin reviews.
+
+Templates are TypeScript constants in the React app. Choosing **Browse templates** opens a searchable, category-filtered modal. Choosing **Use template** fills the existing reminder form with title, category, repeat, priority, and safe notes. The user still chooses or confirms the due date and saves normally through the authenticated `POST /reminders` API.
+
+Templates create normal reminders. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates also avoid sensitive fields and should not store policy numbers, card numbers, SSNs, passwords, medical details, or uploaded documents.
+
 ## Creating The First Cognito User
 
 After deploying the backend with `AuthMode=cognito`, create users from the AWS Console:
@@ -117,11 +125,12 @@ These `VITE_*` values are public frontend configuration. Do not put API keys, to
 
 Local frontend configuration:
 
-- `frontend/.env.local` can point to Uvicorn: `VITE_API_BASE_URL=http://localhost:8000`
+- For local testing with `npm run backend`, use `VITE_AUTH_MODE=local` and `VITE_API_BASE_URL=http://localhost:8000`.
 - `frontend/.env.local` can point to SAM local: `VITE_API_BASE_URL=http://127.0.0.1:3000`
-- Use `VITE_AUTH_MODE=local` or omit it for local development.
+- Use deployed API Gateway URLs only for Cloudflare production builds.
+- Restart `npm run frontend` after changing `frontend/.env.local`; Vite reads env values at startup.
 - `frontend/.env.local` is ignored by git and should not be committed.
-- `frontend/.env.example` shows placeholder values for deployed Cognito configuration.
+- `frontend/.env.example` shows both local and production examples.
 
 Deployed frontend flow:
 
@@ -226,4 +235,4 @@ sam deploy --guided
 
 ## Not In Phase 3
 
-Phase 3 does not add vault features, AI/RAG, Google Calendar sync, social login, public registration, sensitive data fields, push notifications, or a frontend redesign.
+Phase 4 does not add vault features, AI/RAG, Google Calendar sync, social login, public registration, sensitive data fields, file uploads, push notifications, or a frontend redesign.

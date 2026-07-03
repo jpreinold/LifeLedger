@@ -8,7 +8,7 @@
 
 LifeLedger is a personal life-admin hub built as an iPhone-friendly PWA with a React frontend and a Python backend.
 
-The purpose of the app is to help me stay on top of important adult-life responsibilities that are easy to forget, such as:
+The purpose of the app is to help me stay on top of important life admin responsibilities that are easy to forget, such as:
 
 * Car tag / vehicle registration renewals
 * Oil changes
@@ -59,7 +59,7 @@ Long term, LifeLedger should have several major modules.
 
 This is the first and most important module.
 
-It should track important dates, renewals, and recurring adult responsibilities.
+It should track important dates, renewals, and recurring life admin responsibilities.
 
 Examples:
 
@@ -125,7 +125,7 @@ Possible future use cases:
 * “Add a reminder from this insurance renewal notice.”
 * “What car-related tasks are coming up?”
 * “What should I update after moving addresses?”
-* “Summarize my upcoming adult responsibilities.”
+* “Summarize my upcoming life admin responsibilities.”
 * “Help me organize these reminders.”
 * “Search my saved records.”
 
@@ -678,7 +678,7 @@ Example AI questions:
 ```text
 What do I need to handle this month?
 What car-related reminders are coming up?
-What adult-life tasks am I missing?
+What life admin tasks am I missing?
 Create a reminder from this pasted text.
 Summarize my upcoming responsibilities.
 ```
