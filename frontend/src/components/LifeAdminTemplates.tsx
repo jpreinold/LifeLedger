@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
@@ -17,10 +17,13 @@ interface LifeAdminTemplatesProps {
 }
 
 const filters: TemplateFilter[] = ['All', ...reminderCategories]
+const drawerCloseMs = 220
 
 export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplate }: LifeAdminTemplatesProps) {
   const [activeFilter, setActiveFilter] = useState<TemplateFilter>('All')
   const [query, setQuery] = useState('')
+  const [isClosing, setIsClosing] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
 
   const visibleTemplates = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -34,20 +37,43 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
     )
   }, [activeFilter, query])
 
+  const requestClose = useCallback(() => {
+    if (isClosing) {
+      return
+    }
+
+    setIsClosing(true)
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      onClose()
+    }, drawerCloseMs)
+  }, [isClosing, onClose])
   useEffect(() => {
+    if (isOpen) {
+      setIsClosing(false)
+    }
+
     if (!isOpen) {
       return
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        onClose()
+        requestClose()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
+  }, [isOpen, requestClose])
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current)
+      }
+    }
+  }, [])
 
   if (!isOpen) {
     return null
@@ -64,9 +90,13 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className={`modal-backdrop ${isClosing ? 'modal-backdrop-closing' : ''}`}
+      role="presentation"
+      onMouseDown={requestClose}
+    >
       <section
-        className="sheet-dialog template-dialog"
+        className={`sheet-dialog template-dialog ${isClosing ? 'sheet-dialog-closing' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="life-admin-templates-heading"
@@ -77,7 +107,7 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
             <h2 id="life-admin-templates-heading">Templates</h2>
             <p>Start from a common reminder, then confirm the due date.</p>
           </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close templates">
+          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close templates">
             <X size={19} aria-hidden="true" />
           </button>
         </div>

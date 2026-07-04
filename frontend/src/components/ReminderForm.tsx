@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import { Bell, LayoutTemplate, Plus, X } from 'lucide-react'
 
@@ -32,6 +32,7 @@ interface ReminderFormProps {
 }
 
 const today = new Date().toISOString().slice(0, 10)
+const drawerCloseMs = 220
 
 export interface TemplateDraft {
   id: string
@@ -62,13 +63,27 @@ export function ReminderForm({
   templateDraft,
 }: ReminderFormProps) {
   const [form, setForm] = useState<ReminderInput>(initialForm)
+  const [isClosing, setIsClosing] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
   const { Icon, tone } = getCategoryVisual(form.category)
 
   useEffect(() => {
+    if (isOpen) {
+      setIsClosing(false)
+    }
+
     if (isOpen && !templateDraft) {
       setForm({ ...initialForm, due_date: new Date().toISOString().slice(0, 10) })
     }
   }, [isOpen, templateDraft])
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!templateDraft) {
@@ -83,6 +98,18 @@ export function ReminderForm({
     )
   }, [templateDraft])
 
+  function requestClose() {
+    if (isClosing) {
+      return
+    }
+
+    setIsClosing(true)
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      onClose()
+    }, drawerCloseMs)
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -96,7 +123,7 @@ export function ReminderForm({
 
     if (wasCreated) {
       setForm({ ...initialForm, due_date: new Date().toISOString().slice(0, 10) })
-      onClose()
+      requestClose()
     }
   }
 
@@ -105,9 +132,13 @@ export function ReminderForm({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className={`modal-backdrop ${isClosing ? 'modal-backdrop-closing' : ''}`}
+      role="presentation"
+      onMouseDown={requestClose}
+    >
       <section
-        className="sheet-dialog add-dialog"
+        className={`sheet-dialog add-dialog ${isClosing ? 'sheet-dialog-closing' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-reminder-heading"
@@ -118,7 +149,7 @@ export function ReminderForm({
             <h2 id="add-reminder-heading">Add Reminder</h2>
             <p>Choose a template or start from a blank reminder.</p>
           </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close add reminder">
+          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close add reminder">
             <X size={19} aria-hidden="true" />
           </button>
         </div>

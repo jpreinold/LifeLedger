@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Save, Trash2, X } from 'lucide-react'
 
@@ -6,6 +6,8 @@ import type { Reminder, ReminderInput } from '../types/reminder'
 import { buildReminderInputWithDefaultTiming } from '../lib/reminderSchedule'
 import { getCategoryVisual } from './categoryVisuals'
 import { ReminderFields } from './ReminderForm'
+
+const drawerCloseMs = 220
 
 interface EditReminderModalProps {
   reminder: Reminder
@@ -17,22 +19,44 @@ interface EditReminderModalProps {
 
 export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSave }: EditReminderModalProps) {
   const [form, setForm] = useState<ReminderInput>(() => toReminderInput(reminder))
+  const [isClosing, setIsClosing] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
   const { Icon, tone } = getCategoryVisual(form.category)
 
   useEffect(() => {
+    setIsClosing(false)
     setForm(toReminderInput(reminder))
   }, [reminder])
 
   useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current)
+      }
+    }
+  }, [])
+
+  const requestCancel = useCallback(() => {
+    if (isClosing) {
+      return
+    }
+
+    setIsClosing(true)
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      onCancel()
+    }, drawerCloseMs)
+  }, [isClosing, onCancel])
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        onCancel()
+        requestCancel()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onCancel])
+  }, [requestCancel])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -47,19 +71,23 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
     )
 
     if (wasSaved) {
-      onCancel()
+      requestCancel()
     }
   }
 
   async function handleDelete() {
     await onDelete(reminder.id)
-    onCancel()
+    requestCancel()
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
+    <div
+      className={`modal-backdrop ${isClosing ? 'modal-backdrop-closing' : ''}`}
+      role="presentation"
+      onMouseDown={requestCancel}
+    >
       <section
-        className="sheet-dialog edit-dialog"
+        className={`sheet-dialog edit-dialog ${isClosing ? 'sheet-dialog-closing' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-reminder-heading"
@@ -70,7 +98,7 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
             <h2 id="edit-reminder-heading">Edit Reminder</h2>
             <p>Update details and keep the next due date clear.</p>
           </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={onCancel} aria-label="Close edit reminder">
+          <button type="button" className="icon-button ghost-icon-button" onClick={requestCancel} aria-label="Close edit reminder">
             <X size={19} aria-hidden="true" />
           </button>
         </div>
