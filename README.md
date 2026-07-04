@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-Phase 5 polishes reminder management while keeping the authenticated workflow intact. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+The Reminder Delivery Foundations phase adds reminder timing preferences and smarter attention surfacing while keeping the authenticated workflow intact. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -71,7 +71,7 @@ Local development uses `AUTH_MODE=local` and `LOCAL_DEV_USER_ID=local-dev-user`,
 
 The frontend includes a Life Admin Templates modal for common reminders such as vehicle registration, annual checkups, HVAC filters, subscription reviews, birthdays, warranty expirations, and personal admin reviews.
 
-Templates are TypeScript constants in the React app. Choosing **Browse templates** opens a searchable, category-filtered modal. Choosing **Use template** fills the existing reminder form with title, category, repeat, priority, and safe notes. The user still chooses or confirms the due date and saves normally through the authenticated `POST /reminders` API.
+Templates are TypeScript constants in the React app. Choosing **Browse templates** opens a searchable, category-filtered modal. Choosing **Use template** fills the existing reminder form with title, category, repeat, priority, safe notes, and suggested reminder timing when a template has one. The user still chooses or confirms the due date and saves normally through the authenticated `POST /reminders` API.
 
 Templates create normal reminders. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates also avoid sensitive fields and should not store policy numbers, card numbers, SSNs, passwords, medical details, or uploaded documents.
 
@@ -79,7 +79,9 @@ Templates create normal reminders. They do not send or accept `user_id`; the bac
 
 Reminders can be created, edited, completed, and deleted from the React app. Editing uses the authenticated `PUT /reminders/{id}` route and only sends user-editable reminder fields.
 
-The reminder list defaults to active reminders and includes simple filters for overdue items, today, this week, this month, upcoming reminders, and completed reminders. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list.
+Reminder records now store optional delivery preference fields: `reminder_lead_value`, `reminder_lead_unit`, and `reminder_time`. The UI defaults new reminders to 1 day before at 9:00 AM and supports same day, 1 day before, 1 week before, 1 month before, and a simple custom lead time. These fields prepare LifeLedger for future notification, calendar, and email integrations; this phase does not send notifications.
+
+The reminder list defaults to active reminders and includes simple filters for overdue items, today, this week, this month, upcoming reminders, and completed reminders. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list. The dashboard includes an **On your radar** section that prioritizes overdue reminders, due today reminders, reminders whose reminder window has started, and reminders due this week.
 
 ## Creating The First Cognito User
 
@@ -170,7 +172,7 @@ Deployed frontend flow:
 - Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
 - `backend/template.yaml` describes the SAM serverless deployment shape.
 
-Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer.
+Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences are stored on each reminder item without changing the DynamoDB key schema.
 
 ## Environment Variables
 
@@ -239,6 +241,6 @@ sam deploy --guided
 - Cloudflare frontend can load, create, complete, and delete reminders after sign-in.
 - `frontend/.env.local`, AWS credentials, tokens, and local deployment files are not committed.
 
-## Not In Phase 5
+## Not In This Phase
 
-Phase 5 does not add snooze, vault features, AI/RAG, Google Calendar sync, social login, public registration, sensitive data fields, file uploads, push notifications, or a frontend redesign.
+This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, or another frontend redesign.

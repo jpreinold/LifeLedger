@@ -1,6 +1,7 @@
-import { CalendarDays, CheckCircle2, Flag, Pencil, Repeat2, Trash2 } from 'lucide-react'
+import { Bell, CalendarDays, CheckCircle2, Flag, Pencil, Repeat2, Trash2 } from 'lucide-react'
 
 import type { Reminder } from '../types/reminder'
+import { formatReminderTiming } from '../lib/reminderSchedule'
 import { getCategoryVisual } from './categoryVisuals'
 
 interface ReminderCardProps {
@@ -53,6 +54,10 @@ export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: Reminde
             <span className={`priority-chip priority-${reminder.priority.toLowerCase()}`}>
               <Flag size={14} aria-hidden="true" />
               {reminder.priority}
+            </span>
+            <span>
+              <Bell size={14} aria-hidden="true" />
+              {formatReminderTiming(reminder)}
             </span>
             {reminder.next_due_date ? <span>Next {formatShortDate(reminder.next_due_date)}</span> : null}
           </div>

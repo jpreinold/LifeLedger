@@ -265,15 +265,16 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
       ) : null}
 
       {activePage === 'dashboard' ? (
-        <section className="coming-soon-panel" aria-labelledby="dashboard-coming-soon-heading">
-          <div className="coming-soon-icon" aria-hidden="true">
-            <ShieldCheck size={28} />
-          </div>
-          <h2 id="dashboard-coming-soon-heading">Dashboard coming soon</h2>
-          <p>Quick insights, trends, and weekly planning will live here.</p>
-        </section>
+        <Dashboard
+          reminders={reminders}
+          isLoading={isLoading}
+          variant="full"
+          onComplete={handleComplete}
+          onEdit={setEditingReminder}
+          onAddReminder={openAddReminder}
+          onBrowseTemplates={openTemplates}
+        />
       ) : null}
-
       {activePage === 'reminders' ? (
         <>
           <Dashboard reminders={reminders} />

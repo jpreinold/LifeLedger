@@ -10,6 +10,7 @@ export const lifeAdminTemplates: LifeAdminTemplate[] = [
     description: 'Track the next vehicle registration or tag renewal deadline.',
     suggestedNotes: 'Confirm renewal window, inspection needs, and payment method before the due date.',
     defaultDueDateStrategy: 'next-renewal',
+    suggestedReminderTiming: { reminder_lead_value: 1, reminder_lead_unit: 'months', reminder_time: '09:00' },
     tags: ['renewal', 'vehicle'],
   },
   {
@@ -21,6 +22,7 @@ export const lifeAdminTemplates: LifeAdminTemplate[] = [
     description: 'Keep routine oil service from slipping past the recommended window.',
     suggestedNotes: 'Check mileage and schedule service with a trusted shop.',
     defaultDueDateStrategy: 'next-service',
+    suggestedReminderTiming: { reminder_lead_value: 1, reminder_lead_unit: 'weeks', reminder_time: '09:00' },
     tags: ['maintenance', 'vehicle'],
   },
   {
@@ -65,6 +67,7 @@ export const lifeAdminTemplates: LifeAdminTemplate[] = [
     description: 'Set a yearly reminder to schedule a general checkup.',
     suggestedNotes: 'Schedule the appointment and prepare general questions. Do not store medical details here.',
     defaultDueDateStrategy: 'next-review',
+    suggestedReminderTiming: { reminder_lead_value: 1, reminder_lead_unit: 'months', reminder_time: '09:00' },
     tags: ['appointment', 'review'],
   },
   {
@@ -219,6 +222,7 @@ export const lifeAdminTemplates: LifeAdminTemplate[] = [
     description: 'Remember an important birthday each year.',
     suggestedNotes: 'Add the person and any gift or card planning notes.',
     defaultDueDateStrategy: 'choose-date',
+    suggestedReminderTiming: { reminder_lead_value: 1, reminder_lead_unit: 'weeks', reminder_time: '09:00' },
     tags: ['occasion'],
   },
   {
@@ -252,6 +256,7 @@ export const lifeAdminTemplates: LifeAdminTemplate[] = [
     description: 'Avoid surprise charges before a free trial converts.',
     suggestedNotes: 'Confirm trial end date and cancel if you do not want to keep it.',
     defaultDueDateStrategy: 'before-expiration',
+    suggestedReminderTiming: { reminder_lead_value: 1, reminder_lead_unit: 'days', reminder_time: '09:00' },
     tags: ['cancellation', 'subscription'],
   },
   {
@@ -263,6 +268,7 @@ export const lifeAdminTemplates: LifeAdminTemplate[] = [
     description: 'Review annual subscriptions before renewal.',
     suggestedNotes: 'Confirm renewal date and decide whether to keep, change, or cancel.',
     defaultDueDateStrategy: 'next-renewal',
+    suggestedReminderTiming: { reminder_lead_value: 1, reminder_lead_unit: 'weeks', reminder_time: '09:00' },
     tags: ['renewal', 'subscription'],
   },
   {

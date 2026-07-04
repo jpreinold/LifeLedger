@@ -1,4 +1,4 @@
-import type { PriorityOption, ReminderCategory, RepeatOption } from './reminder'
+import type { PriorityOption, ReminderCategory, ReminderLeadUnit, RepeatOption } from './reminder'
 
 export type DefaultDueDateStrategy =
   | 'choose-date'
@@ -6,6 +6,12 @@ export type DefaultDueDateStrategy =
   | 'next-service'
   | 'next-review'
   | 'before-expiration'
+
+export interface TemplateReminderTiming {
+  reminder_lead_value: number
+  reminder_lead_unit: ReminderLeadUnit
+  reminder_time?: string
+}
 
 export interface LifeAdminTemplate {
   id: string
@@ -16,5 +22,6 @@ export interface LifeAdminTemplate {
   description: string
   suggestedNotes: string
   defaultDueDateStrategy?: DefaultDueDateStrategy
+  suggestedReminderTiming?: TemplateReminderTiming
   tags?: string[]
 }

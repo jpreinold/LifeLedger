@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Save, Trash2, X } from 'lucide-react'
 
 import type { Reminder, ReminderInput } from '../types/reminder'
+import { buildReminderInputWithDefaultTiming } from '../lib/reminderSchedule'
 import { getCategoryVisual } from './categoryVisuals'
 import { ReminderFields } from './ReminderForm'
 
@@ -36,11 +37,14 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    const wasSaved = await onSave(reminder.id, {
-      ...form,
-      title: form.title.trim(),
-      notes: form.notes?.trim() || null,
-    })
+    const wasSaved = await onSave(
+      reminder.id,
+      buildReminderInputWithDefaultTiming({
+        ...form,
+        title: form.title.trim(),
+        notes: form.notes?.trim() || null,
+      }),
+    )
 
     if (wasSaved) {
       onCancel()
@@ -97,12 +101,15 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
 }
 
 function toReminderInput(reminder: Reminder): ReminderInput {
-  return {
+  return buildReminderInputWithDefaultTiming({
     title: reminder.title,
     category: reminder.category,
     due_date: reminder.due_date,
     repeat: reminder.repeat,
     priority: reminder.priority,
     notes: reminder.notes,
-  }
+    reminder_lead_value: reminder.reminder_lead_value,
+    reminder_lead_unit: reminder.reminder_lead_unit,
+    reminder_time: reminder.reminder_time,
+  })
 }

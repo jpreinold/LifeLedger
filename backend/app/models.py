@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.schemas import PriorityOption, ReminderCategory, RepeatOption
+from app.schemas import PriorityOption, ReminderCategory, ReminderLeadUnit, RepeatOption
 
 
 class Reminder(BaseModel):
@@ -14,6 +14,9 @@ class Reminder(BaseModel):
     repeat: RepeatOption = RepeatOption.NONE
     priority: PriorityOption = PriorityOption.MEDIUM
     notes: str | None = None
+    reminder_lead_value: int | None = None
+    reminder_lead_unit: ReminderLeadUnit | None = None
+    reminder_time: str | None = None
     completed: bool = False
     created_at: datetime
     updated_at: datetime
@@ -27,3 +30,6 @@ class ReminderPatch(BaseModel):
     repeat: RepeatOption | None = None
     priority: PriorityOption | None = None
     notes: str | None = Field(default=None)
+    reminder_lead_value: int | None = None
+    reminder_lead_unit: ReminderLeadUnit | None = None
+    reminder_time: str | None = None

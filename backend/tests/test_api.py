@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 
 import pytest
@@ -137,6 +138,23 @@ def test_create_and_fetch_reminder(client):
     assert get_response.json()["title"] == "Renew car tag"
 
 
+def test_create_reminder_stores_reminder_timing_fields(client):
+    created = create_reminder(
+        client,
+        reminder_lead_value=1,
+        reminder_lead_unit="weeks",
+        reminder_time="09:00",
+    )
+
+    assert created["reminder_lead_value"] == 1
+    assert created["reminder_lead_unit"] == "weeks"
+    assert created["reminder_time"] == "09:00"
+
+    get_response = client.get(f"/reminders/{created['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["reminder_lead_value"] == 1
+
+
 def test_authenticated_user_can_crud_own_reminders(client):
     set_auth_user("user-a")
 
@@ -192,6 +210,9 @@ def test_update_reminder(client):
             "repeat": "Yearly",
             "priority": "Medium",
             "notes": None,
+            "reminder_lead_value": 1,
+            "reminder_lead_unit": "months",
+            "reminder_time": "09:00",
         },
     )
     body = response.json()
@@ -200,6 +221,9 @@ def test_update_reminder(client):
     assert body["title"] == "Renew vehicle registration"
     assert body["repeat"] == "Yearly"
     assert body["notes"] is None
+    assert body["reminder_lead_value"] == 1
+    assert body["reminder_lead_unit"] == "months"
+    assert body["reminder_time"] == "09:00"
     assert body["next_due_date"] is not None
 
 
@@ -233,6 +257,41 @@ def test_local_json_repository_persists_across_instances(tmp_path):
     assert loaded is not None
     assert loaded.id == created.id
     assert loaded.title == "Repository persistence check"
+
+
+def test_local_json_repository_loads_legacy_reminders_without_timing_fields(tmp_path):
+    data_file = tmp_path / "reminders.json"
+    reminder_id = "legacy-reminder"
+    now = "2026-01-01T00:00:00+00:00"
+    data_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": reminder_id,
+                    "user_id": "local-dev-user",
+                    "title": "Legacy reminder",
+                    "category": "Other",
+                    "due_date": date.today().isoformat(),
+                    "repeat": "None",
+                    "priority": "Medium",
+                    "notes": None,
+                    "completed": False,
+                    "created_at": now,
+                    "updated_at": now,
+                    "completed_at": None,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    repo = LocalReminderRepository(data_file)
+    loaded = repo.get_reminder("local-dev-user", reminder_id)
+
+    assert loaded is not None
+    assert loaded.reminder_lead_value is None
+    assert loaded.reminder_lead_unit is None
+    assert loaded.reminder_time is None
 
 
 def test_complete_non_recurring_reminder(client):
