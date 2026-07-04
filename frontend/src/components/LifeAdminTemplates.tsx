@@ -1,21 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ClipboardList, PlusCircle, Search, X } from 'lucide-react'
+import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
 import { reminderCategories, type ReminderCategory, type ReminderInput } from '../types/reminder'
 import type { LifeAdminTemplate } from '../types/template'
+import { getCategoryVisual } from './categoryVisuals'
 
 type TemplateFilter = 'All' | ReminderCategory
 
 interface LifeAdminTemplatesProps {
   isOpen: boolean
   onClose: () => void
+  onStartBlank: () => void
   onUseTemplate: (input: ReminderInput) => void
 }
 
 const filters: TemplateFilter[] = ['All', ...reminderCategories]
 
-export function LifeAdminTemplates({ isOpen, onClose, onUseTemplate }: LifeAdminTemplatesProps) {
+export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplate }: LifeAdminTemplatesProps) {
   const [activeFilter, setActiveFilter] = useState<TemplateFilter>('All')
   const [query, setQuery] = useState('')
 
@@ -55,23 +57,27 @@ export function LifeAdminTemplates({ isOpen, onClose, onUseTemplate }: LifeAdmin
     onClose()
   }
 
+  function handleStartBlank() {
+    onStartBlank()
+    onClose()
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="template-dialog"
+        className="sheet-dialog template-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="life-admin-templates-heading"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="template-dialog-header">
+        <div className="sheet-header">
           <div>
-            <h2 id="life-admin-templates-heading">Life Admin Templates</h2>
-            <p>Search common renewals, maintenance reminders, and recurring responsibilities.</p>
+            <h2 id="life-admin-templates-heading">Templates</h2>
+            <p>Start from a common reminder, then confirm the due date.</p>
           </div>
-          <button type="button" className="secondary-button dialog-close-button" onClick={onClose}>
-            <X size={18} aria-hidden="true" />
-            Close
+          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close templates">
+            <X size={19} aria-hidden="true" />
           </button>
         </div>
 
@@ -99,13 +105,19 @@ export function LifeAdminTemplates({ isOpen, onClose, onUseTemplate }: LifeAdmin
         </div>
 
         <div className="template-results">
-          <div className="template-count">{visibleTemplates.length} templates</div>
           <div className="template-grid">
             {visibleTemplates.map((template) => (
               <TemplateCard template={template} key={template.id} onUseTemplate={handleUseTemplate} />
             ))}
           </div>
           {visibleTemplates.length === 0 ? <p className="empty-state">No templates match that search.</p> : null}
+        </div>
+
+        <div className="template-footer">
+          <button type="button" className="secondary-button start-blank-button" onClick={handleStartBlank}>
+            <LayoutTemplate size={17} aria-hidden="true" />
+            Start blank reminder
+          </button>
         </div>
       </section>
     </div>
@@ -119,36 +131,27 @@ function TemplateCard({
   template: LifeAdminTemplate
   onUseTemplate: (input: ReminderInput) => void
 }) {
+  const { Icon, tone } = getCategoryVisual(template.category)
+
   return (
-    <article className="template-card">
-      <div className="card-topline">
-        <span className="category-chip">{template.category}</span>
-        <ClipboardList size={18} aria-hidden="true" />
+    <article className={`template-card tone-${tone}`}>
+      <div className={`category-icon tone-${tone}`} aria-hidden="true">
+        <Icon size={24} />
       </div>
 
-      <div>
+      <div className="template-card-content">
         <h3>{template.title}</h3>
+        <span className="category-chip">{template.category}</span>
         <p>{template.description}</p>
+        <div className="template-meta">
+          <span>{template.recommendedRepeat}</span>
+          <span>{template.recommendedPriority}</span>
+        </div>
       </div>
 
-      <dl className="template-meta">
-        <div>
-          <dt>Repeat</dt>
-          <dd>{template.recommendedRepeat}</dd>
-        </div>
-        <div>
-          <dt>Priority</dt>
-          <dd>{template.recommendedPriority}</dd>
-        </div>
-      </dl>
-
-      <button
-        type="button"
-        className="secondary-button template-use-button"
-        onClick={() => onUseTemplate(toInput(template))}
-      >
-        <PlusCircle size={17} aria-hidden="true" />
-        Use template
+      <button type="button" className="template-use-button" onClick={() => onUseTemplate(toInput(template))}>
+        <Plus size={20} aria-hidden="true" />
+        <span className="sr-only">Use {template.title} template</span>
       </button>
     </article>
   )

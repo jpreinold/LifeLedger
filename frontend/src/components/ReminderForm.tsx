@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
-import { LayoutTemplate, Plus } from 'lucide-react'
+import { LayoutTemplate, Plus, X } from 'lucide-react'
 
 import {
   priorityOptions,
@@ -8,11 +8,14 @@ import {
   repeatOptions,
   type ReminderInput,
 } from '../types/reminder'
+import { getCategoryVisual } from './categoryVisuals'
 
 interface ReminderFormProps {
+  isOpen: boolean
   isSaving: boolean
   onCreate: (input: ReminderInput) => Promise<boolean>
   onBrowseTemplates: () => void
+  onClose: () => void
   templateDraft: TemplateDraft | null
 }
 
@@ -37,8 +40,22 @@ const initialForm: ReminderInput = {
   notes: null,
 }
 
-export function ReminderForm({ isSaving, onCreate, onBrowseTemplates, templateDraft }: ReminderFormProps) {
+export function ReminderForm({
+  isOpen,
+  isSaving,
+  onCreate,
+  onBrowseTemplates,
+  onClose,
+  templateDraft,
+}: ReminderFormProps) {
   const [form, setForm] = useState<ReminderInput>(initialForm)
+  const { Icon, tone } = getCategoryVisual(form.category)
+
+  useEffect(() => {
+    if (isOpen && !templateDraft) {
+      setForm({ ...initialForm, due_date: new Date().toISOString().slice(0, 10) })
+    }
+  }, [isOpen, templateDraft])
 
   useEffect(() => {
     if (!templateDraft) {
@@ -62,27 +79,53 @@ export function ReminderForm({ isSaving, onCreate, onBrowseTemplates, templateDr
 
     if (wasCreated) {
       setForm({ ...initialForm, due_date: new Date().toISOString().slice(0, 10) })
+      onClose()
     }
   }
 
+  if (!isOpen) {
+    return null
+  }
+
   return (
-    <section className="form-panel" aria-labelledby="add-reminder-heading">
-      <h2 id="add-reminder-heading">Add Reminder</h2>
-      <p className="form-helper">Choose or confirm the due date before saving.</p>
-      <button type="button" className="secondary-button browse-template-button" onClick={onBrowseTemplates}>
-        <LayoutTemplate size={17} aria-hidden="true" />
-        Browse templates
-      </button>
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="sheet-dialog add-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-reminder-heading"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="sheet-header">
+          <div>
+            <h2 id="add-reminder-heading">Add Reminder</h2>
+            <p>Choose a template or start from a blank reminder.</p>
+          </div>
+          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close add reminder">
+            <X size={19} aria-hidden="true" />
+          </button>
+        </div>
 
-      <form className="reminder-form" onSubmit={handleSubmit}>
-        <ReminderFields form={form} setForm={setForm} />
+        <div className="sheet-icon-lockup">
+          <div className={`category-icon category-icon-large tone-${tone}`} aria-hidden="true">
+            <Icon size={30} />
+          </div>
+          <button type="button" className="small-outline-button" onClick={onBrowseTemplates}>
+            <LayoutTemplate size={15} aria-hidden="true" />
+            Browse templates
+          </button>
+        </div>
 
-        <button className="primary-button" type="submit" disabled={isSaving || !form.title.trim()}>
-          <Plus size={18} aria-hidden="true" />
-          {isSaving ? 'Saving' : 'Add reminder'}
-        </button>
-      </form>
-    </section>
+        <form className="reminder-form sheet-body" onSubmit={handleSubmit}>
+          <ReminderFields form={form} setForm={setForm} />
+
+          <button className="primary-button" type="submit" disabled={isSaving || !form.title.trim()}>
+            <Plus size={18} aria-hidden="true" />
+            {isSaving ? 'Saving' : 'Add reminder'}
+          </button>
+        </form>
+      </section>
+    </div>
   )
 }
 

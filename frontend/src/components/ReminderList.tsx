@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { LayoutTemplate, Plus } from 'lucide-react'
 
 import { ReminderCard } from './ReminderCard'
 import type { Reminder } from '../types/reminder'
@@ -12,6 +13,7 @@ interface ReminderListProps {
   onEdit: (reminder: Reminder) => void
   onDelete: (id: string) => Promise<void>
   onBrowseTemplates: () => void
+  onAddReminder: () => void
 }
 
 const filters: Array<{ id: ReminderFilter; label: string }> = [
@@ -31,6 +33,7 @@ export function ReminderList({
   onEdit,
   onDelete,
   onBrowseTemplates,
+  onAddReminder,
 }: ReminderListProps) {
   const [activeFilter, setActiveFilter] = useState<ReminderFilter>('active')
   const visibleReminders = useMemo(
@@ -40,8 +43,8 @@ export function ReminderList({
   const emptyState = getEmptyState(activeFilter, reminders.length === 0)
 
   return (
-    <section className="list-panel" aria-labelledby="reminders-heading">
-      <div className="section-heading">
+    <section className="reminders-panel" aria-labelledby="reminders-heading">
+      <div className="section-heading sr-only">
         <h2 id="reminders-heading">Reminders</h2>
         <span>{isLoading ? 'Loading' : `${visibleReminders.length} shown`}</span>
       </div>
@@ -68,12 +71,19 @@ export function ReminderList({
       {isLoading ? <p className="empty-state">Loading reminders...</p> : null}
 
       {!isLoading && visibleReminders.length === 0 ? (
-        <div className="empty-state">
+        <div className="empty-state empty-state-card">
           <p>{emptyState}</p>
           {reminders.length === 0 && activeFilter === 'active' ? (
-            <button type="button" className="secondary-button empty-template-button" onClick={onBrowseTemplates}>
-              Browse templates
-            </button>
+            <div className="empty-state-actions">
+              <button type="button" className="secondary-button empty-template-button" onClick={onBrowseTemplates}>
+                <LayoutTemplate size={17} aria-hidden="true" />
+                Browse templates
+              </button>
+              <button type="button" className="primary-button empty-add-button" onClick={onAddReminder}>
+                <Plus size={17} aria-hidden="true" />
+                Add reminder
+              </button>
+            </div>
           ) : null}
         </div>
       ) : null}
