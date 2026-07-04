@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.15.4",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/manrope": "^5.2.8",
     "aws-amplify": "^6.18.0",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",

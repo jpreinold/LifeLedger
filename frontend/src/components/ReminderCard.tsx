@@ -1,6 +1,7 @@
-import { Check, Pencil, Trash2 } from 'lucide-react'
+import { CalendarDays, CheckCircle2, Flag, Pencil, Repeat2, Trash2 } from 'lucide-react'
 
 import type { Reminder } from '../types/reminder'
+import { getCategoryVisual } from './categoryVisuals'
 
 interface ReminderCardProps {
   reminder: Reminder
@@ -19,58 +20,62 @@ const statusClassNames: Record<Reminder['status'], string> = {
 }
 
 export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: ReminderCardProps) {
-  const completeLabel = reminder.completed
-    ? 'Completed'
-    : reminder.repeat === 'None'
-      ? 'Complete'
-      : 'Complete & advance'
+  const { Icon, tone } = getCategoryVisual(reminder.category)
 
   return (
-    <article className="reminder-card">
-      <div className="card-topline">
-        <span className="category-chip">{reminder.category}</span>
-        <span className={`status-chip ${statusClassNames[reminder.status]}`}>{getStatusLabel(reminder)}</span>
-      </div>
+    <article className={`reminder-card tone-${tone}`}>
+      <span className="reminder-card-accent" aria-hidden="true" />
 
-      <div>
-        <h3>{reminder.title}</h3>
-        <p className="due-date">{formatDate(reminder.due_date)}</p>
-      </div>
+      <div className="reminder-card-main">
+        <div className={`category-icon tone-${tone}`} aria-hidden="true">
+          <Icon size={24} />
+        </div>
 
-      <dl className="metadata-grid">
-        <div>
-          <dt>Repeat</dt>
-          <dd>{reminder.repeat}</dd>
-        </div>
-        <div>
-          <dt>Priority</dt>
-          <dd>{reminder.priority}</dd>
-        </div>
-        {reminder.next_due_date ? (
-          <div>
-            <dt>Next</dt>
-            <dd>{formatDate(reminder.next_due_date)}</dd>
+        <div className="reminder-card-content">
+          <div className="card-topline">
+            <span className="category-chip">{reminder.category}</span>
+            <span className={`status-chip ${statusClassNames[reminder.status]}`}>{getStatusLabel(reminder)}</span>
           </div>
-        ) : null}
-      </dl>
+
+          <div>
+            <h3>{reminder.title}</h3>
+            <p className="due-date">
+              <CalendarDays size={15} aria-hidden="true" />
+              {getDueLabel(reminder)}
+            </p>
+          </div>
+
+          <div className="reminder-meta-row" aria-label="Reminder details">
+            <span>
+              <Repeat2 size={14} aria-hidden="true" />
+              {reminder.repeat}
+            </span>
+            <span className={`priority-chip priority-${reminder.priority.toLowerCase()}`}>
+              <Flag size={14} aria-hidden="true" />
+              {reminder.priority}
+            </span>
+            {reminder.next_due_date ? <span>Next {formatShortDate(reminder.next_due_date)}</span> : null}
+          </div>
+        </div>
+      </div>
 
       {reminder.notes ? <p className="notes">{reminder.notes}</p> : null}
 
       <div className="card-actions">
         <button
           type="button"
-          className="secondary-button complete-button"
+          className="action-button complete-button"
           onClick={() => void onComplete(reminder.id)}
           disabled={reminder.completed}
         >
-          <Check size={17} aria-hidden="true" />
-          {completeLabel}
+          <CheckCircle2 size={18} aria-hidden="true" />
+          Complete
         </button>
-        <button type="button" className="secondary-button" onClick={() => onEdit(reminder)}>
+        <button type="button" className="action-button edit-button" onClick={() => onEdit(reminder)}>
           <Pencil size={17} aria-hidden="true" />
           Edit
         </button>
-        <button type="button" className="danger-button" onClick={() => void onDelete(reminder.id)}>
+        <button type="button" className="action-button delete-button" onClick={() => void onDelete(reminder.id)}>
           <Trash2 size={17} aria-hidden="true" />
           Delete
         </button>
@@ -115,7 +120,47 @@ function formatDate(value: string) {
   }).format(date)
 }
 
+function formatShortDate(value: string) {
+  const date = parseDateOnly(value)
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
+
+function getDueLabel(reminder: Reminder) {
+  if (reminder.completed) {
+    return `Completed ${reminder.completed_at ? formatShortDate(reminder.completed_at) : ''}`.trim()
+  }
+
+  if (reminder.status === 'Overdue') {
+    return `Due ${formatShortDate(reminder.due_date)}`
+  }
+
+  if (reminder.status === 'Due today') {
+    return `Due today \u00b7 ${formatShortDate(reminder.due_date)}`
+  }
+
+  const daysUntilDue = getDaysUntilDue(reminder.due_date)
+
+  if (daysUntilDue > 0 && daysUntilDue <= 14) {
+    return `Due in ${daysUntilDue} ${daysUntilDue === 1 ? 'day' : 'days'} \u00b7 ${formatShortDate(reminder.due_date)}`
+  }
+
+  return `Due ${formatDate(reminder.due_date)}`
+}
+
+function getDaysUntilDue(value: string) {
+  const dueDate = parseDateOnly(value)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const difference = dueDate.getTime() - today.getTime()
+  return Math.ceil(difference / 86_400_000)
+}
+
 function parseDateOnly(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
   return new Date(year, month - 1, day)
 }

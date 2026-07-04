@@ -9,30 +9,28 @@ interface DashboardProps {
 export function Dashboard({ reminders }: DashboardProps) {
   const activeCount = reminders.filter((reminder) => !reminder.completed).length
   const overdueCount = reminders.filter((reminder) => reminder.status === 'Overdue').length
+  const dueTodayCount = reminders.filter((reminder) => reminder.status === 'Due today').length
   const dueThisWeekCount = reminders.filter((reminder) =>
     ['Due today', 'Due this week'].includes(reminder.status),
   ).length
-  const dueThisMonthCount = reminders.filter((reminder) =>
-    ['Due today', 'Due this week', 'Due this month'].includes(reminder.status),
-  ).length
 
   const stats = [
-    { label: 'Active', value: activeCount, icon: ListChecks },
-    { label: 'Overdue', value: overdueCount, icon: AlertTriangle },
-    { label: 'This week', value: dueThisWeekCount, icon: CalendarClock },
-    { label: 'This month', value: dueThisMonthCount, icon: CalendarCheck },
+    { label: 'All active', value: activeCount, icon: ListChecks, tone: 'blue' },
+    { label: 'Overdue', value: overdueCount, icon: AlertTriangle, tone: 'red' },
+    { label: 'Due today', value: dueTodayCount, icon: CalendarClock, tone: 'orange' },
+    { label: 'Due this week', value: dueThisWeekCount, icon: CalendarCheck, tone: 'green' },
   ]
 
   return (
-    <section className="dashboard-grid" aria-label="Reminder summary">
+    <section className="dashboard-summary-card" aria-label="Reminder summary">
       {stats.map((stat) => {
         const Icon = stat.icon
 
         return (
-          <article className="stat-card" key={stat.label}>
-            <Icon size={18} aria-hidden="true" />
-            <span>{stat.label}</span>
+          <article className={`stat-item stat-item-${stat.tone}`} key={stat.label}>
+            <Icon size={20} aria-hidden="true" />
             <strong>{stat.value}</strong>
+            <span>{stat.label}</span>
           </article>
         )
       })}
