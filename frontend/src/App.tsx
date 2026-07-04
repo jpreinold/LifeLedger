@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Authenticator } from '@aws-amplify/ui-react'
-import { AlertCircle, LogOut, RefreshCcw } from 'lucide-react'
+import { AlertCircle, CheckCircle2, LogOut, RefreshCcw } from 'lucide-react'
 
 import { remindersApi } from './api/remindersApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { Dashboard } from './components/Dashboard'
+import { EditReminderModal } from './components/EditReminderModal'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
@@ -32,6 +33,8 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
 
@@ -56,6 +59,7 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
   async function handleCreate(input: ReminderInput) {
     setIsSaving(true)
     setError(null)
+    setNotice(null)
 
     try {
       await remindersApi.create(input)
@@ -71,17 +75,39 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
 
   async function handleComplete(id: string) {
     setError(null)
+    setNotice(null)
+    const reminder = reminders.find((item) => item.id === id)
 
     try {
       await remindersApi.complete(id)
       await loadReminders()
+      setNotice(reminder?.repeat && reminder.repeat !== 'None' ? 'Moved to next due date.' : 'Reminder completed.')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to complete reminder.')
     }
   }
 
+  async function handleUpdate(id: string, input: ReminderInput) {
+    setIsSaving(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      await remindersApi.update(id, input)
+      await loadReminders()
+      setNotice('Reminder updated.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update reminder.')
+      return false
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   async function handleDelete(id: string) {
     setError(null)
+    setNotice(null)
 
     try {
       await remindersApi.remove(id)
@@ -129,6 +155,13 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
         </div>
       ) : null}
 
+      {notice ? (
+        <div className="notice" role="status">
+          <CheckCircle2 size={18} aria-hidden="true" />
+          <span>{notice}</span>
+        </div>
+      ) : null}
+
       <Dashboard reminders={reminders} />
 
       <section className="workspace">
@@ -142,6 +175,7 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
           reminders={reminders}
           isLoading={isLoading}
           onComplete={handleComplete}
+          onEdit={setEditingReminder}
           onDelete={handleDelete}
           onBrowseTemplates={() => setIsTemplateModalOpen(true)}
         />
@@ -152,6 +186,15 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
         onClose={() => setIsTemplateModalOpen(false)}
         onUseTemplate={handleUseTemplate}
       />
+
+      {editingReminder ? (
+        <EditReminderModal
+          reminder={editingReminder}
+          isSaving={isSaving}
+          onCancel={() => setEditingReminder(null)}
+          onSave={handleUpdate}
+        />
+      ) : null}
     </main>
   )
 }

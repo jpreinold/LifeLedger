@@ -142,6 +142,19 @@ textarea:focus-visible {
   font-weight: 700;
 }
 
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #b9d8cb;
+  border-radius: 8px;
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+  font-weight: 700;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -183,6 +196,18 @@ textarea:focus-visible {
   overflow: hidden;
 }
 
+.edit-dialog {
+  width: min(640px, 100%);
+  max-height: calc(100vh - 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(23, 32, 42, 0.22);
+  overflow: hidden;
+}
+
 .template-dialog-header {
   display: flex;
   align-items: flex-start;
@@ -192,16 +217,48 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 
-.template-dialog-header p {
+.edit-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.template-dialog-header p,
+.edit-dialog-header p {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 0.9rem;
   font-weight: 600;
 }
 
+.edit-dialog h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
 .dialog-close-button {
   flex: 0 0 auto;
   min-width: 92px;
+}
+
+.edit-dialog-body {
+  min-height: 0;
+  margin-top: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.modal-actions .primary-button {
+  width: 100%;
 }
 
 .template-search {
@@ -451,6 +508,47 @@ textarea:focus-visible {
   font-weight: 750;
 }
 
+.filter-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-tab {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.filter-tab.active {
+  border-color: var(--primary);
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+
+.filter-tab strong {
+  min-width: 24px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  text-align: center;
+}
+
 .empty-state {
   margin: 0;
   display: grid;
@@ -486,6 +584,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -499,17 +598,18 @@ textarea:focus-visible {
   border-radius: 8px;
   font-size: 0.78rem;
   font-weight: 820;
-  white-space: nowrap;
 }
 
 .category-chip {
   color: var(--primary-strong);
   background: var(--primary-soft);
+  white-space: nowrap;
 }
 
 .status-chip {
   color: #29313a;
   background: var(--surface-soft);
+  overflow-wrap: anywhere;
 }
 
 .status-overdue {
@@ -580,6 +680,10 @@ textarea:focus-visible {
   gap: 10px;
 }
 
+.complete-button {
+  grid-column: 1 / -1;
+}
+
 .secondary-button,
 .danger-button {
   padding: 0 12px;
@@ -612,8 +716,20 @@ textarea:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .modal-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .template-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .card-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .complete-button {
+    grid-column: auto;
   }
 }
 

@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-Phase 4 adds Life Admin Templates while keeping the authenticated reminder workflow intact. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+Phase 5 polishes reminder management while keeping the authenticated workflow intact. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -74,6 +74,12 @@ The frontend includes a Life Admin Templates modal for common reminders such as 
 Templates are TypeScript constants in the React app. Choosing **Browse templates** opens a searchable, category-filtered modal. Choosing **Use template** fills the existing reminder form with title, category, repeat, priority, and safe notes. The user still chooses or confirms the due date and saves normally through the authenticated `POST /reminders` API.
 
 Templates create normal reminders. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates also avoid sensitive fields and should not store policy numbers, card numbers, SSNs, passwords, medical details, or uploaded documents.
+
+## Reminder Management
+
+Reminders can be created, edited, completed, and deleted from the React app. Editing uses the authenticated `PUT /reminders/{id}` route and only sends user-editable reminder fields.
+
+The reminder list defaults to active reminders and includes simple filters for overdue items, today, this week, this month, upcoming reminders, and completed reminders. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list.
 
 ## Creating The First Cognito User
 
@@ -233,6 +239,6 @@ sam deploy --guided
 - Cloudflare frontend can load, create, complete, and delete reminders after sign-in.
 - `frontend/.env.local`, AWS credentials, tokens, and local deployment files are not committed.
 
-## Not In Phase 3
+## Not In Phase 5
 
-Phase 4 does not add vault features, AI/RAG, Google Calendar sync, social login, public registration, sensitive data fields, file uploads, push notifications, or a frontend redesign.
+Phase 5 does not add snooze, vault features, AI/RAG, Google Calendar sync, social login, public registration, sensitive data fields, file uploads, push notifications, or a frontend redesign.
