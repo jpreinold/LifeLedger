@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
+import { buildReminderInputWithDefaultTiming, formatReminderTiming } from '../lib/reminderSchedule'
 import { reminderCategories, type ReminderCategory, type ReminderInput } from '../types/reminder'
 import type { LifeAdminTemplate } from '../types/template'
 import { getCategoryVisual } from './categoryVisuals'
@@ -146,6 +147,7 @@ function TemplateCard({
         <div className="template-meta">
           <span>{template.recommendedRepeat}</span>
           <span>{template.recommendedPriority}</span>
+          {template.suggestedReminderTiming ? <span>{formatTemplateReminderTiming(template)}</span> : null}
         </div>
       </div>
 
@@ -158,14 +160,29 @@ function TemplateCard({
 }
 
 function toInput(template: LifeAdminTemplate): ReminderInput {
-  return {
+  return buildReminderInputWithDefaultTiming({
     title: template.title,
     category: template.category,
     due_date: new Date().toISOString().slice(0, 10),
     repeat: template.recommendedRepeat,
     priority: template.recommendedPriority,
     notes: template.suggestedNotes,
+    reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? null,
+    reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? null,
+    reminder_time: template.suggestedReminderTiming?.reminder_time ?? null,
+  })
+}
+
+function formatTemplateReminderTiming(template: LifeAdminTemplate) {
+  if (!template.suggestedReminderTiming) {
+    return ''
   }
+
+  return formatReminderTiming({
+    reminder_lead_value: template.suggestedReminderTiming.reminder_lead_value,
+    reminder_lead_unit: template.suggestedReminderTiming.reminder_lead_unit,
+    reminder_time: template.suggestedReminderTiming.reminder_time ?? null,
+  })
 }
 
 function matchesQuery(template: LifeAdminTemplate, query: string) {

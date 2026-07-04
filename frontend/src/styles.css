@@ -447,6 +447,112 @@ textarea:focus-visible {
   gap: var(--space-4);
   min-width: 0;
 }
+.radar-panel {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.radar-heading {
+  padding: var(--space-2) 0 0;
+  border-bottom: 0;
+}
+
+.radar-heading div {
+  min-width: 0;
+}
+
+.radar-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.radar-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 6px 18px rgba(15, 32, 61, 0.07);
+}
+
+.radar-item-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--radar-color);
+  background: var(--radar-bg);
+}
+
+.radar-item-overdue {
+  --radar-color: var(--color-danger);
+  --radar-bg: var(--color-danger-soft);
+}
+
+.radar-item-today {
+  --radar-color: #b96b00;
+  --radar-bg: var(--color-warning-soft);
+}
+
+.radar-item-window,
+.radar-item-week {
+  --radar-color: var(--color-primary);
+  --radar-bg: var(--color-primary-soft);
+}
+
+.radar-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.radar-item-copy span {
+  color: var(--radar-color);
+  font-size: 0.72rem;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.radar-item-copy h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 0.94rem;
+  font-weight: 760;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.radar-item-copy p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 570;
+  line-height: 1.35;
+}
+
+.radar-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.radar-action-button {
+  width: 36px;
+  min-height: 36px;
+  flex-basis: 36px;
+  color: var(--color-primary);
+  background: var(--color-surface-muted);
+  box-shadow: none;
+}
+
+.radar-empty-state {
+  margin: 0;
+}
 
 .reminders-panel {
   min-height: 420px;
@@ -1038,6 +1144,27 @@ textarea:focus-visible {
   display: grid;
   gap: var(--space-3);
 }
+.remind-me-section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+}
+
+.form-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 780;
+}
+
+.remind-me-section .form-row {
+  gap: var(--space-2);
+}
 
 .reminder-form label {
   display: grid;
@@ -1227,6 +1354,15 @@ textarea:focus-visible {
 
   .notes {
     margin-left: 0;
+  }
+
+  .radar-item {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .radar-item-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 }
 

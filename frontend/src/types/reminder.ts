@@ -12,6 +12,8 @@ export const repeatOptions = ['None', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'
 
 export const priorityOptions = ['Low', 'Medium', 'High'] as const
 
+export const reminderLeadUnits = ['days', 'weeks', 'months'] as const
+
 export const reminderStatuses = [
   'Completed',
   'Overdue',
@@ -24,6 +26,7 @@ export const reminderStatuses = [
 export type ReminderCategory = (typeof reminderCategories)[number]
 export type RepeatOption = (typeof repeatOptions)[number]
 export type PriorityOption = (typeof priorityOptions)[number]
+export type ReminderLeadUnit = (typeof reminderLeadUnits)[number]
 export type ReminderStatus = (typeof reminderStatuses)[number]
 
 export interface Reminder {
@@ -34,6 +37,9 @@ export interface Reminder {
   repeat: RepeatOption
   priority: PriorityOption
   notes: string | null
+  reminder_lead_value: number | null
+  reminder_lead_unit: ReminderLeadUnit | null
+  reminder_time: string | null
   completed: boolean
   status: ReminderStatus
   created_at: string
@@ -49,4 +55,7 @@ export interface ReminderInput {
   repeat: RepeatOption
   priority: PriorityOption
   notes: string | null
+  reminder_lead_value: number | null
+  reminder_lead_unit: ReminderLeadUnit | null
+  reminder_time: string | null
 }

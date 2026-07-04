@@ -28,6 +28,12 @@ class PriorityOption(str, Enum):
     HIGH = "High"
 
 
+class ReminderLeadUnit(str, Enum):
+    DAYS = "days"
+    WEEKS = "weeks"
+    MONTHS = "months"
+
+
 class ReminderStatus(str, Enum):
     COMPLETED = "Completed"
     OVERDUE = "Overdue"
@@ -44,6 +50,9 @@ class ReminderBase(BaseModel):
     repeat: RepeatOption = RepeatOption.NONE
     priority: PriorityOption = PriorityOption.MEDIUM
     notes: str | None = Field(default=None, max_length=1000)
+    reminder_lead_value: int | None = Field(default=None, ge=0, le=36)
+    reminder_lead_unit: ReminderLeadUnit | None = None
+    reminder_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
     @field_validator("title", mode="before")
     @classmethod
@@ -62,6 +71,18 @@ class ReminderBase(BaseModel):
             return stripped or None
         return value
 
+    @field_validator("reminder_time", mode="before")
+    @classmethod
+    def normalize_reminder_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            return stripped[:5] if len(stripped) >= 5 else stripped
+        return value
+
 
 class ReminderCreate(ReminderBase):
     pass
@@ -74,6 +95,9 @@ class ReminderUpdate(BaseModel):
     repeat: RepeatOption | None = None
     priority: PriorityOption | None = None
     notes: str | None = Field(default=None, max_length=1000)
+    reminder_lead_value: int | None = Field(default=None, ge=0, le=36)
+    reminder_lead_unit: ReminderLeadUnit | None = None
+    reminder_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
     @field_validator("title", mode="before")
     @classmethod
@@ -92,6 +116,18 @@ class ReminderUpdate(BaseModel):
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None
+        return value
+
+    @field_validator("reminder_time", mode="before")
+    @classmethod
+    def normalize_reminder_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            return stripped[:5] if len(stripped) >= 5 else stripped
         return value
 
 

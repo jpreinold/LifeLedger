@@ -47,6 +47,9 @@ def test_dynamo_repository_crud_with_fake_table():
     assert loaded is not None
     assert loaded.id == reminder.id
     assert loaded.title == "Dynamo repository check"
+    assert loaded.reminder_lead_value == 1
+    assert loaded.reminder_lead_unit == "weeks"
+    assert loaded.reminder_time == "09:00"
 
     updated = reminder.model_copy(update={"title": "Updated Dynamo reminder"})
     repo.update_reminder(updated)
@@ -61,6 +64,33 @@ def test_dynamo_repository_crud_with_fake_table():
     assert repo.delete_reminder(reminder.user_id, reminder.id) is True
     assert repo.get_reminder(reminder.user_id, reminder.id) is None
     assert repo.delete_reminder(reminder.user_id, reminder.id) is False
+
+
+def test_dynamo_repository_loads_legacy_items_without_timing_fields():
+    table = FakeDynamoTable()
+    repo = DynamoReminderRepository(table_name="test-table", region_name="us-east-1", table=table)
+    now = datetime.now(timezone.utc).isoformat()
+    table.items[("user-a", "legacy-reminder")] = {
+        "id": "legacy-reminder",
+        "user_id": "user-a",
+        "title": "Legacy Dynamo reminder",
+        "category": "Other",
+        "due_date": date.today().isoformat(),
+        "repeat": "None",
+        "priority": "Medium",
+        "notes": None,
+        "completed": False,
+        "created_at": now,
+        "updated_at": now,
+        "completed_at": None,
+    }
+
+    loaded = repo.get_reminder("user-a", "legacy-reminder")
+
+    assert loaded is not None
+    assert loaded.reminder_lead_value is None
+    assert loaded.reminder_lead_unit is None
+    assert loaded.reminder_time is None
 
 
 def test_dynamo_repository_module_imports_without_aws_credentials():
@@ -78,6 +108,9 @@ def build_reminder():
         repeat="None",
         priority="Medium",
         notes=None,
+        reminder_lead_value=1,
+        reminder_lead_unit="weeks",
+        reminder_time="09:00",
         completed=False,
         created_at=now,
         updated_at=now,
