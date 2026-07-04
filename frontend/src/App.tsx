@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Authenticator } from '@aws-amplify/ui-react'
+import { useRegisterSW } from 'virtual:pwa-register/react'
 import {
   AlertCircle,
   Bell,
@@ -25,14 +26,63 @@ import { ReminderList } from './components/ReminderList'
 import type { Reminder, ReminderInput } from './types/reminder'
 
 function App() {
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW()
+
+  const updateToast = needRefresh ? (
+    <PwaUpdateToast
+      onDismiss={() => setNeedRefresh(false)}
+      onUpdate={() => {
+        void updateServiceWorker(true)
+      }}
+    />
+  ) : null
+
   if (!isCognitoAuthEnabled) {
-    return <ReminderApp />
+    return (
+      <>
+        <ReminderApp />
+        {updateToast}
+      </>
+    )
   }
 
   return (
-    <Authenticator hideSignUp>
-      {({ signOut }) => <ReminderApp onSignOut={signOut} />}
-    </Authenticator>
+    <>
+      <Authenticator hideSignUp>
+        {({ signOut }) => <ReminderApp onSignOut={signOut} />}
+      </Authenticator>
+      {updateToast}
+    </>
+  )
+}
+
+interface PwaUpdateToastProps {
+  onDismiss: () => void
+  onUpdate: () => void
+}
+
+function PwaUpdateToast({ onDismiss, onUpdate }: PwaUpdateToastProps) {
+  return (
+    <aside className="update-toast" role="status" aria-live="polite">
+      <div className="update-toast-icon" aria-hidden="true">
+        <RefreshCcw size={18} />
+      </div>
+      <div className="update-toast-copy">
+        <strong>Update available</strong>
+        <span>Refresh to install the latest LifeLedger.</span>
+      </div>
+      <div className="update-toast-actions">
+        <button type="button" className="update-toast-primary" onClick={onUpdate}>
+          Update
+        </button>
+        <button type="button" className="update-toast-dismiss" onClick={onDismiss} aria-label="Dismiss update notice">
+          Later
+        </button>
+      </div>
+    </aside>
   )
 }
 

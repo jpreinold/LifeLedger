@@ -7,13 +7,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       manifest: {
         name: 'LifeLedger',
         short_name: 'LifeLedger',
         description: 'Personal reminder hub for recurring life admin.',
-        theme_color: '#106b5f',
-        background_color: '#f7f9f6',
+        theme_color: '#075eea',
+        background_color: '#f5f9ff',
         display: 'standalone',
         start_url: '/',
         icons: [
@@ -21,6 +21,22 @@ export default defineConfig({
             src: '/favicon.svg',
             sizes: 'any',
             type: 'image/svg+xml',
+          },
+          {
+            src: '/pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+          },
+          {
+            src: '/pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+          },
+          {
+            src: '/maskable-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
           },
         ],
       },
