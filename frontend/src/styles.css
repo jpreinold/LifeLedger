@@ -72,10 +72,15 @@ button,
 input,
 select,
 textarea {
-  min-width: 0;
-  max-width: 100%;
   font: inherit;
   -webkit-tap-highlight-color: transparent;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
 }
 
 button {
@@ -605,6 +610,8 @@ textarea:focus-visible {
 
 .filter-tab,
 .template-filter {
+  flex: 0 0 auto;
+  max-width: none;
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -1227,8 +1234,9 @@ textarea:focus-visible {
 
 .reminder-form input,
 .reminder-form select {
-  min-height: 46px;
+  height: 46px;
   padding: 0 var(--space-3);
+  line-height: 46px;
 }
 
 .reminder-form select {
@@ -1242,13 +1250,16 @@ textarea:focus-visible {
 .reminder-form input[type='date'],
 .reminder-form input[type='time'] {
   display: block;
+  min-width: 100%;
   padding-right: var(--space-3);
   text-align: left;
 }
 
 .reminder-form input[type='date']::-webkit-date-and-time-value,
 .reminder-form input[type='time']::-webkit-date-and-time-value {
-  min-height: 46px;
+  display: flex;
+  align-items: center;
+  height: 46px;
   margin: 0;
   text-align: left;
 }

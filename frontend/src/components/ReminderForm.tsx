@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import { Bell, LayoutTemplate, Plus, X } from 'lucide-react'
 
@@ -64,11 +64,13 @@ export function ReminderForm({
 }: ReminderFormProps) {
   const [form, setForm] = useState<ReminderInput>(initialForm)
   const [isClosing, setIsClosing] = useState(false)
+  const isClosingRef = useRef(false)
   const closeTimerRef = useRef<number | null>(null)
   const { Icon, tone } = getCategoryVisual(form.category)
 
   useEffect(() => {
     if (isOpen) {
+      isClosingRef.current = false
       setIsClosing(false)
     }
 
@@ -98,17 +100,18 @@ export function ReminderForm({
     )
   }, [templateDraft])
 
-  function requestClose() {
-    if (isClosing) {
+  const requestClose = useCallback(() => {
+    if (isClosingRef.current) {
       return
     }
 
+    isClosingRef.current = true
     setIsClosing(true)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onClose()
     }, drawerCloseMs)
-  }
+  }, [onClose])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

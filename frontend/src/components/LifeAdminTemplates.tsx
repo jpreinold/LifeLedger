@@ -23,6 +23,7 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
   const [activeFilter, setActiveFilter] = useState<TemplateFilter>('All')
   const [query, setQuery] = useState('')
   const [isClosing, setIsClosing] = useState(false)
+  const isClosingRef = useRef(false)
   const closeTimerRef = useRef<number | null>(null)
 
   const visibleTemplates = useMemo(() => {
@@ -38,18 +39,20 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
   }, [activeFilter, query])
 
   const requestClose = useCallback(() => {
-    if (isClosing) {
+    if (isClosingRef.current) {
       return
     }
 
+    isClosingRef.current = true
     setIsClosing(true)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onClose()
     }, drawerCloseMs)
-  }, [isClosing, onClose])
+  }, [onClose])
   useEffect(() => {
     if (isOpen) {
+      isClosingRef.current = false
       setIsClosing(false)
     }
 

@@ -20,10 +20,12 @@ interface EditReminderModalProps {
 export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSave }: EditReminderModalProps) {
   const [form, setForm] = useState<ReminderInput>(() => toReminderInput(reminder))
   const [isClosing, setIsClosing] = useState(false)
+  const isClosingRef = useRef(false)
   const closeTimerRef = useRef<number | null>(null)
   const { Icon, tone } = getCategoryVisual(form.category)
 
   useEffect(() => {
+    isClosingRef.current = false
     setIsClosing(false)
     setForm(toReminderInput(reminder))
   }, [reminder])
@@ -37,16 +39,17 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
   }, [])
 
   const requestCancel = useCallback(() => {
-    if (isClosing) {
+    if (isClosingRef.current) {
       return
     }
 
+    isClosingRef.current = true
     setIsClosing(true)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onCancel()
     }, drawerCloseMs)
-  }, [isClosing, onCancel])
+  }, [onCancel])
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
