@@ -126,7 +126,7 @@ export function HomeDashboard({
         <QuickAction label="Add reminder" icon={Plus} tone="blue" onClick={onAddReminder} />
         <QuickAction label="Browse templates" icon={ListChecks} tone="blue-soft" onClick={onBrowseTemplates} />
         <QuickAction label="Add record" icon={FileText} tone="green" disabled />
-        <QuickAction label="Review renewals" icon={RefreshCcw} tone="orange" disabled />
+        <QuickAction label="Review renewals" icon={RefreshCcw} tone="orange" onClick={onViewReminders} />
       </section>
 
       <section className="home-card" aria-labelledby="needs-attention-heading">
@@ -359,6 +359,10 @@ function getUpcomingReminders(reminders: Reminder[]) {
 }
 
 function isRenewalReminder(reminder: Reminder) {
+  if (reminder.reminder_type === 'renewal') {
+    return true
+  }
+
   const title = reminder.title.toLowerCase()
 
   return (

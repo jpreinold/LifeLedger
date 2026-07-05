@@ -1,4 +1,4 @@
-import { Bell, Cake, CalendarDays, CheckCircle2, Flag, Pencil, Repeat2, Trash2 } from 'lucide-react'
+import { Bell, Cake, CalendarDays, CheckCircle2, Flag, Pencil, RefreshCcw, Repeat2, Trash2 } from 'lucide-react'
 
 import type { Reminder } from '../types/reminder'
 import { formatReminderTiming } from '../lib/reminderSchedule'
@@ -24,6 +24,7 @@ const statusClassNames: Record<Reminder['status'], string> = {
 export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: ReminderCardProps) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = getSmartReminderLabel(reminder)
+  const SmartIcon = reminder.reminder_type === 'renewal' ? RefreshCcw : Cake
 
   return (
     <article className={`reminder-card tone-${tone}`}>
@@ -63,7 +64,7 @@ export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: Reminde
             </span>
             {smartLabel ? (
               <span className="smart-context-chip">
-                <Cake size={14} aria-hidden="true" />
+                <SmartIcon size={14} aria-hidden="true" />
                 {smartLabel}
               </span>
             ) : null}

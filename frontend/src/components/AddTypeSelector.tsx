@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, Cake, Car, ChevronRight, FileText, X } from 'lucide-react'
+import { Bell, Cake, Car, ChevronRight, FileText, RefreshCcw, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -8,6 +8,7 @@ interface AddTypeSelectorProps {
   onClose: () => void
   onChooseBirthday: () => void
   onChooseReminder: () => void
+  onChooseRenewal: () => void
 }
 
 interface AddOption {
@@ -26,6 +27,7 @@ export function AddTypeSelector({
   onClose,
   onChooseBirthday,
   onChooseReminder,
+  onChooseRenewal,
 }: AddTypeSelectorProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const isClosingRef = useRef(false)
@@ -90,7 +92,7 @@ export function AddTypeSelector({
   const options: AddOption[] = [
     {
       title: 'Reminder',
-      description: 'For one-time or recurring tasks, renewals, and maintenance.',
+      description: 'For one-time or recurring tasks and maintenance.',
       icon: Bell,
       tone: 'blue',
       onClick: () => closeWithAction(onChooseReminder),
@@ -101,6 +103,13 @@ export function AddTypeSelector({
       icon: Cake,
       tone: 'pink',
       onClick: () => closeWithAction(onChooseBirthday),
+    },
+    {
+      title: 'Renewal',
+      description: 'Track renewals, expirations, warranties, and review dates.',
+      icon: RefreshCcw,
+      tone: 'orange',
+      onClick: () => closeWithAction(onChooseRenewal),
     },
     {
       title: 'Record',

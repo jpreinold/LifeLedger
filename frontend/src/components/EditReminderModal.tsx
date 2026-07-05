@@ -127,5 +127,18 @@ function toReminderInput(reminder: Reminder): ReminderInput {
           relationship: reminder.birthday_details.relationship,
         }
       : null,
+    renewal_details: reminder.renewal_details
+      ? {
+          item_name: reminder.renewal_details.item_name,
+          renewal_kind: reminder.renewal_details.renewal_kind,
+          owner_name: reminder.renewal_details.owner_name,
+          provider: reminder.renewal_details.provider,
+          renewal_date: reminder.renewal_details.renewal_date,
+          expiration_date: reminder.renewal_details.expiration_date,
+          renewal_window_days: reminder.renewal_details.renewal_window_days,
+          review_lead_days: reminder.renewal_details.review_lead_days,
+          frequency: reminder.renewal_details.frequency,
+        }
+      : null,
   })
 }
