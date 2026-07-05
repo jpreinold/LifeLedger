@@ -4,6 +4,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 import {
   AlertCircle,
   Bell,
+  CheckCircle,
   CheckCircle2,
   FileText,
   Home,
@@ -17,6 +18,7 @@ import {
 
 import { remindersApi } from './api/remindersApi'
 import { isCognitoAuthEnabled } from './auth/config'
+import { AddTypeSelector } from './components/AddTypeSelector'
 import { Dashboard } from './components/Dashboard'
 import { EditReminderModal } from './components/EditReminderModal'
 import { HomeDashboard } from './components/HomeDashboard'
@@ -24,6 +26,7 @@ import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
+import { createBirthdayReminderInput } from './lib/reminderInput'
 import { getNeedsAttention } from './lib/reminderSchedule'
 import type { Reminder, ReminderInput } from './types/reminder'
 
@@ -108,6 +111,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [activePage, setActivePage] = useState<AppPage>('home')
   const [isReminderFormOpen, setIsReminderFormOpen] = useState(false)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
+  const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
 
   async function loadReminders() {
     setIsLoading(true)
@@ -189,13 +193,26 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function openAddReminder() {
-    setTemplateDraft(null)
-    setIsReminderFormOpen(true)
+    setIsTemplateModalOpen(false)
+    setIsReminderFormOpen(false)
+    setIsAddTypeSelectorOpen(true)
   }
 
   function closeAddReminder() {
     setIsReminderFormOpen(false)
     setTemplateDraft(null)
+  }
+
+  function openGenericReminderForm() {
+    setTemplateDraft(null)
+    setIsAddTypeSelectorOpen(false)
+    setIsReminderFormOpen(true)
+  }
+
+  function openBirthdayReminderForm(input = createBirthdayReminderInput()) {
+    setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
+    setIsAddTypeSelectorOpen(false)
+    setIsReminderFormOpen(true)
   }
 
   function openTemplates() {
@@ -209,7 +226,13 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function handleUseTemplate(input: ReminderInput) {
+    if (input.reminder_type === 'birthday') {
+      openBirthdayReminderForm(input)
+      return
+    }
+
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
+    setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
 
@@ -224,6 +247,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   const attentionCount = getNeedsAttention(reminders).length
   const displayName = getUserDisplayName(userLabel)
+  const pageTitle = getPageTitle(activePage)
 
   return (
     <main className="app-shell" id="app-top">
@@ -232,7 +256,14 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           <Menu size={20} aria-hidden="true" />
         </span>
 
-        <h1 className="app-title">LifeLedger</h1>
+        <h1 className={activePage === 'home' ? 'app-title app-title-brand' : 'app-title'}>
+          {activePage === 'home' ? (
+            <span className="app-title-logo" aria-hidden="true">
+              <CheckCircle size={14} />
+            </span>
+          ) : null}
+          <span>{pageTitle}</span>
+        </h1>
 
         <button
           type="button"
@@ -337,6 +368,13 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         templateDraft={templateDraft}
       />
 
+      <AddTypeSelector
+        isOpen={isAddTypeSelectorOpen}
+        onClose={() => setIsAddTypeSelectorOpen(false)}
+        onChooseReminder={openGenericReminderForm}
+        onChooseBirthday={() => openBirthdayReminderForm()}
+      />
+
       <LifeAdminTemplates
         isOpen={isTemplateModalOpen}
         onClose={() => setIsTemplateModalOpen(false)}
@@ -431,6 +469,17 @@ function getUserDisplayName(value?: string | null) {
   }
 
   return `${firstToken.charAt(0).toUpperCase()}${firstToken.slice(1)}`
+}
+
+function getPageTitle(page: AppPage) {
+  const titles: Record<AppPage, string> = {
+    home: 'LifeLedger',
+    reminders: 'Reminders',
+    records: 'Records',
+    settings: 'Settings',
+  }
+
+  return titles[page]
 }
 
 export default App

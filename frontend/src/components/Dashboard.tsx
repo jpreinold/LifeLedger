@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 
 import { getNeedsAttention, type AttentionReminder } from '../lib/reminderSchedule'
+import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { Reminder } from '../types/reminder'
 
 interface DashboardProps {
@@ -200,6 +201,11 @@ function getAttentionLabel(item: AttentionReminder) {
 }
 
 function getRadarDueLabel(item: AttentionReminder) {
+  const smartLabel = getSmartReminderLabel(item.reminder)
+  if (smartLabel) {
+    return smartLabel
+  }
+
   if (item.reason === 'Reminder window' && item.reminderDate) {
     return `Window opened ${formatShortDate(item.reminderDate)}. Due ${formatShortDate(item.reminder.due_date)}`
   }

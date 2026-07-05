@@ -1,4 +1,4 @@
-import type { PriorityOption, ReminderCategory, ReminderLeadUnit, RepeatOption } from './reminder'
+import type { PriorityOption, ReminderCategory, ReminderLeadUnit, ReminderType, RepeatOption } from './reminder'
 
 export type DefaultDueDateStrategy =
   | 'choose-date'
@@ -23,5 +23,7 @@ export interface LifeAdminTemplate {
   suggestedNotes: string
   defaultDueDateStrategy?: DefaultDueDateStrategy
   suggestedReminderTiming?: TemplateReminderTiming
+  smartType?: ReminderType
+  smartBadge?: string
   tags?: string[]
 }

@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-The Reminder Delivery Foundations phase adds reminder timing preferences and smarter attention surfacing while keeping the authenticated workflow intact. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+The Smart Birthday Reminders phase adds LifeLedger's first smart reminder type. Birthday reminders still behave like normal yearly reminders, but they can store simple birthday details and calculate age context when a birth year or the age someone is turning is known. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -71,15 +71,17 @@ Local development uses `AUTH_MODE=local` and `LOCAL_DEV_USER_ID=local-dev-user`,
 
 The frontend includes a Life Admin Templates modal for common reminders such as vehicle registration, annual checkups, HVAC filters, subscription reviews, birthdays, warranty expirations, and personal admin reviews.
 
-Templates are TypeScript constants in the React app. Choosing **Browse templates** opens a searchable, category-filtered modal. Choosing **Use template** fills the existing reminder form with title, category, repeat, priority, safe notes, and suggested reminder timing when a template has one. The user still chooses or confirms the due date and saves normally through the authenticated `POST /reminders` API.
+Templates are TypeScript constants in the React app. Choosing **Browse templates** opens a searchable, category-filtered modal. Choosing **Use template** fills the existing reminder form with title, category, repeat, priority, safe notes, and suggested reminder timing when a template has one. The Birthday reminder template is marked as smart and opens birthday-specific fields for person, month/day, optional birth year, optional turning age, and relationship. The user still confirms before saving through the authenticated `POST /reminders` API.
 
-Templates create normal reminders. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates also avoid sensitive fields and should not store policy numbers, card numbers, SSNs, passwords, medical details, or uploaded documents.
+Templates create user-scoped reminders. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates also avoid sensitive fields and should not store policy numbers, card numbers, SSNs, passwords, medical details, contact details, addresses, or uploaded documents.
 
 ## Reminder Management
 
 Reminders can be created, edited, completed, and deleted from the React app. Editing uses the authenticated `PUT /reminders/{id}` route and only sends user-editable reminder fields.
 
 Reminder records now store optional delivery preference fields: `reminder_lead_value`, `reminder_lead_unit`, and `reminder_time`. The UI defaults new reminders to 1 day before at 9:00 AM and supports same day, 1 day before, 1 week before, 1 month before, and a simple custom lead time. These fields prepare LifeLedger for future notification, calendar, and email integrations; this phase does not send notifications.
+
+Reminder records also support `reminder_type`. Existing reminders default to `generic`; birthday reminders use `birthday` and may include `birthday_details`. Birthday reminders calculate the next birthday date, infer birth year when the user enters the age someone is turning, and show labels such as turning age or age unknown on cards and dashboard rows.
 
 The reminder list defaults to active reminders and includes simple filters for overdue items, today, this week, this month, upcoming reminders, and completed reminders. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list. The dashboard includes an **On your radar** section that prioritizes overdue reminders, due today reminders, reminders whose reminder window has started, and reminders due this week.
 
@@ -165,6 +167,7 @@ Deployed frontend flow:
 - Authentication helpers live in `backend/app/auth.py`.
 - Pydantic validates request and response models in `backend/app/schemas.py`.
 - Status, recurrence, and `next_due_date` logic live in `backend/app/recurrence.py`.
+- Birthday reminder date, age, and label helpers live in `backend/app/birthdays.py`.
 - Route handlers depend on a repository abstraction, not a concrete storage backend.
 - Local mode uses JSON-file persistence at `backend/data/reminders.json`.
 - DynamoDB mode uses `DynamoReminderRepository` for AWS deployment.
@@ -172,7 +175,7 @@ Deployed frontend flow:
 - Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
 - `backend/template.yaml` describes the SAM serverless deployment shape.
 
-Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences are stored on each reminder item without changing the DynamoDB key schema.
+Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences and smart birthday fields are stored on each reminder item without changing the DynamoDB key schema.
 
 ## Environment Variables
 
@@ -243,4 +246,4 @@ sam deploy --guided
 
 ## Not In This Phase
 
-This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, or another frontend redesign.
+This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, or another frontend redesign. Future smart reminder types may include renewals, warranties, subscriptions, document expirations, and maintenance cycles.

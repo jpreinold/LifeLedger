@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
+import { createBirthdayReminderInput } from '../lib/reminderInput'
 import { buildReminderInputWithDefaultTiming, formatReminderTiming } from '../lib/reminderSchedule'
 import { reminderCategories, type ReminderCategory, type ReminderInput } from '../types/reminder'
 import type { LifeAdminTemplate } from '../types/template'
 import { getCategoryVisual } from './categoryVisuals'
+import { SheetDrawer } from './SheetDrawer'
 
 type TemplateFilter = 'All' | ReminderCategory
 
@@ -17,14 +19,10 @@ interface LifeAdminTemplatesProps {
 }
 
 const filters: TemplateFilter[] = ['All', ...reminderCategories]
-const drawerCloseMs = 220
 
 export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplate }: LifeAdminTemplatesProps) {
   const [activeFilter, setActiveFilter] = useState<TemplateFilter>('All')
   const [query, setQuery] = useState('')
-  const [isClosing, setIsClosing] = useState(false)
-  const isClosingRef = useRef(false)
-  const closeTimerRef = useRef<number | null>(null)
 
   const visibleTemplates = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -38,50 +36,6 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
     )
   }, [activeFilter, query])
 
-  const requestClose = useCallback(() => {
-    if (isClosingRef.current) {
-      return
-    }
-
-    isClosingRef.current = true
-    setIsClosing(true)
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null
-      onClose()
-    }, drawerCloseMs)
-  }, [onClose])
-  useEffect(() => {
-    if (isOpen) {
-      isClosingRef.current = false
-      setIsClosing(false)
-    }
-
-    if (!isOpen) {
-      return
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        requestClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, requestClose])
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current)
-      }
-    }
-  }, [])
-
-  if (!isOpen) {
-    return null
-  }
-
   function handleUseTemplate(input: ReminderInput) {
     onUseTemplate(input)
     onClose()
@@ -93,24 +47,18 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
   }
 
   return (
-    <div
-      className={`modal-backdrop ${isClosing ? 'modal-backdrop-closing' : ''}`}
-      role="presentation"
-      onMouseDown={requestClose}
+    <SheetDrawer
+      className="template-dialog"
+      isOpen={isOpen}
+      labelledBy="life-admin-templates-heading"
+      onClose={onClose}
     >
-      <section
-        className={`sheet-dialog template-dialog ${isClosing ? 'sheet-dialog-closing' : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="life-admin-templates-heading"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
         <div className="sheet-header">
           <div>
             <h2 id="life-admin-templates-heading">Templates</h2>
             <p>Start from a common reminder, then confirm the due date.</p>
           </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close templates">
+          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close templates">
             <X size={19} aria-hidden="true" />
           </button>
         </div>
@@ -153,8 +101,7 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
             Start blank reminder
           </button>
         </div>
-      </section>
-    </div>
+    </SheetDrawer>
   )
 }
 
@@ -180,6 +127,7 @@ function TemplateCard({
         <div className="template-meta">
           <span>{template.recommendedRepeat}</span>
           <span>{template.recommendedPriority}</span>
+          {template.smartBadge ? <span className="smart-template-badge">{template.smartBadge}</span> : null}
           {template.suggestedReminderTiming ? <span>{formatTemplateReminderTiming(template)}</span> : null}
         </div>
       </div>
@@ -193,6 +141,18 @@ function TemplateCard({
 }
 
 function toInput(template: LifeAdminTemplate): ReminderInput {
+  if (template.smartType === 'birthday') {
+    return createBirthdayReminderInput({
+      title: template.title,
+      category: template.category,
+      priority: template.recommendedPriority,
+      notes: template.suggestedNotes,
+      reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? 1,
+      reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? 'weeks',
+      reminder_time: template.suggestedReminderTiming?.reminder_time ?? '09:00',
+    })
+  }
+
   return buildReminderInputWithDefaultTiming({
     title: template.title,
     category: template.category,
@@ -203,6 +163,8 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
     reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? null,
     reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? null,
     reminder_time: template.suggestedReminderTiming?.reminder_time ?? null,
+    reminder_type: template.smartType ?? 'generic',
+    birthday_details: null,
   })
 }
 
@@ -228,6 +190,7 @@ function matchesQuery(template: LifeAdminTemplate, query: string) {
     template.description,
     template.category,
     template.suggestedNotes,
+    template.smartBadge,
     ...(template.tags ?? []),
   ].join(' ')
 

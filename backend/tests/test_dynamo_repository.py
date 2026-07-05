@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from app.dynamo_repository import DynamoReminderRepository
 from app.models import Reminder
+from app.schemas import BirthdayDetails, ReminderCategory, ReminderType, RepeatOption
 
 
 class FakeDynamoTable:
@@ -91,6 +92,39 @@ def test_dynamo_repository_loads_legacy_items_without_timing_fields():
     assert loaded.reminder_lead_value is None
     assert loaded.reminder_lead_unit is None
     assert loaded.reminder_time is None
+    assert loaded.reminder_type == ReminderType.GENERIC
+    assert loaded.birthday_details is None
+
+
+def test_dynamo_repository_preserves_birthday_fields():
+    table = FakeDynamoTable()
+    repo = DynamoReminderRepository(table_name="test-table", region_name="us-east-1", table=table)
+    birthday = date.today()
+    reminder = build_reminder().model_copy(
+        update={
+            "title": "Jasmine's birthday",
+            "category": ReminderCategory.FAMILY,
+            "due_date": birthday,
+            "repeat": RepeatOption.YEARLY,
+            "reminder_type": ReminderType.BIRTHDAY,
+            "birthday_details": BirthdayDetails(
+                person_name="Jasmine",
+                birth_month=birthday.month,
+                birth_day=birthday.day,
+                birth_year=birthday.year - 31,
+                age_turning_next_birthday=31,
+            ),
+        }
+    )
+
+    repo.create_reminder(reminder)
+    loaded = repo.get_reminder(reminder.user_id, reminder.id)
+
+    assert loaded is not None
+    assert loaded.reminder_type == ReminderType.BIRTHDAY
+    assert loaded.birthday_details is not None
+    assert loaded.birthday_details.person_name == "Jasmine"
+    assert loaded.birthday_details.birth_year == birthday.year - 31
 
 
 def test_dynamo_repository_module_imports_without_aws_credentials():

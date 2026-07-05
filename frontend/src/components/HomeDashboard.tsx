@@ -12,6 +12,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 
 import { getNeedsAttention, type AttentionReminder } from '../lib/reminderSchedule'
+import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { Reminder } from '../types/reminder'
 import { getCategoryVisual } from './categoryVisuals'
 
@@ -223,6 +224,7 @@ function QuickAction({
 function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () => void }) {
   const { reminder } = item
   const { Icon, tone } = getCategoryVisual(reminder.category)
+  const smartLabel = getSmartReminderLabel(reminder)
 
   return (
     <button type="button" className="home-list-row" onClick={onClick}>
@@ -231,11 +233,17 @@ function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () 
       </span>
       <span className="home-row-copy">
         <strong>{reminder.title}</strong>
-        <span>
-          {reminder.category}
-          {' \u00b7 '}
-          <em className={`attention-text attention-text-${getAttentionTone(item)}`}>{formatAttentionStatus(item)}</em>
-        </span>
+        {smartLabel ? (
+          <span>
+            <em className={`attention-text attention-text-${getAttentionTone(item)}`}>{smartLabel}</em>
+          </span>
+        ) : (
+          <span>
+            {reminder.category}
+            {' \u00b7 '}
+            <em className={`attention-text attention-text-${getAttentionTone(item)}`}>{formatAttentionStatus(item)}</em>
+          </span>
+        )}
       </span>
       <ChevronRight size={18} aria-hidden="true" className="home-row-chevron" />
     </button>
@@ -244,6 +252,7 @@ function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () 
 
 function UpcomingRow({ reminder, onClick }: { reminder: Reminder; onClick: () => void }) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
+  const smartLabel = getSmartReminderLabel(reminder)
 
   return (
     <button type="button" className="home-list-row" onClick={onClick}>
@@ -252,11 +261,7 @@ function UpcomingRow({ reminder, onClick }: { reminder: Reminder; onClick: () =>
       </span>
       <span className="home-row-copy">
         <strong>{reminder.title}</strong>
-        <span>
-          {reminder.category}
-          {' \u00b7 '}
-          {formatShortDate(reminder.due_date)}
-        </span>
+        <span>{smartLabel ?? `${reminder.category} \u00b7 ${formatShortDate(reminder.due_date)}`}</span>
       </span>
       <ChevronRight size={18} aria-hidden="true" className="home-row-chevron" />
     </button>
