@@ -5,8 +5,8 @@ import {
   AlertCircle,
   Bell,
   CheckCircle2,
+  FileText,
   Home,
-  LayoutTemplate,
   LogOut,
   Menu,
   Plus,
@@ -19,10 +19,12 @@ import { remindersApi } from './api/remindersApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { Dashboard } from './components/Dashboard'
 import { EditReminderModal } from './components/EditReminderModal'
+import { HomeDashboard } from './components/HomeDashboard'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
+import { getNeedsAttention } from './lib/reminderSchedule'
 import type { Reminder, ReminderInput } from './types/reminder'
 
 function App() {
@@ -52,7 +54,9 @@ function App() {
   return (
     <>
       <Authenticator hideSignUp>
-        {({ signOut }) => <ReminderApp onSignOut={signOut} />}
+        {({ signOut, user }) => (
+          <ReminderApp onSignOut={signOut} userLabel={user?.signInDetails?.loginId ?? user?.username} />
+        )}
       </Authenticator>
       {updateToast}
     </>
@@ -88,11 +92,12 @@ function PwaUpdateToast({ onDismiss, onUpdate }: PwaUpdateToastProps) {
 
 interface ReminderAppProps {
   onSignOut?: () => void
+  userLabel?: string | null
 }
 
-type AppPage = 'dashboard' | 'reminders' | 'settings'
+type AppPage = 'home' | 'reminders' | 'records' | 'settings'
 
-function ReminderApp({ onSignOut }: ReminderAppProps) {
+function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -100,7 +105,7 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
   const [notice, setNotice] = useState<string | null>(null)
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
-  const [activePage, setActivePage] = useState<AppPage>('dashboard')
+  const [activePage, setActivePage] = useState<AppPage>('home')
   const [isReminderFormOpen, setIsReminderFormOpen] = useState(false)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
 
@@ -217,37 +222,31 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
     return activePage === page ? 'active' : undefined
   }
 
-  const pageTitle = activePage === 'reminders' ? 'Reminders' : activePage === 'settings' ? 'Settings' : null
+  const attentionCount = getNeedsAttention(reminders).length
+  const displayName = getUserDisplayName(userLabel)
 
   return (
     <main className="app-shell" id="app-top">
-      <header className={`app-header ${pageTitle ? 'app-header-page' : 'app-header-brand'}`}>
+      <header className="app-header app-header-main">
         <span className="menu-glyph" aria-hidden="true">
           <Menu size={20} aria-hidden="true" />
         </span>
 
-        {pageTitle ? (
-          <h1 className="page-title">{pageTitle}</h1>
-        ) : (
-          <div className="brand-lockup">
-            <div className="brand-mark" aria-hidden="true">
-              <CheckCircle2 size={28} />
-            </div>
-            <div>
-              <h1>LifeLedger</h1>
-              <p>Stay on top of life.</p>
-            </div>
-          </div>
-        )}
+        <h1 className="app-title">LifeLedger</h1>
 
-        <div className="header-actions">
-          <button type="button" className="icon-button refresh-button" onClick={loadReminders} aria-label="Refresh reminders">
-            <RefreshCcw size={18} aria-hidden="true" />
-          </button>
-          <button type="button" className="icon-button primary-icon-button" onClick={openAddReminder} aria-label="Add reminder">
-            <Plus size={21} aria-hidden="true" />
-          </button>
-        </div>
+        <button
+          type="button"
+          className="icon-button header-notification-button"
+          onClick={() => showPage('reminders')}
+          aria-label="View reminders"
+        >
+          <Bell size={19} aria-hidden="true" />
+          {attentionCount > 0 ? (
+            <span className="notification-badge" aria-label={`${attentionCount} reminders need attention`}>
+              {attentionCount > 9 ? '9+' : attentionCount}
+            </span>
+          ) : null}
+        </button>
       </header>
 
       {error ? (
@@ -264,17 +263,19 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
         </div>
       ) : null}
 
-      {activePage === 'dashboard' ? (
-        <Dashboard
+      {activePage === 'home' ? (
+        <HomeDashboard
           reminders={reminders}
           isLoading={isLoading}
-          variant="full"
-          onComplete={handleComplete}
-          onEdit={setEditingReminder}
+          userName={displayName}
           onAddReminder={openAddReminder}
           onBrowseTemplates={openTemplates}
+          onViewReminders={() => showPage('reminders')}
+          onViewRecords={() => showPage('records')}
+          onEditReminder={setEditingReminder}
         />
       ) : null}
+
       {activePage === 'reminders' ? (
         <>
           <Dashboard reminders={reminders} />
@@ -301,36 +302,27 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
         </>
       ) : null}
 
-      {activePage === 'settings' ? (
-        <section className="coming-soon-panel settings-panel" aria-labelledby="settings-heading">
-          <div className="coming-soon-icon" aria-hidden="true">
-            <Settings size={28} />
-          </div>
-          <h2 id="settings-heading">Settings</h2>
-          <p>Account and app preferences will live here.</p>
-          {onSignOut ? (
-            <button type="button" className="secondary-button settings-sign-out-button" onClick={onSignOut}>
-              <LogOut size={17} aria-hidden="true" />
-              Sign out
-            </button>
-          ) : null}
-        </section>
-      ) : null}
+      {activePage === 'records' ? <RecordsView /> : null}
+
+      {activePage === 'settings' ? <SettingsView userLabel={userLabel} onSignOut={onSignOut} /> : null}
 
       <nav className="bottom-nav" aria-label="Primary actions">
-        <button type="button" className={!isTemplateModalOpen ? getNavClass('dashboard') : undefined} onClick={() => showPage('dashboard')} aria-current={activePage === 'dashboard' && !isTemplateModalOpen ? 'page' : undefined}>
+        <button type="button" className={getNavClass('home')} onClick={() => showPage('home')} aria-current={activePage === 'home' ? 'page' : undefined}>
           <Home size={19} aria-hidden="true" />
-          Dashboard
+          Home
         </button>
-        <button type="button" className={!isTemplateModalOpen ? getNavClass('reminders') : undefined} onClick={() => showPage('reminders')} aria-current={activePage === 'reminders' && !isTemplateModalOpen ? 'page' : undefined}>
+        <button type="button" className={getNavClass('reminders')} onClick={() => showPage('reminders')} aria-current={activePage === 'reminders' ? 'page' : undefined}>
           <Bell size={19} aria-hidden="true" />
           Reminders
         </button>
-        <button type="button" className={isTemplateModalOpen ? 'active' : undefined} onClick={openTemplates}>
-          <LayoutTemplate size={19} aria-hidden="true" />
-          Templates
+        <button type="button" className="bottom-nav-add" onClick={openAddReminder} aria-label="Add reminder">
+          <Plus size={28} aria-hidden="true" />
         </button>
-        <button type="button" className={!isTemplateModalOpen ? getNavClass('settings') : undefined} onClick={() => showPage('settings')} aria-current={activePage === 'settings' && !isTemplateModalOpen ? 'page' : undefined}>
+        <button type="button" className={getNavClass('records')} onClick={() => showPage('records')} aria-current={activePage === 'records' ? 'page' : undefined}>
+          <FileText size={19} aria-hidden="true" />
+          Records
+        </button>
+        <button type="button" className={getNavClass('settings')} onClick={() => showPage('settings')} aria-current={activePage === 'settings' ? 'page' : undefined}>
           <Settings size={19} aria-hidden="true" />
           Settings
         </button>
@@ -363,6 +355,82 @@ function ReminderApp({ onSignOut }: ReminderAppProps) {
       ) : null}
     </main>
   )
+}
+
+function RecordsView() {
+  return (
+    <section className="coming-soon-panel records-panel" aria-labelledby="records-heading">
+      <div className="coming-soon-icon" aria-hidden="true">
+        <FileText size={28} />
+      </div>
+      <h2 id="records-heading">Records</h2>
+      <p>Secure personal records are coming soon.</p>
+      <p>Soon, LifeLedger will help you organize important records, renewals, and reference details in one private place.</p>
+    </section>
+  )
+}
+
+function SettingsView({ userLabel, onSignOut }: { userLabel?: string | null; onSignOut?: () => void }) {
+  const accountLabel = userLabel?.trim() || (isCognitoAuthEnabled ? 'Signed in' : 'Local development mode')
+
+  return (
+    <section className="settings-view" aria-labelledby="settings-heading">
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div className="coming-soon-icon settings-icon" aria-hidden="true">
+            <Settings size={26} />
+          </div>
+          <div>
+            <h2 id="settings-heading">Settings</h2>
+            <p>Account, privacy, and app status.</p>
+          </div>
+        </div>
+
+        <div className="settings-list">
+          <div className="settings-row">
+            <span>Account</span>
+            <strong>{accountLabel}</strong>
+          </div>
+          <div className="settings-row">
+            <span>Privacy</span>
+            <strong>Your reminders stay in your private LifeLedger account.</strong>
+          </div>
+          <div className="settings-row">
+            <span>Updates</span>
+            <strong>App updates appear through the refresh prompt when available.</strong>
+          </div>
+        </div>
+
+        {onSignOut ? (
+          <button type="button" className="secondary-button settings-sign-out-button" onClick={onSignOut}>
+            <LogOut size={17} aria-hidden="true" />
+            Sign out
+          </button>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function getUserDisplayName(value?: string | null) {
+  const trimmedValue = value?.trim()
+
+  if (!trimmedValue) {
+    return null
+  }
+
+  const localPart = trimmedValue.includes('@') ? trimmedValue.split('@')[0] : trimmedValue
+  const [firstToken] = localPart.split(/[._\s-]+/).filter(Boolean)
+
+  if (!firstToken) {
+    return null
+  }
+
+  if (firstToken.length <= 3) {
+    return firstToken.toUpperCase()
+  }
+
+  return `${firstToken.charAt(0).toUpperCase()}${firstToken.slice(1)}`
 }
 
 export default App
