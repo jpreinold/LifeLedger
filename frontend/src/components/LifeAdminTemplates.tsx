@@ -3,6 +3,7 @@ import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
 import { createBirthdayReminderInput, createRenewalReminderInput } from '../lib/reminderInput'
+import { getBackendRenewalKind, withRenewalDisplayKind } from '../lib/renewalUx'
 import { buildReminderInputWithDefaultTiming, formatReminderTiming } from '../lib/reminderSchedule'
 import { reminderCategories, type ReminderCategory, type ReminderInput } from '../types/reminder'
 import type { LifeAdminTemplate } from '../types/template'
@@ -154,6 +155,19 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
   }
 
   if (template.smartType === 'renewal') {
+    const displayKind = template.renewalKind ?? 'renewal'
+    const renewalDetails = withRenewalDisplayKind({
+      item_name: template.renewalItemName ?? getTemplateRenewalItemName(template.title),
+      renewal_kind: getBackendRenewalKind(displayKind),
+      owner_name: null,
+      provider: null,
+      renewal_date: null,
+      expiration_date: null,
+      renewal_window_days: template.renewalWindowDays ?? null,
+      review_lead_days: template.reviewLeadDays ?? null,
+      frequency: null,
+    }, displayKind)
+
     return createRenewalReminderInput({
       title: template.title,
       category: template.category,
@@ -163,17 +177,7 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
       reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? 1,
       reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? 'months',
       reminder_time: template.suggestedReminderTiming?.reminder_time ?? '09:00',
-      renewal_details: {
-        item_name: template.renewalItemName ?? getTemplateRenewalItemName(template.title),
-        renewal_kind: template.renewalKind ?? 'renewal',
-        owner_name: null,
-        provider: null,
-        renewal_date: null,
-        expiration_date: null,
-        renewal_window_days: template.renewalWindowDays ?? null,
-        review_lead_days: template.reviewLeadDays ?? null,
-        frequency: template.recommendedRepeat === 'None' ? null : template.recommendedRepeat,
-      },
+      renewal_details: renewalDetails,
     })
   }
   return buildReminderInputWithDefaultTiming({
@@ -227,3 +231,4 @@ function matchesQuery(template: LifeAdminTemplate, query: string) {
 
   return searchable.toLowerCase().includes(query)
 }
+

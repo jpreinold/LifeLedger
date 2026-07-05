@@ -1,4 +1,5 @@
-import type { PriorityOption, ReminderCategory, ReminderLeadUnit, ReminderType, RenewalKind, RepeatOption } from './reminder'
+import type { PriorityOption, ReminderCategory, ReminderLeadUnit, ReminderType, RepeatOption } from './reminder'
+import type { RenewalDisplayKind } from '../lib/renewalUx'
 
 export type DefaultDueDateStrategy =
   | 'choose-date'
@@ -25,9 +26,10 @@ export interface LifeAdminTemplate {
   suggestedReminderTiming?: TemplateReminderTiming
   smartType?: ReminderType
   smartBadge?: string
-  renewalKind?: RenewalKind
+  renewalKind?: RenewalDisplayKind
   renewalItemName?: string
   renewalWindowDays?: number
   reviewLeadDays?: number
   tags?: string[]
 }
+

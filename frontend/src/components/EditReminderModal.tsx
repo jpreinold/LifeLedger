@@ -72,8 +72,8 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
     <SheetDrawer className="edit-dialog" isOpen={isDrawerOpen} labelledBy="edit-reminder-heading" onClose={requestCancel}>
         <div className="sheet-header">
           <div>
-            <h2 id="edit-reminder-heading">Edit Reminder</h2>
-            <p>Update details and keep the next due date clear.</p>
+            <h2 id="edit-reminder-heading">{getEditHeading(form.reminder_type)}</h2>
+            <p>{getEditDescription(form.reminder_type)}</p>
           </div>
           <button type="button" className="icon-button ghost-icon-button" onClick={requestCancel} aria-label="Close edit reminder">
             <X size={19} aria-hidden="true" />
@@ -104,6 +104,29 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
   )
 }
 
+function getEditHeading(reminderType: ReminderInput['reminder_type']) {
+  if (reminderType === 'renewal') {
+    return 'Edit Renewal'
+  }
+
+  if (reminderType === 'birthday') {
+    return 'Edit Birthday'
+  }
+
+  return 'Edit Reminder'
+}
+
+function getEditDescription(reminderType: ReminderInput['reminder_type']) {
+  if (reminderType === 'renewal') {
+    return 'Update the tracked date, kind, and reminder timing.'
+  }
+
+  if (reminderType === 'birthday') {
+    return 'Update birthday details and reminder timing.'
+  }
+
+  return 'Update details and keep the next due date clear.'
+}
 function toReminderInput(reminder: Reminder): ReminderInput {
   return buildReminderInputWithDefaultTiming({
     title: reminder.title,
@@ -142,3 +165,4 @@ function toReminderInput(reminder: Reminder): ReminderInput {
       : null,
   })
 }
+

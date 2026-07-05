@@ -92,7 +92,7 @@ export function AddTypeSelector({
   const options: AddOption[] = [
     {
       title: 'Reminder',
-      description: 'For one-time or recurring tasks and maintenance.',
+      description: 'For one-time or recurring tasks.',
       icon: Bell,
       tone: 'blue',
       onClick: () => closeWithAction(onChooseReminder),
@@ -106,7 +106,7 @@ export function AddTypeSelector({
     },
     {
       title: 'Renewal',
-      description: 'Track renewals, expirations, warranties, and review dates.',
+      description: 'Track renewals, expirations, subscriptions, warranties, and review dates.',
       icon: RefreshCcw,
       tone: 'orange',
       onClick: () => closeWithAction(onChooseRenewal),
@@ -123,6 +123,13 @@ export function AddTypeSelector({
       description: 'Coming soon',
       icon: Car,
       tone: 'orange',
+      disabled: true,
+    },
+    {
+      title: 'Document',
+      description: 'Coming soon',
+      icon: FileText,
+      tone: 'green',
       disabled: true,
     },
   ]
@@ -175,3 +182,4 @@ function AddTypeOption({ option }: { option: AddOption }) {
     </button>
   )
 }
+

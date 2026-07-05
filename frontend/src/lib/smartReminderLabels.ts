@@ -1,4 +1,5 @@
 import type { Reminder } from '../types/reminder'
+import { getRenewalCardSmartLabel } from './renewalUx'
 
 export function getSmartReminderLabel(reminder: Reminder) {
   if (reminder.reminder_type === 'birthday') {
@@ -6,8 +7,9 @@ export function getSmartReminderLabel(reminder: Reminder) {
   }
 
   if (reminder.reminder_type === 'renewal') {
-    return reminder.computed_label ?? reminder.renewal_status_label ?? reminder.renewal_window_label
+    return getRenewalCardSmartLabel(reminder)
   }
 
   return null
 }
+

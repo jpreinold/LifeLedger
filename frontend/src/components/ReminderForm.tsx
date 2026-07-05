@@ -8,11 +8,25 @@ import {
   priorityOptions,
   reminderCategories,
   reminderLeadUnits,
-  renewalKinds,
   repeatOptions,
   type ReminderInput,
 } from '../types/reminder'
 import { buildReminderSubmitInput, emptyBirthdayDetails, emptyRenewalDetails, isReminderReady } from '../lib/reminderInput'
+import {
+  getRenewalDateLabel,
+  getRenewalDefaults,
+  getRenewalDisplayKind,
+  getRenewalHelperText,
+  getRenewalItemLabel,
+  getRenewalPreview,
+  getRenewalTitle,
+  getRenewalValidationMessage,
+  getRelevantRenewalDate,
+  isAutoRenewalTitle,
+  renewalKindOptions,
+  withRenewalDisplayKind,
+  type RenewalDisplayKind,
+} from '../lib/renewalUx'
 import {
   DEFAULT_REMINDER_LEAD_UNIT,
   DEFAULT_REMINDER_LEAD_VALUE,
@@ -97,12 +111,16 @@ export function ReminderForm({
       return
     }
 
-    setForm((current) =>
-      buildReminderInputWithDefaultTiming({
+    setForm((current) => {
+      const nextDueDate = templateDraft.input.due_date || (templateDraft.input.reminder_type === 'renewal'
+        ? ''
+        : current.due_date || new Date().toISOString().slice(0, 10))
+
+      return buildReminderInputWithDefaultTiming({
         ...templateDraft.input,
-        due_date: current.due_date || new Date().toISOString().slice(0, 10),
-      }),
-    )
+        due_date: nextDueDate,
+      })
+    })
   }, [templateDraft])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -120,8 +138,8 @@ export function ReminderForm({
     <SheetDrawer className="add-dialog" isOpen={isOpen} labelledBy="add-reminder-heading" onClose={onClose}>
         <div className="sheet-header">
           <div>
-            <h2 id="add-reminder-heading">Add Reminder</h2>
-            <p>Choose a template or start from a blank reminder.</p>
+            <h2 id="add-reminder-heading">{getAddFormHeading(form.reminder_type)}</h2>
+            <p>{getAddFormDescription(form.reminder_type)}</p>
           </div>
           <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close add reminder">
             <X size={19} aria-hidden="true" />
@@ -152,6 +170,13 @@ export function ReminderForm({
 
 export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
   const selectedReminderPreset = getReminderLeadPreset(form)
+  const renewalDetails = form.renewal_details
+  const renewalDisplayKind = form.reminder_type === 'renewal'
+    ? getRenewalDisplayKind(renewalDetails, { title: form.title, category: form.category })
+    : null
+  const titlePlaceholder = renewalDisplayKind && renewalDetails
+    ? getRenewalTitle(renewalDetails.item_name, renewalDisplayKind)
+    : 'Renew car tag'
 
   function handleReminderPresetChange(preset: ReminderLeadPreset) {
     setForm((current) => {
@@ -175,13 +200,13 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
       {form.reminder_type === 'renewal' ? <RenewalFields form={form} setForm={setForm} /> : null}
 
       <label>
-        <span>Title</span>
+        <span>{form.reminder_type === 'renewal' ? 'Reminder title' : 'Title'}</span>
         <input
           required
           maxLength={120}
           value={form.title}
           onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-          placeholder="Renew car tag"
+          placeholder={titlePlaceholder}
         />
       </label>
 
@@ -202,16 +227,18 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
           </select>
         </label>
 
-        <label>
-          <span>{getDueDateFieldLabel(form.reminder_type)}</span>
-          <input
-            required
-            type="date"
-            value={form.due_date}
-            disabled={form.reminder_type === 'birthday' || form.reminder_type === 'renewal'}
-            onChange={(event) => setForm((current) => ({ ...current, due_date: event.target.value }))}
-          />
-        </label>
+        {form.reminder_type !== 'renewal' ? (
+          <label>
+            <span>{getDueDateFieldLabel(form.reminder_type)}</span>
+            <input
+              required
+              type="date"
+              value={form.due_date}
+              disabled={form.reminder_type === 'birthday'}
+              onChange={(event) => setForm((current) => ({ ...current, due_date: event.target.value }))}
+            />
+          </label>
+        ) : null}
       </div>
 
       <div className="form-row">
@@ -332,37 +359,60 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
   )
 }
 
-const renewalKindLabels: Record<RenewalDetailsInput['renewal_kind'], string> = {
-  renewal: 'Renewal',
-  expiration: 'Expiration',
-  review: 'Review',
-}
-
 function RenewalFields({ form, setForm }: ReminderFieldsProps) {
   const details = form.renewal_details ?? emptyRenewalDetails()
+  const displayKind = getRenewalDisplayKind(details, { title: form.title, category: form.category })
   const relevantDate = getRelevantRenewalFormDate(details, form.due_date)
-  const preview = getRenewalPreview(details, relevantDate)
+  const preview = getRenewalPreview({ ...form, renewal_details: details })
+  const validationMessage = getRenewalValidationMessage({ ...form, renewal_details: details })
 
   function updateDetails(updates: Partial<RenewalDetailsInput>) {
     setForm((current) => {
       const currentDetails = current.renewal_details ?? emptyRenewalDetails()
-      const mergedDetails = { ...currentDetails, ...updates }
+      const currentDisplayKind = getRenewalDisplayKind(currentDetails, {
+        title: current.title,
+        category: current.category,
+      })
+      const mergedDetails = withRenewalDisplayKind({ ...currentDetails, ...updates }, currentDisplayKind)
       const nextDate = getRelevantRenewalFormDate(mergedDetails, current.due_date)
       const nextDetails = withRelevantRenewalDate(mergedDetails, nextDate)
-      const shouldRefreshTitle = updates.item_name !== undefined || updates.renewal_kind !== undefined
+      const shouldRefreshTitle = updates.item_name !== undefined
 
       return {
         ...current,
-        title:
-          shouldRefreshTitle && shouldUpdateRenewalTitle(current.title, currentDetails)
-            ? formatRenewalTitle(nextDetails.item_name, nextDetails.renewal_kind)
-            : current.title,
+        title: shouldRefreshTitle && isAutoRenewalTitle(current.title, currentDetails)
+          ? getRenewalTitle(nextDetails.item_name, currentDisplayKind)
+          : current.title,
         due_date: nextDate,
-        repeat: current.repeat === 'None' ? 'Yearly' : current.repeat,
-        priority: current.priority || 'Medium',
-        reminder_lead_value: current.reminder_lead_value ?? 1,
-        reminder_lead_unit: current.reminder_lead_unit ?? 'months',
-        reminder_time: current.reminder_time ?? '09:00',
+        renewal_details: nextDetails,
+      }
+    })
+  }
+
+  function handleKindChange(nextKind: RenewalDisplayKind) {
+    setForm((current) => {
+      const currentDetails = current.renewal_details ?? emptyRenewalDetails()
+      const defaults = getRenewalDefaults(nextKind)
+      const mergedDetails = withRenewalDisplayKind(currentDetails, nextKind)
+      const nextDate = getRelevantRenewalFormDate(mergedDetails, current.due_date)
+      const nextDetails = {
+        ...withRelevantRenewalDate(mergedDetails, nextDate),
+        renewal_window_days: defaults.renewal_window_days ?? null,
+        review_lead_days: defaults.review_lead_days ?? null,
+      }
+
+      return {
+        ...current,
+        title: isAutoRenewalTitle(current.title, currentDetails)
+          ? getRenewalTitle(nextDetails.item_name, nextKind)
+          : current.title,
+        category: defaults.category && current.category === 'Other' ? defaults.category : current.category,
+        due_date: nextDate,
+        repeat: defaults.repeat,
+        priority: defaults.priority,
+        reminder_lead_value: defaults.reminder_lead_value,
+        reminder_lead_unit: defaults.reminder_lead_unit,
+        reminder_time: defaults.reminder_time,
         renewal_details: nextDetails,
       }
     })
@@ -372,41 +422,44 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
     <section className="renewal-details-section" aria-labelledby="renewal-details-heading">
       <div className="form-section-heading">
         <RefreshCcw size={16} aria-hidden="true" />
-        <span id="renewal-details-heading">Renewal</span>
+        <span id="renewal-details-heading">Renewal setup</span>
       </div>
 
-      <p className="renewal-helper-text">
-        Track safe renewal or expiration context without storing policy, account, or document numbers.
-      </p>
+      <div className="renewal-kind-grid" role="radiogroup" aria-label="Date type">
+        {renewalKindOptions.map((option) => {
+          const isSelected = option.kind === displayKind
 
-      <label>
-        <span>Item</span>
-        <input
-          required
-          maxLength={120}
-          value={details.item_name}
-          onChange={(event) => updateDetails({ item_name: event.target.value })}
-          placeholder="Alina's car tag"
-        />
-      </label>
+          return (
+            <button
+              type="button"
+              className={isSelected ? 'renewal-kind-option active' : 'renewal-kind-option'}
+              key={option.kind}
+              onClick={() => handleKindChange(option.kind)}
+              aria-pressed={isSelected}
+            >
+              <strong>{option.label}</strong>
+              <span>{option.description}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <p className="renewal-helper-text">{getRenewalHelperText(displayKind)}</p>
 
       <div className="form-row">
         <label>
-          <span>Kind</span>
-          <select
-            value={details.renewal_kind}
-            onChange={(event) => updateDetails({ renewal_kind: event.target.value as RenewalDetailsInput['renewal_kind'] })}
-          >
-            {renewalKinds.map((kind) => (
-              <option value={kind} key={kind}>
-                {renewalKindLabels[kind]}
-              </option>
-            ))}
-          </select>
+          <span>{getRenewalItemLabel(displayKind)}</span>
+          <input
+            required
+            maxLength={120}
+            value={details.item_name}
+            onChange={(event) => updateDetails({ item_name: event.target.value })}
+            placeholder={getRenewalItemPlaceholder(displayKind)}
+          />
         </label>
 
         <label>
-          <span>{getRenewalDateLabel(details.renewal_kind)}</span>
+          <span>{getRenewalDateLabel(displayKind)}</span>
           <input
             required
             type="date"
@@ -418,7 +471,7 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
 
       <div className="form-row">
         <label>
-          <span>Owner/name</span>
+          <span>Owner/person (optional)</span>
           <input
             maxLength={120}
             value={details.owner_name ?? ''}
@@ -428,7 +481,7 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
         </label>
 
         <label>
-          <span>Provider</span>
+          <span>Provider/source (optional)</span>
           <input
             maxLength={120}
             value={details.provider ?? ''}
@@ -438,37 +491,67 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
         </label>
       </div>
 
-      <div className="form-row">
-        <label>
-          <span>Renewal window days</span>
-          <input
-            inputMode="numeric"
-            min="0"
-            max="365"
-            type="number"
-            value={details.renewal_window_days ?? ''}
-            onChange={(event) => updateDetails({ renewal_window_days: toOptionalNumber(event.target.value) })}
-            placeholder="30"
-          />
-        </label>
+      <p className="renewal-safety-note">
+        Do not store policy numbers, account numbers, passwords, or other sensitive details here.
+      </p>
 
-        <label>
-          <span>Review lead days</span>
-          <input
-            inputMode="numeric"
-            min="0"
-            max="365"
-            type="number"
-            value={details.review_lead_days ?? ''}
-            onChange={(event) => updateDetails({ review_lead_days: toOptionalNumber(event.target.value) })}
-            placeholder="30"
-          />
-        </label>
+      {validationMessage ? <p className="field-error">{validationMessage}</p> : null}
+
+      <div className="renewal-preview" aria-live="polite">
+        <strong>{preview.primary}</strong>
+        {preview.reminder ? <span>{preview.reminder}</span> : null}
+        {preview.card ? <small>{preview.card}</small> : null}
       </div>
-
-      <p className="renewal-preview">{preview}</p>
     </section>
   )
+}
+
+function getAddFormHeading(reminderType: ReminderInput['reminder_type']) {
+  if (reminderType === 'birthday') {
+    return 'Add Birthday'
+  }
+
+  if (reminderType === 'renewal') {
+    return 'Add Renewal'
+  }
+
+  return 'Add Reminder'
+}
+
+function getAddFormDescription(reminderType: ReminderInput['reminder_type']) {
+  if (reminderType === 'birthday') {
+    return 'Track a birthday and calculate age when details are known.'
+  }
+
+  if (reminderType === 'renewal') {
+    return 'Set up the date LifeLedger should track.'
+  }
+
+  return 'Choose a template or start from a blank reminder.'
+}
+
+function getRenewalItemPlaceholder(kind: RenewalDisplayKind) {
+  if (kind === 'subscription') {
+    return 'Netflix'
+  }
+
+  if (kind === 'free_trial') {
+    return 'YouTube Premium'
+  }
+
+  if (kind === 'warranty') {
+    return 'HVAC'
+  }
+
+  if (kind === 'document') {
+    return 'Passport'
+  }
+
+  if (kind === 'review') {
+    return 'Home insurance'
+  }
+
+  return "Alina's car tag"
 }
 
 function getDueDateFieldLabel(reminderType: ReminderInput['reminder_type']) {
@@ -476,31 +559,11 @@ function getDueDateFieldLabel(reminderType: ReminderInput['reminder_type']) {
     return 'Next birthday'
   }
 
-  if (reminderType === 'renewal') {
-    return 'Tracked date'
-  }
-
   return 'Due date'
 }
 
-function getRenewalDateLabel(kind: RenewalDetailsInput['renewal_kind']) {
-  if (kind === 'expiration') {
-    return 'Expiration date'
-  }
-
-  if (kind === 'review') {
-    return 'Renewal date'
-  }
-
-  return 'Renewal date'
-}
-
 function getRelevantRenewalFormDate(details: RenewalDetailsInput, fallbackDate: string) {
-  if (details.renewal_kind === 'expiration') {
-    return details.expiration_date || details.renewal_date || fallbackDate || today
-  }
-
-  return details.renewal_date || details.expiration_date || fallbackDate || today
+  return getRelevantRenewalDate(details, fallbackDate)
 }
 
 function withRelevantRenewalDate(details: RenewalDetailsInput, relevantDate: string): RenewalDetailsInput {
@@ -519,68 +582,6 @@ function withRelevantRenewalDate(details: RenewalDetailsInput, relevantDate: str
   }
 }
 
-function shouldUpdateRenewalTitle(currentTitle: string, previousDetails: RenewalDetailsInput) {
-  const trimmedTitle = currentTitle.trim()
-  return (
-    !trimmedTitle ||
-    trimmedTitle === 'Renewal reminder' ||
-    trimmedTitle === formatRenewalTitle(previousDetails.item_name, previousDetails.renewal_kind)
-  )
-}
-
-function formatRenewalTitle(itemName: string, kind: RenewalDetailsInput['renewal_kind']) {
-  const trimmedName = itemName.trim()
-  if (!trimmedName) {
-    return 'Renewal reminder'
-  }
-
-  if (kind === 'expiration') {
-    return `${trimmedName} expiration`
-  }
-
-  if (kind === 'review') {
-    return `Review ${trimmedName}`
-  }
-
-  if (/\b(insurance|subscription|membership|warranty|certification)\b/i.test(trimmedName)) {
-    return `${trimmedName} renewal`
-  }
-
-  return `Renew ${trimmedName}`
-}
-
-function getRenewalPreview(details: RenewalDetailsInput, relevantDate: string) {
-  const itemName = details.item_name.trim()
-  const dateLabel = formatFullDate(relevantDate)
-  const windowDays = toOptionalNumber(details.renewal_window_days)
-  const reviewLeadDays = toOptionalNumber(details.review_lead_days)
-  const windowLabel = windowDays !== null
-    ? ` Renewal window starts ${formatFullDate(addDaysToDateString(relevantDate, -windowDays))}.`
-    : ''
-
-  if (!itemName) {
-    return 'Add an item and date to calculate renewal or expiration context.'
-  }
-
-  if (details.renewal_kind === 'expiration') {
-    return `${itemName} expires on ${dateLabel}.${windowLabel}`
-  }
-
-  if (details.renewal_kind === 'review') {
-    const reviewDate = reviewLeadDays !== null ? addDaysToDateString(relevantDate, -reviewLeadDays) : relevantDate
-    const leadLabel = reviewLeadDays !== null ? `${reviewLeadDays} days before renewal` : 'before renewal'
-    return `Review ${itemName} by ${formatFullDate(reviewDate)} (${leadLabel}).${windowLabel}`
-  }
-
-  return `${itemName} renews on ${dateLabel}.${windowLabel}`
-}
-
-function addDaysToDateString(value: string, days: number) {
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
-  const date = new Date(year, month - 1, day)
-  date.setDate(date.getDate() + days)
-  return formatDateOnly(date)
-}
 function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
   const details = form.birthday_details ?? emptyBirthdayDetails()
   const dayCount = details.birth_month ? getDaysInMonth(details.birth_month) : 31
@@ -901,3 +902,4 @@ function toOptionalNumber(value: string | number | null | undefined) {
   const numericValue = Number(value)
   return Number.isFinite(numericValue) ? numericValue : null
 }
+

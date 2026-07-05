@@ -1,5 +1,13 @@
 import { buildReminderInputWithDefaultTiming } from './reminderSchedule'
 import type { BirthdayDetailsInput, ReminderInput, RenewalDetailsInput } from '../types/reminder'
+import {
+  getBackendRenewalKind,
+  getRenewalDefaults,
+  getRenewalDisplayKind,
+  getRenewalValidationMessage,
+  getRelevantRenewalDate,
+  withRenewalDisplayKind,
+} from './renewalUx'
 
 const today = new Date().toISOString().slice(0, 10)
 
@@ -52,21 +60,24 @@ export function createBirthdayReminderInput(overrides: Partial<ReminderInput> = 
 }
 
 export function createRenewalReminderInput(overrides: Partial<ReminderInput> = {}): ReminderInput {
-  const renewalDetails = {
+  const mergedRenewalDetails = {
     ...emptyRenewalDetails(),
     ...(overrides.renewal_details ?? {}),
   }
-  const dueDate = renewalDetails.renewal_date ?? renewalDetails.expiration_date ?? overrides.due_date ?? today
+  const displayKind = getRenewalDisplayKind(mergedRenewalDetails)
+  const renewalDetails = withRenewalDisplayKind(mergedRenewalDetails, displayKind)
+  const defaults = getRenewalDefaults(displayKind)
+  const dueDate = getRelevantRenewalDate(renewalDetails, overrides.due_date ?? '')
 
   return buildReminderInputWithDefaultTiming({
     title: 'Renewal reminder',
-    category: 'Other',
-    repeat: 'Yearly',
-    priority: 'Medium',
+    category: defaults.category ?? 'Other',
+    repeat: defaults.repeat,
+    priority: defaults.priority,
     notes: null,
-    reminder_lead_value: 1,
-    reminder_lead_unit: 'months',
-    reminder_time: '09:00',
+    reminder_lead_value: defaults.reminder_lead_value,
+    reminder_lead_unit: defaults.reminder_lead_unit,
+    reminder_time: defaults.reminder_time,
     reminder_type: 'renewal',
     ...overrides,
     due_date: dueDate,
@@ -85,8 +96,7 @@ export function isReminderReady(form: ReminderInput) {
   }
 
   if (form.reminder_type === 'renewal') {
-    const details = form.renewal_details
-    return Boolean(details?.item_name.trim() && form.due_date)
+    return getRenewalValidationMessage(form) === null
   }
 
   return true
@@ -140,8 +150,13 @@ function buildBirthdaySubmitInput(baseInput: ReminderInput): ReminderInput {
 
 function buildRenewalSubmitInput(baseInput: ReminderInput): ReminderInput {
   const details = baseInput.renewal_details ?? emptyRenewalDetails()
-  const renewalKind = details.renewal_kind ?? 'renewal'
-  const relevantDate = getRelevantRenewalDate(details, baseInput.due_date)
+  const displayKind = getRenewalDisplayKind(details, {
+    title: baseInput.title,
+    category: baseInput.category,
+  })
+  const renewalKind = getBackendRenewalKind(displayKind)
+  const detailsWithDisplayKind = withRenewalDisplayKind(details, displayKind)
+  const relevantDate = getRelevantRenewalDate({ ...detailsWithDisplayKind, renewal_kind: renewalKind }, baseInput.due_date)
   const renewalDate = renewalKind === 'expiration'
     ? toOptionalDate(details.renewal_date)
     : toOptionalDate(details.renewal_date ?? relevantDate)
@@ -164,17 +179,9 @@ function buildRenewalSubmitInput(baseInput: ReminderInput): ReminderInput {
       expiration_date: expirationDate,
       renewal_window_days: toOptionalNumber(details.renewal_window_days),
       review_lead_days: toOptionalNumber(details.review_lead_days),
-      frequency: baseInput.repeat === 'None' ? null : baseInput.repeat,
+      frequency: detailsWithDisplayKind.frequency,
     },
   }
-}
-
-function getRelevantRenewalDate(details: RenewalDetailsInput, fallbackDate: string) {
-  if (details.renewal_kind === 'expiration') {
-    return details.expiration_date || details.renewal_date || fallbackDate || today
-  }
-
-  return details.renewal_date || details.expiration_date || fallbackDate || today
 }
 
 function toOptionalDate(value: string | null | undefined) {
@@ -189,3 +196,4 @@ function toOptionalNumber(value: string | number | null | undefined) {
   const numericValue = Number(value)
   return Number.isFinite(numericValue) ? numericValue : null
 }
+
