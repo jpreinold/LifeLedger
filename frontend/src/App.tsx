@@ -26,7 +26,7 @@ import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
-import { createBirthdayReminderInput } from './lib/reminderInput'
+import { createBirthdayReminderInput, createRenewalReminderInput } from './lib/reminderInput'
 import { getNeedsAttention } from './lib/reminderSchedule'
 import type { Reminder, ReminderInput } from './types/reminder'
 
@@ -215,6 +215,11 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setIsReminderFormOpen(true)
   }
 
+  function openRenewalReminderForm(input = createRenewalReminderInput()) {
+    setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
+    setIsAddTypeSelectorOpen(false)
+    setIsReminderFormOpen(true)
+  }
   function openTemplates() {
     setIsReminderFormOpen(false)
     setIsTemplateModalOpen(true)
@@ -231,6 +236,10 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       return
     }
 
+    if (input.reminder_type === 'renewal') {
+      openRenewalReminderForm(input)
+      return
+    }
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
@@ -373,6 +382,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onClose={() => setIsAddTypeSelectorOpen(false)}
         onChooseReminder={openGenericReminderForm}
         onChooseBirthday={() => openBirthdayReminderForm()}
+        onChooseRenewal={() => openRenewalReminderForm()}
       />
 
       <LifeAdminTemplates

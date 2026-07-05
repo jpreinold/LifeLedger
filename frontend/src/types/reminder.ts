@@ -23,7 +23,9 @@ export const reminderStatuses = [
   'Upcoming',
 ] as const
 
-export const reminderTypes = ['generic', 'birthday'] as const
+export const reminderTypes = ['generic', 'birthday', 'renewal'] as const
+
+export const renewalKinds = ['renewal', 'expiration', 'review'] as const
 
 export type ReminderCategory = (typeof reminderCategories)[number]
 export type RepeatOption = (typeof repeatOptions)[number]
@@ -31,6 +33,7 @@ export type PriorityOption = (typeof priorityOptions)[number]
 export type ReminderLeadUnit = (typeof reminderLeadUnits)[number]
 export type ReminderStatus = (typeof reminderStatuses)[number]
 export type ReminderType = (typeof reminderTypes)[number]
+export type RenewalKind = (typeof renewalKinds)[number]
 
 export interface BirthdayDetails {
   person_name: string
@@ -52,6 +55,30 @@ export interface BirthdayDetailsInput {
   relationship: string | null
 }
 
+export interface RenewalDetails {
+  item_name: string
+  renewal_kind: RenewalKind
+  owner_name: string | null
+  provider: string | null
+  renewal_date: string | null
+  expiration_date: string | null
+  renewal_window_days: number | null
+  review_lead_days: number | null
+  frequency: string | null
+}
+
+export interface RenewalDetailsInput {
+  item_name: string
+  renewal_kind: RenewalKind
+  owner_name: string | null
+  provider: string | null
+  renewal_date: string | null
+  expiration_date: string | null
+  renewal_window_days: number | null
+  review_lead_days: number | null
+  frequency: string | null
+}
+
 export interface Reminder {
   id: string
   title: string
@@ -65,6 +92,7 @@ export interface Reminder {
   reminder_time: string | null
   reminder_type: ReminderType
   birthday_details: BirthdayDetails | null
+  renewal_details: RenewalDetails | null
   completed: boolean
   status: ReminderStatus
   created_at: string
@@ -73,6 +101,8 @@ export interface Reminder {
   next_due_date: string | null
   computed_label: string | null
   birthday_age_label: string | null
+  renewal_status_label: string | null
+  renewal_window_label: string | null
 }
 
 export interface ReminderInput {
@@ -87,4 +117,5 @@ export interface ReminderInput {
   reminder_time: string | null
   reminder_type: ReminderType
   birthday_details: BirthdayDetailsInput | null
+  renewal_details: RenewalDetailsInput | null
 }

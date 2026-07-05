@@ -14,9 +14,24 @@ from app.birthdays import (
 from app.config import get_settings
 from app.models import Reminder
 from app.recurrence import advance_due_date, calculate_status, get_next_due_date
+from app.renewals import (
+    advance_renewal_details,
+    get_renewal_computed_label,
+    get_renewal_due_date,
+    get_renewal_status_label,
+    get_renewal_window_label,
+)
 from app.repository import ReminderRepository
 from app.repository_factory import create_repository
-from app.schemas import ReminderCreate, ReminderLeadUnit, ReminderResponse, ReminderType, ReminderUpdate, RepeatOption
+from app.schemas import (
+    ReminderCreate,
+    ReminderLeadUnit,
+    ReminderResponse,
+    ReminderType,
+    ReminderUpdate,
+    RenewalDetails,
+    RepeatOption,
+)
 
 settings = get_settings()
 app = FastAPI(title="LifeLedger API", version="0.1.0")
@@ -130,8 +145,11 @@ def complete_reminder(
 
     next_due_date = advance_due_date(reminder.due_date, reminder.repeat, today=now.date())
     birthday_details = reminder.birthday_details
+    renewal_details = reminder.renewal_details
     if reminder.reminder_type == ReminderType.BIRTHDAY and birthday_details is not None:
         birthday_details = enrich_birthday_details(birthday_details, next_due_date)
+    if reminder.reminder_type == ReminderType.RENEWAL and renewal_details is not None:
+        renewal_details = advance_renewal_details(renewal_details, reminder.due_date, next_due_date)
 
     advanced_reminder = reminder.model_copy(
         update={
@@ -139,6 +157,7 @@ def complete_reminder(
             "completed_at": now,
             "due_date": next_due_date,
             "birthday_details": birthday_details,
+            "renewal_details": renewal_details,
             "updated_at": now,
         }
     )
@@ -163,6 +182,12 @@ def to_response(reminder: Reminder) -> ReminderResponse:
             "birthday_age_label": get_birthday_age_label(reminder.birthday_details)
             if reminder.reminder_type == ReminderType.BIRTHDAY
             else None,
+            "renewal_status_label": get_renewal_status_label(reminder.renewal_details)
+            if reminder.reminder_type == ReminderType.RENEWAL
+            else None,
+            "renewal_window_label": get_renewal_window_label(reminder.renewal_details)
+            if reminder.reminder_type == ReminderType.RENEWAL
+            else None,
         }
     )
 
@@ -173,26 +198,46 @@ def utc_now() -> datetime:
 
 def prepare_create_fields(payload: ReminderCreate) -> dict:
     data = payload.model_dump()
-    return prepare_birthday_fields(data)
+    return prepare_smart_fields(data)
 
 
 def prepare_update_fields(reminder: Reminder, updates: dict) -> dict:
     reminder_type = updates.get("reminder_type", reminder.reminder_type)
-    if reminder_type == ReminderType.BIRTHDAY or reminder_type == ReminderType.BIRTHDAY.value:
+    if is_reminder_type(reminder_type, ReminderType.BIRTHDAY):
         merged = {**reminder.model_dump(), **updates}
         return prepare_birthday_fields(merged, keep_existing_timing=True)
 
-    if reminder_type == ReminderType.GENERIC or reminder_type == ReminderType.GENERIC.value:
+    if is_reminder_type(reminder_type, ReminderType.RENEWAL):
+        merged = {**reminder.model_dump(), **updates}
+        return prepare_renewal_fields(merged, keep_existing_timing=True)
+
+    if is_reminder_type(reminder_type, ReminderType.GENERIC):
         updates["reminder_type"] = ReminderType.GENERIC
         updates["birthday_details"] = None
+        updates["renewal_details"] = None
 
     return updates
 
 
+def prepare_smart_fields(data: dict) -> dict:
+    reminder_type = data.get("reminder_type", ReminderType.GENERIC)
+    if is_reminder_type(reminder_type, ReminderType.BIRTHDAY):
+        return prepare_birthday_fields(data)
+
+    if is_reminder_type(reminder_type, ReminderType.RENEWAL):
+        return prepare_renewal_fields(data)
+
+    data["reminder_type"] = ReminderType.GENERIC
+    data["birthday_details"] = None
+    data["renewal_details"] = None
+    return data
+
+
 def prepare_birthday_fields(data: dict, keep_existing_timing: bool = False) -> dict:
-    if data.get("reminder_type") != ReminderType.BIRTHDAY and data.get("reminder_type") != ReminderType.BIRTHDAY.value:
+    if not is_reminder_type(data.get("reminder_type"), ReminderType.BIRTHDAY):
         data["reminder_type"] = ReminderType.GENERIC
         data["birthday_details"] = None
+        data["renewal_details"] = None
         return data
 
     details = data.get("birthday_details")
@@ -212,6 +257,7 @@ def prepare_birthday_fields(data: dict, keep_existing_timing: bool = False) -> d
 
     data["reminder_type"] = ReminderType.BIRTHDAY
     data["birthday_details"] = enriched_details
+    data["renewal_details"] = None
     data["due_date"] = due_date
     data["repeat"] = RepeatOption.YEARLY
 
@@ -225,8 +271,47 @@ def prepare_birthday_fields(data: dict, keep_existing_timing: bool = False) -> d
     return data
 
 
-def get_computed_label(reminder: Reminder) -> str | None:
-    if reminder.reminder_type != ReminderType.BIRTHDAY:
-        return None
+def prepare_renewal_fields(data: dict, keep_existing_timing: bool = False) -> dict:
+    if not is_reminder_type(data.get("reminder_type"), ReminderType.RENEWAL):
+        data["reminder_type"] = ReminderType.GENERIC
+        data["birthday_details"] = None
+        data["renewal_details"] = None
+        return data
 
-    return get_birthday_computed_label(reminder.birthday_details, reminder.due_date)
+    details = data.get("renewal_details")
+    if details is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Renewal details are required")
+
+    if not hasattr(details, "item_name"):
+        details = RenewalDetails.model_validate(details)
+
+    due_date = get_renewal_due_date(details)
+    if due_date is not None:
+        data["due_date"] = due_date
+
+    data["reminder_type"] = ReminderType.RENEWAL
+    data["birthday_details"] = None
+    data["renewal_details"] = details
+
+    if not keep_existing_timing or data.get("reminder_lead_value") is None:
+        data["reminder_lead_value"] = data.get("reminder_lead_value") if data.get("reminder_lead_value") is not None else 1
+    if not keep_existing_timing or data.get("reminder_lead_unit") is None:
+        data["reminder_lead_unit"] = data.get("reminder_lead_unit") or ReminderLeadUnit.MONTHS
+    if not keep_existing_timing or data.get("reminder_time") is None:
+        data["reminder_time"] = data.get("reminder_time") or "09:00"
+
+    return data
+
+
+def get_computed_label(reminder: Reminder) -> str | None:
+    if reminder.reminder_type == ReminderType.BIRTHDAY:
+        return get_birthday_computed_label(reminder.birthday_details, reminder.due_date)
+
+    if reminder.reminder_type == ReminderType.RENEWAL:
+        return get_renewal_computed_label(reminder.renewal_details)
+
+    return None
+
+
+def is_reminder_type(value: ReminderType | str | None, expected: ReminderType) -> bool:
+    return value == expected or value == expected.value

@@ -8,7 +8,7 @@ from app.auth import UserContext, get_current_user
 from app.config import get_settings
 from app.main import app, get_repository
 from app.repository import LocalReminderRepository
-from app.schemas import BirthdayDetails, ReminderCategory, ReminderType, RepeatOption
+from app.schemas import BirthdayDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
 
 
 @pytest.fixture()
@@ -131,7 +131,9 @@ def test_create_and_fetch_reminder(client):
     assert "user_id" not in created
     assert created["reminder_type"] == "generic"
     assert created["birthday_details"] is None
+    assert created["renewal_details"] is None
     assert created["computed_label"] is None
+    assert created["renewal_status_label"] is None
 
     list_response = client.get("/reminders")
     assert list_response.status_code == 200
@@ -254,6 +256,151 @@ def test_birthday_reminders_remain_user_scoped(client):
             "birth_month": birthday.month,
             "birth_day": birthday.day,
             "birth_year": birthday.year - 58,
+        },
+    )
+
+    set_auth_user("user-b")
+
+    list_response = client.get("/reminders")
+    get_response = client.get(f"/reminders/{created['id']}")
+
+    assert list_response.status_code == 200
+    assert list_response.json() == []
+    assert get_response.status_code == 404
+
+
+
+def test_create_renewal_reminder_with_renewal_date_works(client):
+    renewal_date = date.today() + timedelta(days=42)
+
+    created = create_reminder(
+        client,
+        title="Renew Alina's car tag",
+        category="Car",
+        due_date=date.today().isoformat(),
+        repeat="Yearly",
+        priority="High",
+        reminder_type="renewal",
+        renewal_details={
+            "item_name": "Alina's car tag",
+            "renewal_kind": "renewal",
+            "renewal_date": renewal_date.isoformat(),
+            "renewal_window_days": 31,
+            "frequency": "Yearly",
+        },
+    )
+
+    assert created["reminder_type"] == "renewal"
+    assert created["due_date"] == renewal_date.isoformat()
+    assert created["birthday_details"] is None
+    assert created["renewal_details"]["item_name"] == "Alina's car tag"
+    assert created["renewal_details"]["renewal_kind"] == "renewal"
+    assert created["reminder_lead_value"] == 1
+    assert created["reminder_lead_unit"] == "months"
+    assert created["reminder_time"] == "09:00"
+    assert created["renewal_status_label"] == "Renews in 42 days"
+    assert created["computed_label"] == "Renews in 42 days"
+    assert created["renewal_window_label"] is not None
+
+
+def test_create_expiration_reminder_with_expiration_date_works(client):
+    expiration_date = date.today() + timedelta(days=86)
+
+    created = create_reminder(
+        client,
+        title="Passport expiration",
+        category="Other",
+        due_date=date.today().isoformat(),
+        reminder_type="renewal",
+        renewal_details={
+            "item_name": "Passport",
+            "renewal_kind": "expiration",
+            "expiration_date": expiration_date.isoformat(),
+        },
+    )
+
+    assert created["due_date"] == expiration_date.isoformat()
+    assert created["renewal_details"]["expiration_date"] == expiration_date.isoformat()
+    assert created["renewal_status_label"] == "Expires in 86 days"
+    assert created["computed_label"] == "Expires in 86 days"
+
+
+def test_past_expiration_reminder_shows_expired_label(client):
+    expiration_date = date.today() - timedelta(days=12)
+
+    created = create_reminder(
+        client,
+        title="Warranty expiration",
+        category="Home",
+        due_date=date.today().isoformat(),
+        reminder_type="renewal",
+        renewal_details={
+            "item_name": "Warranty",
+            "renewal_kind": "expiration",
+            "expiration_date": expiration_date.isoformat(),
+        },
+    )
+
+    assert created["status"] == "Overdue"
+    assert created["renewal_status_label"] == "Expired 12 days ago"
+    assert created["computed_label"] == "Expired 12 days ago"
+
+
+def test_renewal_reminder_with_unknown_structured_date_still_works(client):
+    generic_due_date = date.today() + timedelta(days=10)
+
+    created = create_reminder(
+        client,
+        title="Mystery renewal",
+        category="Other",
+        due_date=generic_due_date.isoformat(),
+        reminder_type="renewal",
+        renewal_details={
+            "item_name": "Mystery renewal",
+            "renewal_kind": "renewal",
+        },
+    )
+
+    assert created["due_date"] == generic_due_date.isoformat()
+    assert created["renewal_status_label"] == "Renewal date unknown"
+    assert created["computed_label"] == "Renewal date unknown"
+
+
+def test_review_renewal_reminder_shows_review_label(client):
+    renewal_date = date.today() + timedelta(days=180)
+
+    created = create_reminder(
+        client,
+        title="Review home insurance",
+        category="Home",
+        due_date=date.today().isoformat(),
+        reminder_type="renewal",
+        renewal_details={
+            "item_name": "Home insurance",
+            "renewal_kind": "review",
+            "renewal_date": renewal_date.isoformat(),
+            "review_lead_days": 30,
+        },
+    )
+
+    assert created["due_date"] == renewal_date.isoformat()
+    assert created["computed_label"] == "Review 30 days before renewal"
+    assert created["renewal_status_label"] == "Renews in 180 days"
+
+
+def test_renewal_reminders_remain_user_scoped(client):
+    set_auth_user("user-a")
+    renewal_date = date.today() + timedelta(days=20)
+    created = create_reminder(
+        client,
+        title="Renew car tag",
+        category="Car",
+        due_date=date.today().isoformat(),
+        reminder_type="renewal",
+        renewal_details={
+            "item_name": "Car tag",
+            "renewal_kind": "renewal",
+            "renewal_date": renewal_date.isoformat(),
         },
     )
 
@@ -403,6 +550,38 @@ def test_local_json_repository_persists_birthday_reminders(tmp_path):
     assert loaded.birthday_details.age_turning_next_birthday == 27
 
 
+
+def test_local_json_repository_persists_renewal_reminders(tmp_path):
+    data_file = tmp_path / "reminders.json"
+    first_repo = LocalReminderRepository(data_file)
+    due_date = date.today() + timedelta(days=10)
+    created = create_reminder_model(due_date).model_copy(
+        update={
+            "title": "Passport expiration",
+            "category": ReminderCategory.OTHER,
+            "due_date": due_date,
+            "repeat": RepeatOption.YEARLY,
+            "reminder_type": ReminderType.RENEWAL,
+            "renewal_details": RenewalDetails(
+                item_name="Passport",
+                renewal_kind="expiration",
+                expiration_date=due_date,
+                review_lead_days=90,
+            ),
+        }
+    )
+
+    first_repo.create_reminder(created)
+    second_repo = LocalReminderRepository(data_file)
+    loaded = second_repo.get_reminder("local-dev-user", created.id)
+
+    assert loaded is not None
+    assert loaded.reminder_type == ReminderType.RENEWAL
+    assert loaded.renewal_details is not None
+    assert loaded.renewal_details.item_name == "Passport"
+    assert loaded.renewal_details.expiration_date == due_date
+
+
 def test_local_json_repository_loads_legacy_reminders_without_timing_fields(tmp_path):
     data_file = tmp_path / "reminders.json"
     reminder_id = "legacy-reminder"
@@ -438,6 +617,7 @@ def test_local_json_repository_loads_legacy_reminders_without_timing_fields(tmp_
     assert loaded.reminder_time is None
     assert loaded.reminder_type == ReminderType.GENERIC
     assert loaded.birthday_details is None
+    assert loaded.renewal_details is None
 
 
 def test_complete_non_recurring_reminder(client):

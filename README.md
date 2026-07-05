@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-The Smart Birthday Reminders phase adds LifeLedger's first smart reminder type. Birthday reminders still behave like normal yearly reminders, but they can store simple birthday details and calculate age context when a birth year or the age someone is turning is known. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger supports smart birthday reminders and smart renewal/expiration reminders. Birthday reminders can calculate age context when a birth year or turning age is known. Renewal reminders can store safe renewal details and calculate context such as renewal timing, expiration status, review lead time, and renewal windows. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -175,7 +175,7 @@ Deployed frontend flow:
 - Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
 - `backend/template.yaml` describes the SAM serverless deployment shape.
 
-Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences and smart birthday fields are stored on each reminder item without changing the DynamoDB key schema.
+Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences, smart birthday fields, and smart renewal fields are stored on each reminder item without changing the DynamoDB key schema.
 
 ## Environment Variables
 
@@ -246,4 +246,4 @@ sam deploy --guided
 
 ## Not In This Phase
 
-This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, or another frontend redesign. Future smart reminder types may include renewals, warranties, subscriptions, document expirations, and maintenance cycles.
+This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, or another frontend redesign. Do not store policy numbers, account numbers, card numbers, government ID numbers, passwords, medical details, or uploaded documents in reminders. Future smart reminder types may include subscriptions, warranties, document expirations, maintenance cycles, and anniversaries.

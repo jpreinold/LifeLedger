@@ -1,6 +1,6 @@
 # LifeLedger Backend
 
-FastAPI backend for the LifeLedger reminder MVP. Phase 3 keeps local JSON persistence working by default while adding Cognito authentication, API Gateway JWT protection, and user-scoped DynamoDB storage for deployed mode.
+FastAPI backend for LifeLedger reminders. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays plus renewal/expiration context without changing the DynamoDB key schema.
 
 ## Run Locally
 

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from app.dynamo_repository import DynamoReminderRepository
 from app.models import Reminder
-from app.schemas import BirthdayDetails, ReminderCategory, ReminderType, RepeatOption
+from app.schemas import BirthdayDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
 
 
 class FakeDynamoTable:
@@ -127,6 +127,35 @@ def test_dynamo_repository_preserves_birthday_fields():
     assert loaded.birthday_details.birth_year == birthday.year - 31
 
 
+
+def test_dynamo_repository_preserves_renewal_fields():
+    table = FakeDynamoTable()
+    repo = DynamoReminderRepository(table_name="test-table", region_name="us-east-1", table=table)
+    expiration_date = date.today()
+    reminder = build_reminder().model_copy(
+        update={
+            "title": "Passport expiration",
+            "category": ReminderCategory.OTHER,
+            "due_date": expiration_date,
+            "repeat": RepeatOption.YEARLY,
+            "reminder_type": ReminderType.RENEWAL,
+            "renewal_details": RenewalDetails(
+                item_name="Passport",
+                renewal_kind="expiration",
+                expiration_date=expiration_date,
+                review_lead_days=90,
+            ),
+        }
+    )
+
+    repo.create_reminder(reminder)
+    loaded = repo.get_reminder(reminder.user_id, reminder.id)
+
+    assert loaded is not None
+    assert loaded.reminder_type == ReminderType.RENEWAL
+    assert loaded.renewal_details is not None
+    assert loaded.renewal_details.item_name == "Passport"
+    assert loaded.renewal_details.expiration_date == expiration_date
 def test_dynamo_repository_module_imports_without_aws_credentials():
     assert DynamoReminderRepository.__name__ == "DynamoReminderRepository"
 

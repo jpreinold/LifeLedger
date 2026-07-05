@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
-import { createBirthdayReminderInput } from '../lib/reminderInput'
+import { createBirthdayReminderInput, createRenewalReminderInput } from '../lib/reminderInput'
 import { buildReminderInputWithDefaultTiming, formatReminderTiming } from '../lib/reminderSchedule'
 import { reminderCategories, type ReminderCategory, type ReminderInput } from '../types/reminder'
 import type { LifeAdminTemplate } from '../types/template'
@@ -153,6 +153,29 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
     })
   }
 
+  if (template.smartType === 'renewal') {
+    return createRenewalReminderInput({
+      title: template.title,
+      category: template.category,
+      repeat: template.recommendedRepeat,
+      priority: template.recommendedPriority,
+      notes: template.suggestedNotes,
+      reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? 1,
+      reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? 'months',
+      reminder_time: template.suggestedReminderTiming?.reminder_time ?? '09:00',
+      renewal_details: {
+        item_name: template.renewalItemName ?? getTemplateRenewalItemName(template.title),
+        renewal_kind: template.renewalKind ?? 'renewal',
+        owner_name: null,
+        provider: null,
+        renewal_date: null,
+        expiration_date: null,
+        renewal_window_days: template.renewalWindowDays ?? null,
+        review_lead_days: template.reviewLeadDays ?? null,
+        frequency: template.recommendedRepeat === 'None' ? null : template.recommendedRepeat,
+      },
+    })
+  }
   return buildReminderInputWithDefaultTiming({
     title: template.title,
     category: template.category,
@@ -168,6 +191,14 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
   })
 }
 
+function getTemplateRenewalItemName(title: string) {
+  return title
+    .replace(/^Renew\s+/i, '')
+    .replace(/\s+reminder$/i, '')
+    .replace(/\s+renewal$/i, '')
+    .replace(/\s+expiration$/i, '')
+    .trim() || title
+}
 function formatTemplateReminderTiming(template: LifeAdminTemplate) {
   if (!template.suggestedReminderTiming) {
     return ''

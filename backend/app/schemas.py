@@ -47,6 +47,13 @@ class ReminderStatus(str, Enum):
 class ReminderType(str, Enum):
     GENERIC = "generic"
     BIRTHDAY = "birthday"
+    RENEWAL = "renewal"
+
+
+class RenewalKind(str, Enum):
+    RENEWAL = "renewal"
+    EXPIRATION = "expiration"
+    REVIEW = "review"
 
 
 class BirthdayDetails(BaseModel):
@@ -84,6 +91,37 @@ class BirthdayDetails(BaseModel):
         return self
 
 
+class RenewalDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_name: str = Field(..., min_length=1, max_length=120)
+    renewal_kind: RenewalKind = RenewalKind.RENEWAL
+    owner_name: str | None = Field(default=None, max_length=120)
+    provider: str | None = Field(default=None, max_length=120)
+    renewal_date: date | None = None
+    expiration_date: date | None = None
+    renewal_window_days: int | None = Field(default=None, ge=0, le=365)
+    review_lead_days: int | None = Field(default=None, ge=0, le=365)
+    frequency: str | None = Field(default=None, max_length=80)
+
+    @field_validator("item_name", mode="before")
+    @classmethod
+    def normalize_item_name(cls, value: str) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("owner_name", "provider", "frequency", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
 class ReminderBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     category: ReminderCategory
@@ -96,6 +134,7 @@ class ReminderBase(BaseModel):
     reminder_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     reminder_type: ReminderType = ReminderType.GENERIC
     birthday_details: BirthdayDetails | None = None
+    renewal_details: RenewalDetails | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -131,8 +170,20 @@ class ReminderBase(BaseModel):
         if self.reminder_type == ReminderType.BIRTHDAY and self.birthday_details is None:
             raise ValueError("Birthday reminders require birthday details")
 
-        if self.reminder_type == ReminderType.GENERIC and self.birthday_details is not None:
-            raise ValueError("Generic reminders cannot include birthday details")
+        if self.reminder_type == ReminderType.RENEWAL and self.renewal_details is None:
+            raise ValueError("Renewal reminders require renewal details")
+
+        if self.reminder_type != ReminderType.BIRTHDAY and self.birthday_details is not None:
+            raise ValueError("Only birthday reminders can include birthday details")
+
+        if self.reminder_type != ReminderType.RENEWAL and self.renewal_details is not None:
+            raise ValueError("Only renewal reminders can include renewal details")
+
+        if self.reminder_type == ReminderType.BIRTHDAY and self.renewal_details is not None:
+            raise ValueError("Birthday reminders cannot include renewal details")
+
+        if self.reminder_type == ReminderType.RENEWAL and self.birthday_details is not None:
+            raise ValueError("Renewal reminders cannot include birthday details")
 
         return self
 
@@ -153,6 +204,7 @@ class ReminderUpdate(BaseModel):
     reminder_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     reminder_type: ReminderType | None = None
     birthday_details: BirthdayDetails | None = None
+    renewal_details: RenewalDetails | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -198,3 +250,5 @@ class ReminderResponse(ReminderBase):
     next_due_date: date | None = None
     computed_label: str | None = None
     birthday_age_label: str | None = None
+    renewal_status_label: str | None = None
+    renewal_window_label: str | None = None
