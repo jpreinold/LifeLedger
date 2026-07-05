@@ -75,10 +75,16 @@ export function getPresetTiming(preset: ReminderLeadPreset, current: ReminderTim
 }
 
 export function buildReminderInputWithDefaultTiming(
-  input: Omit<ReminderInput, keyof ReminderTimingFields> & Partial<ReminderTimingFields>,
+  input: Omit<ReminderInput, keyof ReminderTimingFields | 'reminder_type' | 'birthday_details'> &
+    Partial<ReminderTimingFields> &
+    Partial<Pick<ReminderInput, 'reminder_type' | 'birthday_details'>>,
 ): ReminderInput {
+  const reminderType = input.reminder_type ?? 'generic'
+
   return {
     ...input,
+    reminder_type: reminderType,
+    birthday_details: reminderType === 'birthday' ? input.birthday_details ?? null : null,
     ...withDefaultReminderTiming({
       reminder_lead_value: input.reminder_lead_value ?? null,
       reminder_lead_unit: input.reminder_lead_unit ?? null,

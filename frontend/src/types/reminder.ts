@@ -23,11 +23,34 @@ export const reminderStatuses = [
   'Upcoming',
 ] as const
 
+export const reminderTypes = ['generic', 'birthday'] as const
+
 export type ReminderCategory = (typeof reminderCategories)[number]
 export type RepeatOption = (typeof repeatOptions)[number]
 export type PriorityOption = (typeof priorityOptions)[number]
 export type ReminderLeadUnit = (typeof reminderLeadUnits)[number]
 export type ReminderStatus = (typeof reminderStatuses)[number]
+export type ReminderType = (typeof reminderTypes)[number]
+
+export interface BirthdayDetails {
+  person_name: string
+  birth_month: number
+  birth_day: number
+  birth_year: number | null
+  age_turning_next_birthday: number | null
+  inferred_birth_year: boolean
+  relationship: string | null
+}
+
+export interface BirthdayDetailsInput {
+  person_name: string
+  birth_month: number | null
+  birth_day: number | null
+  birth_year: number | null
+  age_turning_next_birthday: number | null
+  inferred_birth_year: boolean
+  relationship: string | null
+}
 
 export interface Reminder {
   id: string
@@ -40,12 +63,16 @@ export interface Reminder {
   reminder_lead_value: number | null
   reminder_lead_unit: ReminderLeadUnit | null
   reminder_time: string | null
+  reminder_type: ReminderType
+  birthday_details: BirthdayDetails | null
   completed: boolean
   status: ReminderStatus
   created_at: string
   updated_at: string
   completed_at: string | null
   next_due_date: string | null
+  computed_label: string | null
+  birthday_age_label: string | null
 }
 
 export interface ReminderInput {
@@ -58,4 +85,6 @@ export interface ReminderInput {
   reminder_lead_value: number | null
   reminder_lead_unit: ReminderLeadUnit | null
   reminder_time: string | null
+  reminder_type: ReminderType
+  birthday_details: BirthdayDetailsInput | null
 }

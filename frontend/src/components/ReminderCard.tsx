@@ -1,7 +1,8 @@
-import { Bell, CalendarDays, CheckCircle2, Flag, Pencil, Repeat2, Trash2 } from 'lucide-react'
+import { Bell, Cake, CalendarDays, CheckCircle2, Flag, Pencil, Repeat2, Trash2 } from 'lucide-react'
 
 import type { Reminder } from '../types/reminder'
 import { formatReminderTiming } from '../lib/reminderSchedule'
+import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import { getCategoryVisual } from './categoryVisuals'
 
 interface ReminderCardProps {
@@ -22,6 +23,7 @@ const statusClassNames: Record<Reminder['status'], string> = {
 
 export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: ReminderCardProps) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
+  const smartLabel = getSmartReminderLabel(reminder)
 
   return (
     <article className={`reminder-card tone-${tone}`}>
@@ -59,6 +61,12 @@ export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: Reminde
               <Bell size={14} aria-hidden="true" />
               {formatReminderTiming(reminder)}
             </span>
+            {smartLabel ? (
+              <span className="smart-context-chip">
+                <Cake size={14} aria-hidden="true" />
+                {smartLabel}
+              </span>
+            ) : null}
             {reminder.next_due_date ? <span>Next {formatShortDate(reminder.next_due_date)}</span> : null}
           </div>
         </div>

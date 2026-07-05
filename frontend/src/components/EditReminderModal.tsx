@@ -3,9 +3,11 @@ import type { FormEvent } from 'react'
 import { Save, Trash2, X } from 'lucide-react'
 
 import type { Reminder, ReminderInput } from '../types/reminder'
+import { buildReminderSubmitInput, isReminderReady } from '../lib/reminderInput'
 import { buildReminderInputWithDefaultTiming } from '../lib/reminderSchedule'
 import { getCategoryVisual } from './categoryVisuals'
 import { ReminderFields } from './ReminderForm'
+import { SheetDrawer } from './SheetDrawer'
 
 const drawerCloseMs = 220
 
@@ -19,14 +21,14 @@ interface EditReminderModalProps {
 
 export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSave }: EditReminderModalProps) {
   const [form, setForm] = useState<ReminderInput>(() => toReminderInput(reminder))
-  const [isClosing, setIsClosing] = useState(false)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(true)
   const isClosingRef = useRef(false)
   const closeTimerRef = useRef<number | null>(null)
   const { Icon, tone } = getCategoryVisual(form.category)
 
   useEffect(() => {
     isClosingRef.current = false
-    setIsClosing(false)
+    setIsDrawerOpen(true)
     setForm(toReminderInput(reminder))
   }, [reminder])
 
@@ -44,34 +46,17 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
     }
 
     isClosingRef.current = true
-    setIsClosing(true)
+    setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onCancel()
     }, drawerCloseMs)
   }, [onCancel])
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        requestCancel()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [requestCancel])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    const wasSaved = await onSave(
-      reminder.id,
-      buildReminderInputWithDefaultTiming({
-        ...form,
-        title: form.title.trim(),
-        notes: form.notes?.trim() || null,
-      }),
-    )
+    const wasSaved = await onSave(reminder.id, buildReminderSubmitInput(form))
 
     if (wasSaved) {
       requestCancel()
@@ -84,18 +69,7 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
   }
 
   return (
-    <div
-      className={`modal-backdrop ${isClosing ? 'modal-backdrop-closing' : ''}`}
-      role="presentation"
-      onMouseDown={requestCancel}
-    >
-      <section
-        className={`sheet-dialog edit-dialog ${isClosing ? 'sheet-dialog-closing' : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-reminder-heading"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <SheetDrawer className="edit-dialog" isOpen={isDrawerOpen} labelledBy="edit-reminder-heading" onClose={requestCancel}>
         <div className="sheet-header">
           <div>
             <h2 id="edit-reminder-heading">Edit Reminder</h2>
@@ -116,7 +90,7 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
           <ReminderFields form={form} setForm={setForm} />
 
           <div className="modal-actions">
-            <button className="primary-button" type="submit" disabled={isSaving || !form.title.trim()}>
+            <button className="primary-button" type="submit" disabled={isSaving || !isReminderReady(form)}>
               <Save size={18} aria-hidden="true" />
               {isSaving ? 'Saving' : 'Save changes'}
             </button>
@@ -126,8 +100,7 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
             </button>
           </div>
         </form>
-      </section>
-    </div>
+    </SheetDrawer>
   )
 }
 
@@ -142,5 +115,17 @@ function toReminderInput(reminder: Reminder): ReminderInput {
     reminder_lead_value: reminder.reminder_lead_value,
     reminder_lead_unit: reminder.reminder_lead_unit,
     reminder_time: reminder.reminder_time,
+    reminder_type: reminder.reminder_type ?? 'generic',
+    birthday_details: reminder.birthday_details
+      ? {
+          person_name: reminder.birthday_details.person_name,
+          birth_month: reminder.birthday_details.birth_month,
+          birth_day: reminder.birthday_details.birth_day,
+          birth_year: reminder.birthday_details.birth_year,
+          age_turning_next_birthday: reminder.birthday_details.age_turning_next_birthday,
+          inferred_birth_year: reminder.birthday_details.inferred_birth_year,
+          relationship: reminder.birthday_details.relationship,
+        }
+      : null,
   })
 }
