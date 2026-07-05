@@ -1,16 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
 import { createBirthdayReminderInput, createRenewalReminderInput } from '../lib/reminderInput'
 import { getBackendRenewalKind, withRenewalDisplayKind } from '../lib/renewalUx'
 import { buildReminderInputWithDefaultTiming, formatReminderTiming } from '../lib/reminderSchedule'
-import { reminderCategories, type ReminderCategory, type ReminderInput } from '../types/reminder'
-import type { LifeAdminTemplate } from '../types/template'
+import type { ReminderInput } from '../types/reminder'
+import type { LifeAdminTemplate, TemplateFilterGroup } from '../types/template'
 import { getCategoryVisual } from './categoryVisuals'
 import { SheetDrawer } from './SheetDrawer'
 
-type TemplateFilter = 'All' | ReminderCategory
+type TemplateFilter = 'All' | TemplateFilterGroup
 
 interface LifeAdminTemplatesProps {
   isOpen: boolean
@@ -19,26 +19,42 @@ interface LifeAdminTemplatesProps {
   onUseTemplate: (input: ReminderInput) => void
 }
 
-const filters: TemplateFilter[] = ['All', ...reminderCategories]
+const filters: TemplateFilter[] = [
+  'All',
+  'Smart',
+  'Dates & People',
+  'Vehicle',
+  'Home',
+  'Health',
+  'Finance',
+  'Subscriptions',
+  'Documents',
+  'Maintenance',
+  'Coming soon',
+]
 
 export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplate }: LifeAdminTemplatesProps) {
   const [activeFilter, setActiveFilter] = useState<TemplateFilter>('All')
   const [query, setQuery] = useState('')
 
-  const visibleTemplates = useMemo(() => {
+  const filteredTemplates = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
 
-    if (activeFilter === 'All') {
-      return lifeAdminTemplates.filter((template) => matchesQuery(template, normalizedQuery))
-    }
-
     return lifeAdminTemplates.filter(
-      (template) => template.category === activeFilter && matchesQuery(template, normalizedQuery),
+      (template) => matchesFilter(template, activeFilter) && matchesQuery(template, normalizedQuery),
     )
   }, [activeFilter, query])
 
-  function handleUseTemplate(input: ReminderInput) {
-    onUseTemplate(input)
+  const featuredTemplates = filteredTemplates.filter((template) => template.featured)
+  const regularTemplates = filteredTemplates.filter((template) => !template.featured)
+  const hasResults = featuredTemplates.length > 0 || regularTemplates.length > 0
+
+  function handleUseTemplate(template: LifeAdminTemplate) {
+    if (template.targetType === 'comingSoon') {
+      return
+    }
+
+    onUseTemplate(toInput(template))
     onClose()
   }
 
@@ -57,7 +73,7 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
         <div className="sheet-header">
           <div>
             <h2 id="life-admin-templates-heading">Templates</h2>
-            <p>Start from a common reminder, then confirm the due date.</p>
+            <p>Choose what you want to track, then confirm it in the right setup flow.</p>
           </div>
           <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close templates">
             <X size={19} aria-hidden="true" />
@@ -69,12 +85,12 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search templates"
+            placeholder="Search birthdays, renewals, passport, trial..."
             aria-label="Search templates"
           />
         </div>
 
-        <div className="template-filters" aria-label="Filter templates by category">
+        <div className="template-filters" aria-label="Filter templates by purpose">
           {filters.map((filter) => (
             <button
               type="button"
@@ -88,12 +104,23 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
         </div>
 
         <div className="template-results">
-          <div className="template-grid">
-            {visibleTemplates.map((template) => (
-              <TemplateCard template={template} key={template.id} onUseTemplate={handleUseTemplate} />
-            ))}
-          </div>
-          {visibleTemplates.length === 0 ? <p className="empty-state">No templates match that search.</p> : null}
+          {featuredTemplates.length > 0 ? (
+            <TemplateSection title="Recommended smart starters">
+              {featuredTemplates.map((template) => (
+                <TemplateCard template={template} key={template.id} onUseTemplate={handleUseTemplate} />
+              ))}
+            </TemplateSection>
+          ) : null}
+
+          {regularTemplates.length > 0 ? (
+            <TemplateSection title={activeFilter === 'All' ? 'More templates' : `${activeFilter} templates`}>
+              {regularTemplates.map((template) => (
+                <TemplateCard template={template} key={template.id} onUseTemplate={handleUseTemplate} />
+              ))}
+            </TemplateSection>
+          ) : null}
+
+          {!hasResults ? <p className="empty-state">No templates match that search.</p> : null}
         </div>
 
         <div className="template-footer">
@@ -106,56 +133,73 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
   )
 }
 
+function TemplateSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="template-section" aria-label={title}>
+      <h3>{title}</h3>
+      <div className="template-grid">{children}</div>
+    </section>
+  )
+}
+
 function TemplateCard({
   template,
   onUseTemplate,
 }: {
   template: LifeAdminTemplate
-  onUseTemplate: (input: ReminderInput) => void
+  onUseTemplate: (template: LifeAdminTemplate) => void
 }) {
   const { Icon, tone } = getCategoryVisual(template.category)
+  const isComingSoon = template.targetType === 'comingSoon'
+  const badge = getTemplateBadge(template)
 
   return (
-    <article className={`template-card tone-${tone}`}>
+    <article className={`template-card tone-${tone} ${isComingSoon ? 'template-card-coming-soon' : ''}`}>
       <div className={`category-icon tone-${tone}`} aria-hidden="true">
         <Icon size={24} />
       </div>
 
       <div className="template-card-content">
         <h3>{template.title}</h3>
-        <span className="category-chip">{template.category}</span>
+        <div className="template-card-labels">
+          <span className="category-chip">{template.category}</span>
+          <span className={isComingSoon ? 'coming-soon-template-badge' : 'smart-template-badge'}>{badge}</span>
+        </div>
         <p>{template.description}</p>
         <div className="template-meta">
-          <span>{template.recommendedRepeat}</span>
-          <span>{template.recommendedPriority}</span>
-          {template.smartBadge ? <span className="smart-template-badge">{template.smartBadge}</span> : null}
-          {template.suggestedReminderTiming ? <span>{formatTemplateReminderTiming(template)}</span> : null}
+          {isComingSoon ? <span>{template.comingSoonLabel ?? 'Future phase'}</span> : <span>{template.recommendedRepeat}</span>}
+          {!isComingSoon && template.defaultReminderTiming ? <span>{formatTemplateReminderTiming(template)}</span> : null}
         </div>
       </div>
 
-      <button type="button" className="template-use-button" onClick={() => onUseTemplate(toInput(template))}>
-        <Plus size={20} aria-hidden="true" />
-        <span className="sr-only">Use {template.title} template</span>
+      <button
+        type="button"
+        className="template-use-button"
+        disabled={isComingSoon}
+        onClick={() => onUseTemplate(template)}
+        aria-label={isComingSoon ? `${template.title} coming soon` : `Use ${template.title} template`}
+      >
+        {isComingSoon ? <span aria-hidden="true">Soon</span> : <Plus size={20} aria-hidden="true" />}
       </button>
     </article>
   )
 }
 
 function toInput(template: LifeAdminTemplate): ReminderInput {
-  if (template.smartType === 'birthday') {
+  if (template.targetType === 'birthday') {
     return createBirthdayReminderInput({
       title: template.title,
       category: template.category,
       priority: template.recommendedPriority,
       notes: template.suggestedNotes,
-      reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? 1,
-      reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? 'weeks',
-      reminder_time: template.suggestedReminderTiming?.reminder_time ?? '09:00',
+      reminder_lead_value: template.defaultReminderTiming?.reminder_lead_value ?? 1,
+      reminder_lead_unit: template.defaultReminderTiming?.reminder_lead_unit ?? 'weeks',
+      reminder_time: template.defaultReminderTiming?.reminder_time ?? '09:00',
     })
   }
 
-  if (template.smartType === 'renewal') {
-    const displayKind = template.renewalKind ?? 'renewal'
+  if (template.targetType === 'renewal') {
+    const displayKind = template.targetKind ?? 'renewal'
     const renewalDetails = withRenewalDisplayKind({
       item_name: template.renewalItemName ?? getTemplateRenewalItemName(template.title),
       renewal_kind: getBackendRenewalKind(displayKind),
@@ -174,12 +218,13 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
       repeat: template.recommendedRepeat,
       priority: template.recommendedPriority,
       notes: template.suggestedNotes,
-      reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? 1,
-      reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? 'months',
-      reminder_time: template.suggestedReminderTiming?.reminder_time ?? '09:00',
+      reminder_lead_value: template.defaultReminderTiming?.reminder_lead_value ?? 1,
+      reminder_lead_unit: template.defaultReminderTiming?.reminder_lead_unit ?? 'months',
+      reminder_time: template.defaultReminderTiming?.reminder_time ?? '09:00',
       renewal_details: renewalDetails,
     })
   }
+
   return buildReminderInputWithDefaultTiming({
     title: template.title,
     category: template.category,
@@ -187,11 +232,12 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
     repeat: template.recommendedRepeat,
     priority: template.recommendedPriority,
     notes: template.suggestedNotes,
-    reminder_lead_value: template.suggestedReminderTiming?.reminder_lead_value ?? null,
-    reminder_lead_unit: template.suggestedReminderTiming?.reminder_lead_unit ?? null,
-    reminder_time: template.suggestedReminderTiming?.reminder_time ?? null,
-    reminder_type: template.smartType ?? 'generic',
+    reminder_lead_value: template.defaultReminderTiming?.reminder_lead_value ?? null,
+    reminder_lead_unit: template.defaultReminderTiming?.reminder_lead_unit ?? null,
+    reminder_time: template.defaultReminderTiming?.reminder_time ?? null,
+    reminder_type: 'generic',
     birthday_details: null,
+    renewal_details: null,
   })
 }
 
@@ -203,16 +249,49 @@ function getTemplateRenewalItemName(title: string) {
     .replace(/\s+expiration$/i, '')
     .trim() || title
 }
+
+function getTemplateBadge(template: LifeAdminTemplate) {
+  if (template.smartBadge) {
+    return template.smartBadge
+  }
+
+  if (template.targetType === 'comingSoon') {
+    return 'Coming soon'
+  }
+
+  if (template.targetType === 'generic') {
+    return 'Generic'
+  }
+
+  return 'Smart'
+}
+
 function formatTemplateReminderTiming(template: LifeAdminTemplate) {
-  if (!template.suggestedReminderTiming) {
+  if (!template.defaultReminderTiming) {
     return ''
   }
 
   return formatReminderTiming({
-    reminder_lead_value: template.suggestedReminderTiming.reminder_lead_value,
-    reminder_lead_unit: template.suggestedReminderTiming.reminder_lead_unit,
-    reminder_time: template.suggestedReminderTiming.reminder_time ?? null,
+    reminder_lead_value: template.defaultReminderTiming.reminder_lead_value,
+    reminder_lead_unit: template.defaultReminderTiming.reminder_lead_unit,
+    reminder_time: template.defaultReminderTiming.reminder_time ?? null,
   })
+}
+
+function matchesFilter(template: LifeAdminTemplate, filter: TemplateFilter) {
+  if (filter === 'All') {
+    return true
+  }
+
+  if (filter === 'Smart') {
+    return template.targetType === 'birthday' || template.targetType === 'renewal'
+  }
+
+  if (filter === 'Coming soon') {
+    return template.targetType === 'comingSoon'
+  }
+
+  return template.filterGroups?.includes(filter) ?? false
 }
 
 function matchesQuery(template: LifeAdminTemplate, query: string) {
@@ -226,9 +305,12 @@ function matchesQuery(template: LifeAdminTemplate, query: string) {
     template.category,
     template.suggestedNotes,
     template.smartBadge,
+    template.targetType,
+    template.targetKind,
+    template.comingSoonLabel,
+    ...(template.filterGroups ?? []),
     ...(template.tags ?? []),
   ].join(' ')
 
   return searchable.toLowerCase().includes(query)
 }
-

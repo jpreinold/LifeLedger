@@ -69,11 +69,11 @@ Local development uses `AUTH_MODE=local` and `LOCAL_DEV_USER_ID=local-dev-user`,
 
 ## Life Admin Templates
 
-The frontend includes a Life Admin Templates modal for common reminders such as vehicle registration, annual checkups, HVAC filters, subscription reviews, birthdays, warranty expirations, and personal admin reviews.
+The frontend includes a Life Admin Templates modal for curated shortcuts into the add experience. Each template declares an explicit target type: `generic`, `birthday`, `renewal`, or `comingSoon`.
 
-Templates are TypeScript constants in the React app. Choosing **Browse templates** opens a searchable, category-filtered modal. Choosing **Use template** fills the existing reminder form with title, category, repeat, priority, safe notes, and suggested reminder timing when a template has one. The Birthday reminder template is marked as smart and opens birthday-specific fields for person, month/day, optional birth year, optional turning age, and relationship. The user still confirms before saving through the authenticated `POST /reminders` API.
+Choosing **Browse templates** opens searchable templates with recommended smart starters first. Generic templates prefill the normal reminder form. Smart birthday templates open the Birthday flow, and smart renewal templates open the Renewal flow with the correct renewal kind preselected, such as expiration, subscription, free trial, warranty, or document. Coming soon templates preview future areas without opening a form or storing data.
 
-Templates create user-scoped reminders. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates also avoid sensitive fields and should not store policy numbers, card numbers, SSNs, passwords, medical details, contact details, addresses, or uploaded documents.
+Templates create user-scoped reminders only after the user confirms the form. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates avoid sensitive fields and should not store policy numbers, account numbers, card numbers, SSNs, passwords, medical details, contact details, addresses, uploaded documents, or government ID numbers.
 
 ## Reminder Management
 

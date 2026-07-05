@@ -853,7 +853,8 @@ textarea:focus-visible {
 }
 
 .reminder-meta-row .smart-context-chip,
-.template-meta .smart-template-badge {
+.template-meta .smart-template-badge,
+.template-card-labels .smart-template-badge {
   color: #5b4bd8;
   background: #eef0ff;
 }
@@ -1465,10 +1466,20 @@ textarea:focus-visible {
   overflow-y: auto;
 }
 
+.template-section {
+  padding: 0 var(--space-5) var(--space-4);
+}
+
+.template-section > h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .template-grid {
   display: grid;
   gap: var(--space-3);
-  padding: 0 var(--space-5) var(--space-4);
 }
 
 .template-card {
@@ -1486,6 +1497,29 @@ textarea:focus-visible {
 
 .template-card-content {
   min-width: 0;
+}
+
+.template-card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.template-card-labels .smart-template-badge,
+.template-card-labels .coming-soon-template-badge {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  font-weight: 780;
+}
+
+.template-card-labels .coming-soon-template-badge {
+  color: var(--color-text-soft);
+  background: var(--color-surface-muted);
 }
 
 .template-card h3 {
@@ -1511,6 +1545,11 @@ textarea:focus-visible {
   margin-top: var(--space-2);
 }
 
+.template-card-coming-soon {
+  border-style: dashed;
+  background: rgba(248, 250, 252, 0.82);
+}
+
 .template-use-button {
   width: 38px;
   min-height: 38px;
@@ -1519,6 +1558,11 @@ textarea:focus-visible {
   color: #ffffff;
   background: var(--color-primary);
   box-shadow: var(--shadow-button);
+}
+
+.template-use-button span {
+  font-size: 0.64rem;
+  font-weight: 800;
 }
 
 .template-footer {
@@ -2298,4 +2342,3 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
 }
-
