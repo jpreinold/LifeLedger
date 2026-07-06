@@ -14,16 +14,19 @@ import {
   RefreshCcw,
   ShieldCheck,
   Settings,
+  X,
 } from 'lucide-react'
 
 import { remindersApi } from './api/remindersApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { AddTypeSelector } from './components/AddTypeSelector'
 import { AlertCenter } from './components/AlertCenter'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { Dashboard } from './components/Dashboard'
 import { EditReminderModal } from './components/EditReminderModal'
 import { HomeDashboard } from './components/HomeDashboard'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
+import { ReminderDetailDrawer } from './components/ReminderDetailDrawer'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
@@ -106,9 +109,12 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [alerts, setAlerts] = useState<ReminderAlert[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
+  const [viewingReminder, setViewingReminder] = useState<{ reminder: Reminder; fromAlert: boolean } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
   const [activePage, setActivePage] = useState<AppPage>('home')
   const [reminderStatusFilter, setReminderStatusFilter] = useState<ReminderStatusFilter>('active')
@@ -186,15 +192,30 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleDelete(id: string) {
+  function requestDelete(reminder: Reminder) {
+    setPendingDelete(reminder)
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) {
+      return
+    }
+
+    setIsDeleting(true)
     setError(null)
     setNotice(null)
 
     try {
-      await remindersApi.remove(id)
+      await remindersApi.remove(pendingDelete.id)
       await loadReminderData()
+      setNotice('Reminder deleted.')
+      setEditingReminder((current) => (current?.id === pendingDelete.id ? null : current))
+      setViewingReminder((current) => (current?.reminder.id === pendingDelete.id ? null : current))
+      setPendingDelete(null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to delete reminder.')
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -226,6 +247,18 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function openAlertReminder(reminder: Reminder) {
     setIsAlertCenterOpen(false)
+    setViewingReminder(null)
+    setEditingReminder(reminder)
+  }
+
+  function openAlertDetail(reminder: Reminder) {
+    setIsAlertCenterOpen(false)
+    setEditingReminder(null)
+    setViewingReminder({ reminder, fromAlert: true })
+  }
+
+  function openDetailEdit(reminder: Reminder) {
+    setViewingReminder(null)
     setEditingReminder(reminder)
   }
   function openAddReminder() {
@@ -341,6 +374,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         <div className="alert" role="alert">
           <AlertCircle size={18} aria-hidden="true" />
           <span>{error}</span>
+          <button type="button" className="message-dismiss-button" onClick={() => setError(null)} aria-label="Dismiss message">
+            <X size={16} aria-hidden="true" />
+          </button>
         </div>
       ) : null}
 
@@ -348,6 +384,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         <div className="notice" role="status">
           <CheckCircle2 size={18} aria-hidden="true" />
           <span>{notice}</span>
+          <button type="button" className="message-dismiss-button" onClick={() => setNotice(null)} aria-label="Dismiss message">
+            <X size={16} aria-hidden="true" />
+          </button>
         </div>
       ) : null}
 
@@ -385,7 +424,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
               onTypeFilterChange={setReminderTypeFilter}
               onComplete={handleComplete}
               onEdit={setEditingReminder}
-              onDelete={handleDelete}
+              onDelete={requestDelete}
               onBrowseTemplates={openTemplates}
               onAddReminder={openAddReminder}
             />
@@ -461,16 +500,47 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onDismiss={handleDismissAlert}
         onEdit={openAlertReminder}
         onSnooze={handleSnoozeAlert}
+        onView={openAlertDetail}
       />
+      {viewingReminder ? (
+        <ReminderDetailDrawer
+          reminder={viewingReminder.reminder}
+          isAlertEligible={viewingReminder.fromAlert || alerts.some((alert) => alert.id === viewingReminder.reminder.id)}
+          onClose={() => setViewingReminder(null)}
+          onComplete={async (id) => {
+            await handleComplete(id)
+            setViewingReminder(null)
+          }}
+          onDismiss={async (id) => {
+            await handleDismissAlert(id)
+            setViewingReminder(null)
+          }}
+          onEdit={openDetailEdit}
+          onRequestDelete={requestDelete}
+          onSnooze={async (id) => {
+            await handleSnoozeAlert(id)
+            setViewingReminder(null)
+          }}
+        />
+      ) : null}
       {editingReminder ? (
         <EditReminderModal
           reminder={editingReminder}
           isSaving={isSaving}
           onCancel={() => setEditingReminder(null)}
-          onDelete={handleDelete}
+          onDelete={requestDelete}
           onSave={handleUpdate}
         />
       ) : null}
+      <ConfirmDialog
+        body={getDeleteConfirmationBody(pendingDelete)}
+        confirmLabel="Delete reminder"
+        isBusy={isDeleting}
+        isOpen={pendingDelete !== null}
+        title="Delete reminder?"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDelete()}
+      />
     </main>
   )
 }
@@ -557,6 +627,16 @@ function getTomorrowMorningIso() {
   tomorrow.setHours(9, 0, 0, 0)
   return tomorrow.toISOString()
 }
+function getDeleteConfirmationBody(reminder: Reminder | null) {
+  const name = reminder?.title.trim()
+
+  if (name) {
+    return `Delete ${name}? This cannot be undone.`
+  }
+
+  return 'Are you sure you want to delete this reminder? This cannot be undone.'
+}
+
 function getPageTitle(page: AppPage) {
   const titles: Record<AppPage, string> = {
     home: 'LifeLedger',

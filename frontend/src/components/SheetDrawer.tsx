@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import SwipeableDrawer from '@mui/material/SwipeableDrawer'
+import Drawer from '@mui/material/Drawer'
 
 interface SheetDrawerProps {
   children: ReactNode
@@ -11,15 +11,14 @@ interface SheetDrawerProps {
 
 export function SheetDrawer({ children, className, isOpen, labelledBy, onClose }: SheetDrawerProps) {
   return (
-    <SwipeableDrawer
+    <Drawer
       anchor="bottom"
       open={isOpen}
       onClose={onClose}
-      onOpen={() => undefined}
       aria-labelledby={labelledBy}
-      disableDiscovery
-      disableSwipeToOpen
-      keepMounted
+      ModalProps={{
+        keepMounted: true,
+      }}
       slotProps={{
         backdrop: {
           className: 'sheet-backdrop',
@@ -32,6 +31,6 @@ export function SheetDrawer({ children, className, isOpen, labelledBy, onClose }
       }}
     >
       {children}
-    </SwipeableDrawer>
+    </Drawer>
   )
 }

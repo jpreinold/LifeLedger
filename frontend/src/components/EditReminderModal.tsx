@@ -15,7 +15,7 @@ interface EditReminderModalProps {
   reminder: Reminder
   isSaving: boolean
   onCancel: () => void
-  onDelete: (id: string) => Promise<void>
+  onDelete: (reminder: Reminder) => void
   onSave: (id: string, input: ReminderInput) => Promise<boolean>
 }
 
@@ -63,11 +63,6 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
     }
   }
 
-  async function handleDelete() {
-    await onDelete(reminder.id)
-    requestCancel()
-  }
-
   return (
     <SheetDrawer className="edit-dialog" isOpen={isDrawerOpen} labelledBy="edit-reminder-heading" onClose={requestCancel}>
         <div className="sheet-header">
@@ -94,7 +89,7 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
               <Save size={18} aria-hidden="true" />
               {isSaving ? 'Saving' : 'Save changes'}
             </button>
-            <button type="button" className="text-danger-button" onClick={() => void handleDelete()}>
+            <button type="button" className="text-danger-button" onClick={() => onDelete(reminder)}>
               <Trash2 size={16} aria-hidden="true" />
               Delete reminder
             </button>

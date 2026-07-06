@@ -14,7 +14,7 @@ interface ReminderCardProps {
   reminder: Reminder
   onComplete: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
-  onDelete: (id: string) => Promise<void>
+  onDelete: (reminder: Reminder) => void
 }
 
 const statusClassNames: Record<Reminder['status'], string> = {
@@ -116,7 +116,7 @@ export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: Reminde
           <Pencil size={17} aria-hidden="true" />
           Edit
         </button>
-        <button type="button" className="action-button delete-button" onClick={() => void onDelete(reminder.id)}>
+        <button type="button" className="action-button delete-button" onClick={() => onDelete(reminder)}>
           <Trash2 size={17} aria-hidden="true" />
           Delete
         </button>

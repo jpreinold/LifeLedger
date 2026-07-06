@@ -21,7 +21,7 @@ interface ReminderListProps {
   onTypeFilterChange: (filter: ReminderTypeFilter) => void
   onComplete: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
-  onDelete: (id: string) => Promise<void>
+  onDelete: (reminder: Reminder) => void
   onBrowseTemplates: () => void
   onAddReminder: () => void
 }

@@ -16,6 +16,7 @@ interface AlertCenterProps {
   onDismiss: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
   onSnooze: (id: string) => Promise<void>
+  onView: (reminder: Reminder) => void
 }
 
 export function AlertCenter({
@@ -27,6 +28,7 @@ export function AlertCenter({
   onDismiss,
   onEdit,
   onSnooze,
+  onView,
 }: AlertCenterProps) {
   const attentionItems = alerts.map(toAttentionReminder)
 
@@ -62,6 +64,7 @@ export function AlertCenter({
                 onDismiss={onDismiss}
                 onEdit={onEdit}
                 onSnooze={onSnooze}
+                onView={onView}
               />
             ))}
           </div>
@@ -77,12 +80,14 @@ function AlertItem({
   onDismiss,
   onEdit,
   onSnooze,
+  onView,
 }: {
   item: AttentionReminder
   onComplete: (id: string) => Promise<void>
   onDismiss: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
   onSnooze: (id: string) => Promise<void>
+  onView: (reminder: Reminder) => void
 }) {
   const { reminder } = item
   const { Icon, tone } = getCategoryVisual(reminder.category)
@@ -90,7 +95,7 @@ function AlertItem({
 
   return (
     <article className={`alert-center-item tone-${tone}`}>
-      <div className="alert-center-main">
+      <button type="button" className="alert-center-main alert-center-main-button" onClick={() => onView(reminder)}>
         <div className={`alert-center-icon tone-${tone}`} aria-hidden="true">
           <Icon size={21} />
         </div>
@@ -105,7 +110,7 @@ function AlertItem({
             {getReminderTypeLabel(reminder.reminder_type)} {'\u2022'} {reminder.category}
           </small>
         </div>
-      </div>
+      </button>
 
       <div className="alert-center-actions">
         <button type="button" className="secondary-button alert-action-secondary" onClick={() => onEdit(reminder)}>
