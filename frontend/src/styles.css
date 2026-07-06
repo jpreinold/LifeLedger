@@ -2476,7 +2476,9 @@ textarea:focus-visible {
   }
 }
 .alerts-dialog {
+  height: auto !important;
   max-height: min(84vh, 720px) !important;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .alerts-header {
@@ -2484,9 +2486,7 @@ textarea:focus-visible {
 }
 
 .alerts-body {
-  display: grid;
-  gap: var(--space-3);
-  min-height: 220px;
+  min-height: 0;
   max-height: calc(84vh - 92px);
   overflow-y: auto;
   padding: 0 var(--space-5) var(--space-5);
@@ -2494,11 +2494,13 @@ textarea:focus-visible {
 
 .alerts-list {
   display: grid;
+  align-content: start;
   gap: var(--space-3);
 }
 
 .alert-center-item {
   display: grid;
+  align-self: start;
   gap: var(--space-3);
   padding: var(--space-3);
   border: 1px solid var(--color-border);
@@ -2579,19 +2581,25 @@ textarea:focus-visible {
 .alert-center-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(36px, auto);
   gap: var(--space-2);
 }
 
 .alert-action-primary,
 .alert-action-secondary {
+  height: 40px;
   min-height: 40px;
+  padding-inline: var(--space-3);
   font-size: 0.76rem;
 }
 
 .alert-action-chip {
   width: 100%;
+  height: 36px;
   min-height: 36px;
+  padding-inline: var(--space-2);
   font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 .alerts-empty-state {
