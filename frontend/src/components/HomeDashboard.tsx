@@ -134,7 +134,7 @@ export function HomeDashboard({
           <>
             <div className="home-list">
               {visibleAttentionItems.map((item) => (
-                <AttentionRow item={item} key={item.reminder.id} onClick={() => onViewReminder(item.reminder)} />
+                <AttentionRow item={item} key={item.reminder.id} onClick={onViewAlerts} />
               ))}
             </div>
             {attentionItems.length > maxAttentionItems ? (

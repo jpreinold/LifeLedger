@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock3, Pencil, X } from 'lucide-react'
+import { CheckCircle2, Clock3, Eye, X } from 'lucide-react'
 
 import { formatReminderDueLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
 import { toAttentionReminder, type AttentionReminder } from '../lib/reminderSchedule'
@@ -114,8 +114,8 @@ function AlertItem({
 
       <div className="alert-center-actions">
         <button type="button" className="secondary-button alert-action-secondary" onClick={() => onEdit(reminder)}>
-          <Pencil size={16} aria-hidden="true" />
-          Open/Edit
+          <Eye size={16} aria-hidden="true" />
+          View
         </button>
         <button type="button" className="primary-button alert-action-primary" onClick={() => void onComplete(reminder.id)}>
           <CheckCircle2 size={16} aria-hidden="true" />

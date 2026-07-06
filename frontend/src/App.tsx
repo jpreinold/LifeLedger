@@ -245,12 +245,6 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  function openAlertReminder(reminder: Reminder) {
-    setIsAlertCenterOpen(false)
-    setViewingReminder(null)
-    setEditingReminder(reminder)
-  }
-
   function openAlertDetail(reminder: Reminder) {
     setIsAlertCenterOpen(false)
     setEditingReminder(null)
@@ -504,7 +498,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onClose={() => setIsAlertCenterOpen(false)}
         onComplete={handleComplete}
         onDismiss={handleDismissAlert}
-        onEdit={openAlertReminder}
+        onEdit={openAlertDetail}
         onSnooze={handleSnoozeAlert}
         onView={openAlertDetail}
       />
