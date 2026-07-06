@@ -52,6 +52,7 @@ export function ReminderDetailDrawer({
 }: ReminderDetailDrawerProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
+  const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = getSmartReminderLabel(reminder)
@@ -59,10 +60,15 @@ export function ReminderDetailDrawer({
   const typeRows = getTypeSpecificRows(reminder)
   const note = getNotes(reminder)
   const heroLabel = smartLabel ?? formatReminderDueLabel(reminder)
+  const resetDetailScroll = useCallback(() => {
+    detailBodyRef.current?.scrollTo({ top: 0 })
+  }, [])
 
   useEffect(() => {
     setIsDrawerOpen(false)
+    resetDetailScroll()
     openFrameRef.current = window.requestAnimationFrame(() => {
+      resetDetailScroll()
       setIsDrawerOpen(true)
       openFrameRef.current = null
     })
@@ -72,7 +78,30 @@ export function ReminderDetailDrawer({
         window.cancelAnimationFrame(openFrameRef.current)
       }
     }
-  }, [reminder.id])
+  }, [reminder.id, resetDetailScroll])
+
+  useEffect(() => {
+    if (!isDrawerOpen) {
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      resetDetailScroll()
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [isDrawerOpen, reminder.id, resetDetailScroll])
+
+  useEffect(() => {
+    if (!isDrawerOpen || !detailBodyRef.current) {
+      return
+    }
+
+    const observer = new ResizeObserver(() => resetDetailScroll())
+    observer.observe(detailBodyRef.current)
+
+    return () => observer.disconnect()
+  }, [isDrawerOpen, resetDetailScroll])
 
   useEffect(() => {
     return () => {
@@ -125,7 +154,7 @@ export function ReminderDetailDrawer({
         </button>
       </div>
 
-      <div className="detail-body">
+      <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
         <section className={`detail-hero tone-${tone}`} aria-labelledby="detail-title">
           <div className={`category-icon category-icon-large tone-${tone}`} aria-hidden="true">
             <Icon size={30} />
@@ -173,38 +202,38 @@ export function ReminderDetailDrawer({
             <p className="detail-note">{note}</p>
           </section>
         ) : null}
-
-        <section className="detail-actions" aria-label="Reminder actions">
-          <button type="button" className="secondary-button" onClick={handleEdit}>
-            <Pencil size={17} aria-hidden="true" />
-            Edit
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void handleComplete()}
-            disabled={reminder.completed}
-          >
-            <CheckCircle2 size={17} aria-hidden="true" />
-            {reminder.completed ? 'Completed' : 'Complete'}
-          </button>
-          {isAlertEligible ? (
-            <>
-              <button type="button" className="small-outline-button" onClick={() => void handleDismiss()}>
-                Dismiss for now
-              </button>
-              <button type="button" className="small-outline-button" onClick={() => void handleSnooze()}>
-                <Clock3 size={14} aria-hidden="true" />
-                Remind tomorrow
-              </button>
-            </>
-          ) : null}
-          <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(reminder)}>
-            <Trash2 size={16} aria-hidden="true" />
-            Delete
-          </button>
-        </section>
       </div>
+
+      <section className="detail-actions" aria-label="Reminder actions">
+        <button type="button" className="secondary-button" onClick={handleEdit}>
+          <Pencil size={17} aria-hidden="true" />
+          Edit
+        </button>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => void handleComplete()}
+          disabled={reminder.completed}
+        >
+          <CheckCircle2 size={17} aria-hidden="true" />
+          {reminder.completed ? 'Completed' : 'Complete'}
+        </button>
+        {isAlertEligible ? (
+          <>
+            <button type="button" className="small-outline-button" onClick={() => void handleDismiss()}>
+              Dismiss for now
+            </button>
+            <button type="button" className="small-outline-button" onClick={() => void handleSnooze()}>
+              <Clock3 size={14} aria-hidden="true" />
+              Remind tomorrow
+            </button>
+          </>
+        ) : null}
+        <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(reminder)}>
+          <Trash2 size={16} aria-hidden="true" />
+          Delete
+        </button>
+      </section>
     </SheetDrawer>
   )
 }
