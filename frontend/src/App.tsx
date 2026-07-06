@@ -261,6 +261,11 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setViewingReminder(null)
     setEditingReminder(reminder)
   }
+
+  function openReminderDetail(reminder: Reminder) {
+    setEditingReminder(null)
+    setViewingReminder({ reminder, fromAlert: false })
+  }
   function openAddReminder() {
     setIsTemplateModalOpen(false)
     setIsReminderFormOpen(false)
@@ -425,6 +430,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
               onComplete={handleComplete}
               onEdit={setEditingReminder}
               onDelete={requestDelete}
+              onView={openReminderDetail}
               onBrowseTemplates={openTemplates}
               onAddReminder={openAddReminder}
             />
@@ -507,20 +513,11 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           reminder={viewingReminder.reminder}
           isAlertEligible={viewingReminder.fromAlert || alerts.some((alert) => alert.id === viewingReminder.reminder.id)}
           onClose={() => setViewingReminder(null)}
-          onComplete={async (id) => {
-            await handleComplete(id)
-            setViewingReminder(null)
-          }}
-          onDismiss={async (id) => {
-            await handleDismissAlert(id)
-            setViewingReminder(null)
-          }}
+          onComplete={handleComplete}
+          onDismiss={handleDismissAlert}
           onEdit={openDetailEdit}
           onRequestDelete={requestDelete}
-          onSnooze={async (id) => {
-            await handleSnoozeAlert(id)
-            setViewingReminder(null)
-          }}
+          onSnooze={handleSnoozeAlert}
         />
       ) : null}
       {editingReminder ? (

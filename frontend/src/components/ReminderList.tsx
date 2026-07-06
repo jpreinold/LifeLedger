@@ -22,6 +22,7 @@ interface ReminderListProps {
   onComplete: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
   onDelete: (reminder: Reminder) => void
+  onView: (reminder: Reminder) => void
   onBrowseTemplates: () => void
   onAddReminder: () => void
 }
@@ -36,6 +37,7 @@ export function ReminderList({
   onComplete,
   onEdit,
   onDelete,
+  onView,
   onBrowseTemplates,
   onAddReminder,
 }: ReminderListProps) {
@@ -118,6 +120,7 @@ export function ReminderList({
             onComplete={onComplete}
             onEdit={onEdit}
             onDelete={onDelete}
+            onView={onView}
           />
         ))}
       </div>

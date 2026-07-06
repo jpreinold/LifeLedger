@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Cake, CheckCircle2, Clock3, Pencil, RefreshCcw, Trash2, Wrench, X } from 'lucide-react'
 
 import { getMaintenanceAreaLabel, getMaintenanceDueDate } from '../lib/maintenanceUx'
@@ -20,6 +21,8 @@ import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { Reminder } from '../types/reminder'
 import { getCategoryVisual } from './categoryVisuals'
 import { SheetDrawer } from './SheetDrawer'
+
+const drawerCloseMs = 220
 
 interface ReminderDetailDrawerProps {
   reminder: Reminder
@@ -47,20 +50,77 @@ export function ReminderDetailDrawer({
   onRequestDelete,
   onSnooze,
 }: ReminderDetailDrawerProps) {
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
+  const openFrameRef = useRef<number | null>(null)
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = getSmartReminderLabel(reminder)
   const TypeIcon = getTypeIcon(reminder.reminder_type)
   const typeRows = getTypeSpecificRows(reminder)
   const note = getNotes(reminder)
+  const heroLabel = smartLabel ?? formatReminderDueLabel(reminder)
+
+  useEffect(() => {
+    setIsDrawerOpen(false)
+    openFrameRef.current = window.requestAnimationFrame(() => {
+      setIsDrawerOpen(true)
+      openFrameRef.current = null
+    })
+
+    return () => {
+      if (openFrameRef.current !== null) {
+        window.cancelAnimationFrame(openFrameRef.current)
+      }
+    }
+  }, [reminder.id])
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current)
+      }
+    }
+  }, [])
+
+  const requestClose = useCallback(() => {
+    setIsDrawerOpen(false)
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      onClose()
+    }, drawerCloseMs)
+  }, [onClose])
+
+  function handleEdit() {
+    setIsDrawerOpen(false)
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      onEdit(reminder)
+    }, drawerCloseMs)
+  }
+
+  async function handleComplete() {
+    await onComplete(reminder.id)
+    requestClose()
+  }
+
+  async function handleDismiss() {
+    await onDismiss(reminder.id)
+    requestClose()
+  }
+
+  async function handleSnooze() {
+    await onSnooze(reminder.id)
+    requestClose()
+  }
 
   return (
-    <SheetDrawer className="detail-dialog" isOpen labelledBy="reminder-detail-heading" onClose={onClose}>
+    <SheetDrawer className="detail-dialog" isOpen={isDrawerOpen} labelledBy="reminder-detail-heading" onClose={requestClose}>
       <div className="sheet-header detail-header">
         <div>
           <h2 id="reminder-detail-heading">Reminder details</h2>
           <p>Review the reminder before taking action.</p>
         </div>
-        <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close reminder details">
+        <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close reminder details">
           <X size={19} aria-hidden="true" />
         </button>
       </div>
@@ -76,23 +136,21 @@ export function ReminderDetailDrawer({
               <span className="category-chip">{reminder.category}</span>
             </div>
             <h3 id="detail-title">{reminder.title}</h3>
-            {smartLabel ? (
-              <p className="detail-smart-label">
-                <TypeIcon size={15} aria-hidden="true" />
-                {smartLabel}
-              </p>
-            ) : (
-              <p>{formatReminderDueLabel(reminder)}</p>
-            )}
+            <p className="detail-smart-label">
+              <TypeIcon size={15} aria-hidden="true" />
+              {heroLabel}
+            </p>
+            <div className="detail-hero-meta" aria-label="Reminder summary">
+              <span className="detail-hero-pill">{formatReminderStatusLabel(reminder)}</span>
+              <span className="detail-hero-pill">{formatLongDate(reminder.due_date)}</span>
+              <span className="detail-hero-pill">{formatReminderTiming(reminder)}</span>
+            </div>
           </div>
         </section>
 
         <DetailSection
-          title="Details"
+          title={getDetailSectionTitle(reminder)}
           rows={[
-            { label: 'Title', value: reminder.title },
-            { label: 'Type', value: getReminderTypeLabel(reminder.reminder_type) },
-            { label: 'Category', value: reminder.category },
             { label: 'Priority', value: `${reminder.priority} priority` },
             ...typeRows,
           ]}
@@ -100,11 +158,12 @@ export function ReminderDetailDrawer({
 
         <DetailSection
           title="Schedule"
+          className="detail-schedule-section"
           rows={[
-            { label: 'Status', value: formatReminderStatusLabel(reminder) },
             { label: 'Due date', value: formatLongDate(reminder.due_date) },
             { label: 'Reminder timing', value: formatReminderTiming(reminder) },
             { label: 'Repeat', value: formatRepeatLabel(reminder.repeat) ?? 'Does not repeat' },
+            { label: 'Status', value: formatReminderStatusLabel(reminder) },
           ]}
         />
 
@@ -116,14 +175,14 @@ export function ReminderDetailDrawer({
         ) : null}
 
         <section className="detail-actions" aria-label="Reminder actions">
-          <button type="button" className="secondary-button" onClick={() => onEdit(reminder)}>
+          <button type="button" className="secondary-button" onClick={handleEdit}>
             <Pencil size={17} aria-hidden="true" />
             Edit
           </button>
           <button
             type="button"
             className="primary-button"
-            onClick={() => void onComplete(reminder.id)}
+            onClick={() => void handleComplete()}
             disabled={reminder.completed}
           >
             <CheckCircle2 size={17} aria-hidden="true" />
@@ -131,10 +190,10 @@ export function ReminderDetailDrawer({
           </button>
           {isAlertEligible ? (
             <>
-              <button type="button" className="small-outline-button" onClick={() => void onDismiss(reminder.id)}>
+              <button type="button" className="small-outline-button" onClick={() => void handleDismiss()}>
                 Dismiss for now
               </button>
-              <button type="button" className="small-outline-button" onClick={() => void onSnooze(reminder.id)}>
+              <button type="button" className="small-outline-button" onClick={() => void handleSnooze()}>
                 <Clock3 size={14} aria-hidden="true" />
                 Remind tomorrow
               </button>
@@ -150,7 +209,7 @@ export function ReminderDetailDrawer({
   )
 }
 
-function DetailSection({ rows, title }: { rows: DetailRow[]; title: string }) {
+function DetailSection({ className = '', rows, title }: { className?: string; rows: DetailRow[]; title: string }) {
   const visibleRows = rows.filter((row) => hasValue(row.value))
 
   if (visibleRows.length === 0) {
@@ -158,7 +217,7 @@ function DetailSection({ rows, title }: { rows: DetailRow[]; title: string }) {
   }
 
   return (
-    <section className="detail-section" aria-label={title}>
+    <section className={`detail-section ${className}`.trim()} aria-label={title}>
       <h3>{title}</h3>
       <dl className="detail-list">
         {visibleRows.map((row) => (
@@ -170,6 +229,22 @@ function DetailSection({ rows, title }: { rows: DetailRow[]; title: string }) {
       </dl>
     </section>
   )
+}
+
+function getDetailSectionTitle(reminder: Reminder) {
+  if (reminder.reminder_type === 'birthday') {
+    return 'Birthday details'
+  }
+
+  if (reminder.reminder_type === 'renewal') {
+    return 'Renewal details'
+  }
+
+  if (reminder.reminder_type === 'maintenance') {
+    return 'Maintenance details'
+  }
+
+  return 'Reminder details'
 }
 
 function getTypeSpecificRows(reminder: Reminder): DetailRow[] {
@@ -245,7 +320,11 @@ function getTypeIcon(type: Reminder['reminder_type']) {
     return RefreshCcw
   }
 
-  return Cake
+  if (type === 'birthday') {
+    return Cake
+  }
+
+  return Clock3
 }
 
 function formatBirthday(month: number, day: number) {

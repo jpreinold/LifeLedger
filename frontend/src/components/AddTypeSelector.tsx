@@ -134,13 +134,6 @@ export function AddTypeSelector({
       tone: 'orange',
       disabled: true,
     },
-    {
-      title: 'Document',
-      description: 'Coming soon',
-      icon: FileText,
-      tone: 'green',
-      disabled: true,
-    },
   ]
 
   return (
