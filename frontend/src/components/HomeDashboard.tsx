@@ -26,7 +26,7 @@ interface HomeDashboardProps {
   onViewReminders: () => void
   onViewAlerts: () => void
   onViewRecords: () => void
-  onEditReminder: (reminder: Reminder) => void
+  onViewReminder: (reminder: Reminder) => void
 }
 
 interface OverviewTileData {
@@ -51,7 +51,7 @@ export function HomeDashboard({
   onBrowseTemplates,
   onViewReminders,
   onViewAlerts,
-  onEditReminder,
+  onViewReminder,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter((reminder) => !reminder.completed)
   const genericReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'generic')
@@ -134,7 +134,7 @@ export function HomeDashboard({
           <>
             <div className="home-list">
               {visibleAttentionItems.map((item) => (
-                <AttentionRow item={item} key={item.reminder.id} onClick={() => onEditReminder(item.reminder)} />
+                <AttentionRow item={item} key={item.reminder.id} onClick={() => onViewReminder(item.reminder)} />
               ))}
             </div>
             {attentionItems.length > maxAttentionItems ? (
@@ -162,7 +162,7 @@ export function HomeDashboard({
           <>
             <div className="home-list">
               {upcomingItems.map((reminder) => (
-                <UpcomingRow reminder={reminder} key={reminder.id} onClick={() => onEditReminder(reminder)} />
+                <UpcomingRow reminder={reminder} key={reminder.id} onClick={() => onViewReminder(reminder)} />
               ))}
             </div>
             <button type="button" className="home-card-link" onClick={onViewReminders}>

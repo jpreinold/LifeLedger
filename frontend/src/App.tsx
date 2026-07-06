@@ -406,7 +406,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onViewReminders={() => showPage('reminders')}
           onViewAlerts={() => setIsAlertCenterOpen(true)}
           onViewRecords={() => showPage('records')}
-          onEditReminder={setEditingReminder}
+          onViewReminder={openReminderDetail}
         />
       ) : null}
 
