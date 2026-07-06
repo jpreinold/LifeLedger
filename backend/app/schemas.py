@@ -48,12 +48,28 @@ class ReminderType(str, Enum):
     GENERIC = "generic"
     BIRTHDAY = "birthday"
     RENEWAL = "renewal"
+    MAINTENANCE = "maintenance"
 
 
 class RenewalKind(str, Enum):
     RENEWAL = "renewal"
     EXPIRATION = "expiration"
     REVIEW = "review"
+
+
+class MaintenanceArea(str, Enum):
+    HOME = "home"
+    VEHICLE = "vehicle"
+    PET = "pet"
+    HEALTH = "health"
+    OTHER = "other"
+
+
+class MaintenanceIntervalUnit(str, Enum):
+    DAYS = "days"
+    WEEKS = "weeks"
+    MONTHS = "months"
+    YEARS = "years"
 
 
 class BirthdayDetails(BaseModel):
@@ -122,6 +138,47 @@ class RenewalDetails(BaseModel):
         return value
 
 
+class MaintenanceDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_name: str = Field(..., min_length=1, max_length=120)
+    maintenance_area: MaintenanceArea = MaintenanceArea.OTHER
+    last_completed_date: date | None = None
+    interval_value: int | None = Field(default=None, ge=1, le=365)
+    interval_unit: MaintenanceIntervalUnit | None = None
+    next_due_date: date | None = None
+    instructions: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("item_name", mode="before")
+    @classmethod
+    def normalize_item_name(cls, value: str) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("instructions", mode="before")
+    @classmethod
+    def normalize_instructions(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> "MaintenanceDetails":
+        has_interval = self.interval_value is not None and self.interval_unit is not None
+        has_partial_interval = (self.interval_value is None) != (self.interval_unit is None)
+        if has_partial_interval:
+            raise ValueError("Maintenance interval needs both a value and a unit")
+
+        if self.next_due_date is None and not (self.last_completed_date is not None and has_interval):
+            raise ValueError("Maintenance reminders need a next due date or a last completed date with an interval")
+
+        return self
+
+
 class ReminderBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     category: ReminderCategory
@@ -135,6 +192,7 @@ class ReminderBase(BaseModel):
     reminder_type: ReminderType = ReminderType.GENERIC
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
+    maintenance_details: MaintenanceDetails | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -173,17 +231,17 @@ class ReminderBase(BaseModel):
         if self.reminder_type == ReminderType.RENEWAL and self.renewal_details is None:
             raise ValueError("Renewal reminders require renewal details")
 
+        if self.reminder_type == ReminderType.MAINTENANCE and self.maintenance_details is None:
+            raise ValueError("Maintenance reminders require maintenance details")
+
         if self.reminder_type != ReminderType.BIRTHDAY and self.birthday_details is not None:
             raise ValueError("Only birthday reminders can include birthday details")
 
         if self.reminder_type != ReminderType.RENEWAL and self.renewal_details is not None:
             raise ValueError("Only renewal reminders can include renewal details")
 
-        if self.reminder_type == ReminderType.BIRTHDAY and self.renewal_details is not None:
-            raise ValueError("Birthday reminders cannot include renewal details")
-
-        if self.reminder_type == ReminderType.RENEWAL and self.birthday_details is not None:
-            raise ValueError("Renewal reminders cannot include birthday details")
+        if self.reminder_type != ReminderType.MAINTENANCE and self.maintenance_details is not None:
+            raise ValueError("Only maintenance reminders can include maintenance details")
 
         return self
 
@@ -205,6 +263,7 @@ class ReminderUpdate(BaseModel):
     reminder_type: ReminderType | None = None
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
+    maintenance_details: MaintenanceDetails | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -252,3 +311,4 @@ class ReminderResponse(ReminderBase):
     birthday_age_label: str | None = None
     renewal_status_label: str | None = None
     renewal_window_label: str | None = None
+    maintenance_status_label: str | None = None

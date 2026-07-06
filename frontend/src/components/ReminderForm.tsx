@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
-import { Bell, Cake, LayoutTemplate, Plus, RefreshCcw, X } from 'lucide-react'
+import { Bell, Cake, LayoutTemplate, Plus, RefreshCcw, Wrench, X } from 'lucide-react'
 
 import {
   type BirthdayDetailsInput,
+  type MaintenanceDetailsInput,
   type RenewalDetailsInput,
   priorityOptions,
   reminderCategories,
+  maintenanceIntervalUnits,
   reminderLeadUnits,
   repeatOptions,
   type ReminderInput,
 } from '../types/reminder'
-import { buildReminderSubmitInput, emptyBirthdayDetails, emptyRenewalDetails, isReminderReady } from '../lib/reminderInput'
+import { buildReminderSubmitInput, emptyBirthdayDetails, emptyMaintenanceDetails, emptyRenewalDetails, isReminderReady } from '../lib/reminderInput'
 import {
   getRenewalDateLabel,
   getRenewalDefaults,
@@ -27,6 +29,18 @@ import {
   withRenewalDisplayKind,
   type RenewalDisplayKind,
 } from '../lib/renewalUx'
+import {
+  getCalculatedMaintenanceDueDate,
+  getMaintenanceAreaCategory,
+  getMaintenanceDefaults,
+  getMaintenanceDueDate,
+  getMaintenancePreview,
+  getMaintenanceRepeat,
+  getMaintenanceTitle,
+  getMaintenanceValidationMessage,
+  isAutoMaintenanceTitle,
+  maintenanceAreaOptions,
+} from '../lib/maintenanceUx'
 import {
   DEFAULT_REMINDER_LEAD_UNIT,
   DEFAULT_REMINDER_LEAD_VALUE,
@@ -86,6 +100,7 @@ const initialForm: ReminderInput = {
   reminder_type: 'generic',
   birthday_details: null,
   renewal_details: null,
+  maintenance_details: null,
   ...defaultReminderTiming(),
 }
 
@@ -112,7 +127,7 @@ export function ReminderForm({
     }
 
     setForm((current) => {
-      const nextDueDate = templateDraft.input.due_date || (templateDraft.input.reminder_type === 'renewal'
+      const nextDueDate = templateDraft.input.due_date || ((templateDraft.input.reminder_type === 'renewal' || templateDraft.input.reminder_type === 'maintenance')
         ? ''
         : current.due_date || new Date().toISOString().slice(0, 10))
 
@@ -171,12 +186,15 @@ export function ReminderForm({
 export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
   const selectedReminderPreset = getReminderLeadPreset(form)
   const renewalDetails = form.renewal_details
+  const maintenanceDetails = form.maintenance_details
   const renewalDisplayKind = form.reminder_type === 'renewal'
     ? getRenewalDisplayKind(renewalDetails, { title: form.title, category: form.category })
     : null
   const titlePlaceholder = renewalDisplayKind && renewalDetails
     ? getRenewalTitle(renewalDetails.item_name, renewalDisplayKind)
-    : 'Renew car tag'
+    : form.reminder_type === 'maintenance' && maintenanceDetails
+      ? getMaintenanceTitle(maintenanceDetails.item_name)
+      : 'Renew car tag'
 
   function handleReminderPresetChange(preset: ReminderLeadPreset) {
     setForm((current) => {
@@ -198,9 +216,10 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
     <>
       {form.reminder_type === 'birthday' ? <BirthdayFields form={form} setForm={setForm} /> : null}
       {form.reminder_type === 'renewal' ? <RenewalFields form={form} setForm={setForm} /> : null}
+      {form.reminder_type === 'maintenance' ? <MaintenanceFields form={form} setForm={setForm} /> : null}
 
       <label>
-        <span>{form.reminder_type === 'renewal' ? 'Reminder title' : 'Title'}</span>
+        <span>{form.reminder_type === 'renewal' || form.reminder_type === 'maintenance' ? 'Reminder title' : 'Title'}</span>
         <input
           required
           maxLength={120}
@@ -227,7 +246,7 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
           </select>
         </label>
 
-        {form.reminder_type !== 'renewal' ? (
+        {form.reminder_type !== 'renewal' && form.reminder_type !== 'maintenance' ? (
           <label>
             <span>{getDueDateFieldLabel(form.reminder_type)}</span>
             <input
@@ -352,10 +371,191 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
           value={form.notes ?? ''}
           onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value || null }))}
           rows={4}
-          placeholder="Optional details"
+          placeholder={form.reminder_type === 'maintenance' ? 'Keep notes general. Do not store sensitive details.' : 'Optional details'}
         />
       </label>
     </>
+  )
+}
+
+function MaintenanceFields({ form, setForm }: ReminderFieldsProps) {
+  const details = form.maintenance_details ?? emptyMaintenanceDetails()
+  const preview = getMaintenancePreview({ ...form, maintenance_details: details })
+  const validationMessage = getMaintenanceValidationMessage({ ...form, maintenance_details: details })
+
+  function updateDetails(updates: Partial<MaintenanceDetailsInput>, options: { recalculateDueDate?: boolean } = {}) {
+    setForm((current) => {
+      const currentDetails = current.maintenance_details ?? emptyMaintenanceDetails()
+      const mergedDetails = { ...currentDetails, ...updates }
+      const calculatedDueDate = options.recalculateDueDate ? getCalculatedMaintenanceDueDate(mergedDetails) : ''
+      const nextDetails = {
+        ...mergedDetails,
+        next_due_date: calculatedDueDate || mergedDetails.next_due_date,
+      }
+      const nextDueDate = getMaintenanceDueDate(nextDetails, current.due_date)
+      const shouldRefreshTitle = updates.item_name !== undefined
+
+      return {
+        ...current,
+        title: shouldRefreshTitle && isAutoMaintenanceTitle(current.title, currentDetails.item_name)
+          ? getMaintenanceTitle(nextDetails.item_name)
+          : current.title,
+        category: getMaintenanceAreaCategory(nextDetails.maintenance_area),
+        due_date: nextDueDate,
+        repeat: getMaintenanceRepeat(nextDetails),
+        maintenance_details: nextDetails,
+      }
+    })
+  }
+
+  function handleAreaChange(value: string) {
+    const maintenanceArea = value as MaintenanceDetailsInput['maintenance_area']
+    const defaults = getMaintenanceDefaults(maintenanceArea)
+
+    setForm((current) => {
+      const currentDetails = current.maintenance_details ?? emptyMaintenanceDetails()
+      const nextDetails = {
+        ...currentDetails,
+        maintenance_area: maintenanceArea,
+        interval_value: defaults.interval_value,
+        interval_unit: defaults.interval_unit,
+      }
+      const calculatedDueDate = getCalculatedMaintenanceDueDate(nextDetails)
+      const nextWithDueDate = {
+        ...nextDetails,
+        next_due_date: calculatedDueDate || nextDetails.next_due_date,
+      }
+
+      return {
+        ...current,
+        category: defaults.category,
+        repeat: getMaintenanceRepeat(nextWithDueDate),
+        priority: defaults.priority,
+        reminder_lead_value: defaults.reminder_lead_value,
+        reminder_lead_unit: defaults.reminder_lead_unit,
+        reminder_time: defaults.reminder_time,
+        due_date: getMaintenanceDueDate(nextWithDueDate, current.due_date),
+        maintenance_details: nextWithDueDate,
+      }
+    })
+  }
+
+  function handleLastCompletedToday() {
+    updateDetails({ last_completed_date: new Date().toISOString().slice(0, 10) }, { recalculateDueDate: true })
+  }
+
+  return (
+    <section className="maintenance-details-section" aria-labelledby="maintenance-details-heading">
+      <div className="form-section-heading">
+        <Wrench size={16} aria-hidden="true" />
+        <span id="maintenance-details-heading">Maintenance setup</span>
+      </div>
+
+      <p className="maintenance-helper-text">
+        Add the interval and LifeLedger will calculate the next due date after each completion.
+      </p>
+
+      <div className="form-row">
+        <label>
+          <span>Item name</span>
+          <input
+            required
+            maxLength={120}
+            value={details.item_name}
+            onChange={(event) => updateDetails({ item_name: event.target.value })}
+            placeholder="Change HVAC filter"
+          />
+        </label>
+
+        <label>
+          <span>Maintenance area</span>
+          <select value={details.maintenance_area} onChange={(event) => handleAreaChange(event.target.value)}>
+            {maintenanceAreaOptions.map((option) => (
+              <option value={option.area} key={option.area}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="form-row">
+        <label>
+          <span>Every</span>
+          <input
+            required
+            type="number"
+            min="1"
+            max="365"
+            inputMode="numeric"
+            value={details.interval_value ?? ''}
+            onChange={(event) => updateDetails({ interval_value: toOptionalNumber(event.target.value) }, { recalculateDueDate: true })}
+          />
+        </label>
+
+        <label>
+          <span>Interval unit</span>
+          <select
+            value={details.interval_unit ?? 'months'}
+            onChange={(event) => updateDetails({ interval_unit: event.target.value as MaintenanceDetailsInput['interval_unit'] }, { recalculateDueDate: true })}
+          >
+            {maintenanceIntervalUnits.map((unit) => (
+              <option value={unit} key={unit}>
+                {unit}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="form-row">
+        <label>
+          <span>Last completed date (optional)</span>
+          <input
+            type="date"
+            value={details.last_completed_date ?? ''}
+            onChange={(event) => updateDetails({ last_completed_date: event.target.value || null }, { recalculateDueDate: true })}
+          />
+        </label>
+
+        <label>
+          <span>Next due date</span>
+          <input
+            required
+            type="date"
+            value={details.next_due_date ?? ''}
+            onChange={(event) => updateDetails({ next_due_date: event.target.value })}
+          />
+        </label>
+      </div>
+
+      <button type="button" className="small-outline-button maintenance-today-button" onClick={handleLastCompletedToday}>
+        Completed today
+      </button>
+
+      <label>
+        <span>Instructions (optional)</span>
+        <textarea
+          maxLength={1000}
+          value={details.instructions ?? ''}
+          onChange={(event) => updateDetails({ instructions: event.target.value || null })}
+          rows={3}
+          placeholder="General steps or supplies to check"
+        />
+      </label>
+
+      <p className="maintenance-safety-note">
+        Keep notes general. Do not store passwords, account numbers, or sensitive details.
+      </p>
+
+      {validationMessage ? <p className="field-error">{validationMessage}</p> : null}
+
+      <div className="maintenance-preview" aria-live="polite">
+        <strong>{preview.primary}</strong>
+        {preview.reminder ? <span>{preview.reminder}</span> : null}
+        {preview.card ? <small>{preview.card}</small> : null}
+      </div>
+    </section>
   )
 }
 
@@ -515,6 +715,10 @@ function getAddFormHeading(reminderType: ReminderInput['reminder_type']) {
     return 'Add Renewal'
   }
 
+  if (reminderType === 'maintenance') {
+    return 'Add Maintenance'
+  }
+
   return 'Add Reminder'
 }
 
@@ -525,6 +729,10 @@ function getAddFormDescription(reminderType: ReminderInput['reminder_type']) {
 
   if (reminderType === 'renewal') {
     return 'Set up the date LifeLedger should track.'
+  }
+
+  if (reminderType === 'maintenance') {
+    return 'Set up a repeating maintenance schedule.'
   }
 
   return 'Choose a template or start from a blank reminder.'

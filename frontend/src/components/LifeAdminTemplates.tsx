@@ -2,7 +2,12 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { LayoutTemplate, Plus, Search, X } from 'lucide-react'
 
 import { lifeAdminTemplates } from '../templates/lifeAdminTemplates'
-import { createBirthdayReminderInput, createRenewalReminderInput } from '../lib/reminderInput'
+import {
+  createBirthdayReminderInput,
+  createMaintenanceReminderInput,
+  createRenewalReminderInput,
+} from '../lib/reminderInput'
+import { getMaintenanceDefaults, getMaintenanceRepeat } from '../lib/maintenanceUx'
 import { getBackendRenewalKind, withRenewalDisplayKind } from '../lib/renewalUx'
 import { buildReminderInputWithDefaultTiming, formatReminderTiming } from '../lib/reminderSchedule'
 import type { ReminderInput } from '../types/reminder'
@@ -224,6 +229,31 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
       renewal_details: renewalDetails,
     })
   }
+  if (template.targetType === 'maintenance') {
+    const maintenanceArea = template.maintenanceArea ?? 'home'
+    const defaults = getMaintenanceDefaults(maintenanceArea)
+    const maintenanceDetails = {
+      item_name: template.maintenanceItemName ?? template.title,
+      maintenance_area: maintenanceArea,
+      last_completed_date: null,
+      interval_value: template.maintenanceIntervalValue ?? defaults.interval_value,
+      interval_unit: template.maintenanceIntervalUnit ?? defaults.interval_unit,
+      next_due_date: null,
+      instructions: template.maintenanceInstructions ?? null,
+    }
+
+    return createMaintenanceReminderInput({
+      title: template.title,
+      category: template.category,
+      repeat: getMaintenanceRepeat(maintenanceDetails),
+      priority: template.recommendedPriority,
+      notes: template.suggestedNotes,
+      reminder_lead_value: template.defaultReminderTiming?.reminder_lead_value ?? defaults.reminder_lead_value,
+      reminder_lead_unit: template.defaultReminderTiming?.reminder_lead_unit ?? defaults.reminder_lead_unit,
+      reminder_time: template.defaultReminderTiming?.reminder_time ?? defaults.reminder_time,
+      maintenance_details: maintenanceDetails,
+    })
+  }
 
   return buildReminderInputWithDefaultTiming({
     title: template.title,
@@ -238,6 +268,7 @@ function toInput(template: LifeAdminTemplate): ReminderInput {
     reminder_type: 'generic',
     birthday_details: null,
     renewal_details: null,
+    maintenance_details: null,
   })
 }
 
@@ -284,7 +315,7 @@ function matchesFilter(template: LifeAdminTemplate, filter: TemplateFilter) {
   }
 
   if (filter === 'Smart') {
-    return template.targetType === 'birthday' || template.targetType === 'renewal'
+    return template.targetType === 'birthday' || template.targetType === 'renewal' || template.targetType === 'maintenance'
   }
 
   if (filter === 'Coming soon') {

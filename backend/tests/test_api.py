@@ -8,7 +8,7 @@ from app.auth import UserContext, get_current_user
 from app.config import get_settings
 from app.main import app, get_repository
 from app.repository import LocalReminderRepository
-from app.schemas import BirthdayDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
+from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
 
 
 @pytest.fixture()
@@ -132,6 +132,7 @@ def test_create_and_fetch_reminder(client):
     assert created["reminder_type"] == "generic"
     assert created["birthday_details"] is None
     assert created["renewal_details"] is None
+    assert created["maintenance_details"] is None
     assert created["computed_label"] is None
     assert created["renewal_status_label"] is None
 
@@ -413,6 +414,122 @@ def test_renewal_reminders_remain_user_scoped(client):
     assert list_response.json() == []
     assert get_response.status_code == 404
 
+def test_create_maintenance_reminder_with_last_completed_calculates_next_due(client):
+    last_completed = date.today()
+    expected_due_date = last_completed + timedelta(weeks=12)
+
+    created = create_reminder(
+        client,
+        title="Change HVAC filter",
+        category="Home",
+        due_date=date.today().isoformat(),
+        repeat="None",
+        priority="Medium",
+        reminder_type="maintenance",
+        maintenance_details={
+            "item_name": "Change HVAC filter",
+            "maintenance_area": "home",
+            "last_completed_date": last_completed.isoformat(),
+            "interval_value": 12,
+            "interval_unit": "weeks",
+            "instructions": "Replace the filter and reset the reminder.",
+        },
+    )
+
+    assert created["reminder_type"] == "maintenance"
+    assert created["due_date"] == expected_due_date.isoformat()
+    assert created["next_due_date"] == expected_due_date.isoformat()
+    assert created["birthday_details"] is None
+    assert created["renewal_details"] is None
+    assert created["maintenance_details"]["item_name"] == "Change HVAC filter"
+    assert created["maintenance_details"]["next_due_date"] == expected_due_date.isoformat()
+    assert created["reminder_lead_value"] == 1
+    assert created["reminder_lead_unit"] == "weeks"
+    assert created["reminder_time"] == "09:00"
+    assert created["maintenance_status_label"] is not None
+    assert created["computed_label"] is not None
+
+
+def test_create_maintenance_reminder_with_explicit_next_due_date_works(client):
+    next_due_date = date.today() + timedelta(days=58)
+
+    created = create_reminder(
+        client,
+        title="Clean dryer vent",
+        category="Home",
+        due_date=date.today().isoformat(),
+        reminder_type="maintenance",
+        maintenance_details={
+            "item_name": "Clean dryer vent",
+            "maintenance_area": "home",
+            "interval_value": 1,
+            "interval_unit": "years",
+            "next_due_date": next_due_date.isoformat(),
+        },
+    )
+
+    assert created["due_date"] == next_due_date.isoformat()
+    assert created["maintenance_details"]["next_due_date"] == next_due_date.isoformat()
+    assert created["repeat"] == "Yearly"
+
+
+def test_complete_maintenance_reminder_advances_next_due_date(client):
+    next_due_date = date.today() - timedelta(days=1)
+    created = create_reminder(
+        client,
+        title="Test smoke detectors",
+        category="Home",
+        due_date=next_due_date.isoformat(),
+        repeat="None",
+        priority="Medium",
+        reminder_type="maintenance",
+        maintenance_details={
+            "item_name": "Test smoke detectors",
+            "maintenance_area": "home",
+            "last_completed_date": (date.today() - timedelta(days=190)).isoformat(),
+            "interval_value": 6,
+            "interval_unit": "months",
+            "next_due_date": next_due_date.isoformat(),
+        },
+    )
+
+    complete_response = client.post(f"/reminders/{created['id']}/complete")
+    body = complete_response.json()
+    completed_on = date.fromisoformat(body["maintenance_details"]["last_completed_date"])
+
+    assert complete_response.status_code == 200
+    assert body["completed"] is False
+    assert body["completed_at"] is not None
+    assert date.fromisoformat(body["due_date"]) > completed_on
+    assert body["due_date"] == body["maintenance_details"]["next_due_date"]
+    assert body["maintenance_details"]["last_completed_date"] == completed_on.isoformat()
+
+
+def test_maintenance_reminders_remain_user_scoped(client):
+    set_auth_user("user-a")
+    created = create_reminder(
+        client,
+        title="Pet heartworm medicine",
+        category="Family",
+        due_date=date.today().isoformat(),
+        reminder_type="maintenance",
+        maintenance_details={
+            "item_name": "Pet heartworm medicine",
+            "maintenance_area": "pet",
+            "last_completed_date": date.today().isoformat(),
+            "interval_value": 1,
+            "interval_unit": "months",
+        },
+    )
+
+    set_auth_user("user-b")
+
+    list_response = client.get("/reminders")
+    get_response = client.get(f"/reminders/{created['id']}")
+
+    assert list_response.status_code == 200
+    assert list_response.json() == []
+    assert get_response.status_code == 404
 
 def test_authenticated_user_can_crud_own_reminders(client):
     set_auth_user("user-a")
@@ -581,6 +698,37 @@ def test_local_json_repository_persists_renewal_reminders(tmp_path):
     assert loaded.renewal_details.item_name == "Passport"
     assert loaded.renewal_details.expiration_date == due_date
 
+def test_local_json_repository_persists_maintenance_reminders(tmp_path):
+    data_file = tmp_path / "reminders.json"
+    first_repo = LocalReminderRepository(data_file)
+    due_date = date.today() + timedelta(days=10)
+    created = create_reminder_model(due_date).model_copy(
+        update={
+            "title": "Change HVAC filter",
+            "category": ReminderCategory.HOME,
+            "due_date": due_date,
+            "repeat": RepeatOption.QUARTERLY,
+            "reminder_type": ReminderType.MAINTENANCE,
+            "maintenance_details": MaintenanceDetails(
+                item_name="Change HVAC filter",
+                maintenance_area="home",
+                last_completed_date=date.today(),
+                interval_value=3,
+                interval_unit="months",
+                next_due_date=due_date,
+            ),
+        }
+    )
+
+    first_repo.create_reminder(created)
+    second_repo = LocalReminderRepository(data_file)
+    loaded = second_repo.get_reminder("local-dev-user", created.id)
+
+    assert loaded is not None
+    assert loaded.reminder_type == ReminderType.MAINTENANCE
+    assert loaded.maintenance_details is not None
+    assert loaded.maintenance_details.item_name == "Change HVAC filter"
+    assert loaded.maintenance_details.next_due_date == due_date
 
 def test_local_json_repository_loads_legacy_reminders_without_timing_fields(tmp_path):
     data_file = tmp_path / "reminders.json"
@@ -618,6 +766,7 @@ def test_local_json_repository_loads_legacy_reminders_without_timing_fields(tmp_
     assert loaded.reminder_type == ReminderType.GENERIC
     assert loaded.birthday_details is None
     assert loaded.renewal_details is None
+    assert loaded.maintenance_details is None
 
 
 def test_complete_non_recurring_reminder(client):

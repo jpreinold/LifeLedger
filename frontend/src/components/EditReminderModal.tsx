@@ -109,6 +109,10 @@ function getEditHeading(reminderType: ReminderInput['reminder_type']) {
     return 'Edit Renewal'
   }
 
+  if (reminderType === 'maintenance') {
+    return 'Edit Maintenance'
+  }
+
   if (reminderType === 'birthday') {
     return 'Edit Birthday'
   }
@@ -119,6 +123,10 @@ function getEditHeading(reminderType: ReminderInput['reminder_type']) {
 function getEditDescription(reminderType: ReminderInput['reminder_type']) {
   if (reminderType === 'renewal') {
     return 'Update the tracked date, kind, and reminder timing.'
+  }
+
+  if (reminderType === 'maintenance') {
+    return 'Update the maintenance schedule, next due date, and reminder timing.'
   }
 
   if (reminderType === 'birthday') {
@@ -161,6 +169,17 @@ function toReminderInput(reminder: Reminder): ReminderInput {
           renewal_window_days: reminder.renewal_details.renewal_window_days,
           review_lead_days: reminder.renewal_details.review_lead_days,
           frequency: reminder.renewal_details.frequency,
+        }
+      : null,
+    maintenance_details: reminder.maintenance_details
+      ? {
+          item_name: reminder.maintenance_details.item_name,
+          maintenance_area: reminder.maintenance_details.maintenance_area,
+          last_completed_date: reminder.maintenance_details.last_completed_date,
+          interval_value: reminder.maintenance_details.interval_value,
+          interval_unit: reminder.maintenance_details.interval_unit,
+          next_due_date: reminder.maintenance_details.next_due_date,
+          instructions: reminder.maintenance_details.instructions,
         }
       : null,
   })
