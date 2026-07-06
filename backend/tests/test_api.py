@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 from app.alerts import get_alert_eligibility
 from app.auth import UserContext, get_current_user
 from app.config import get_settings
-from app.main import app, get_repository
+from app.main import app, get_preferences_repository, get_repository
+from app.preferences_repository import LocalPreferencesRepository
 from app.repository import LocalReminderRepository
 from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
 
@@ -15,7 +16,9 @@ from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, R
 @pytest.fixture()
 def client(tmp_path):
     repo = LocalReminderRepository(tmp_path / "reminders.json")
+    preferences_repo = LocalPreferencesRepository(tmp_path / "preferences.json")
     app.dependency_overrides[get_repository] = lambda: repo
+    app.dependency_overrides[get_preferences_repository] = lambda: preferences_repo
 
     with TestClient(app) as test_client:
         yield test_client
@@ -69,7 +72,9 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
     ("method", "path", "json_body"),
     [
         ("get", "/alerts", None),
+        ("get", "/preferences/digest", None),
         ("get", "/reminders", None),
+        ("put", "/preferences/digest", {"digest_enabled": False}),
         ("post", "/reminders", make_payload()),
         ("get", "/reminders/example-id", None),
         ("put", "/reminders/example-id", {"title": "Updated"}),
@@ -127,6 +132,87 @@ def test_cors_preflight_allows_cloudflare_frontend(client, origin):
     assert response.headers["access-control-allow-origin"] == origin
     assert "GET" in response.headers["access-control-allow-methods"]
     assert "Authorization" in response.headers["access-control-allow-headers"]
+
+
+def test_get_digest_preferences_returns_defaults_for_new_user(client):
+    response = client.get("/preferences/digest")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["digest_enabled"] is True
+    assert body["digest_time"] == "09:00"
+    assert body["digest_lookahead_days"] == 30
+    assert body["timezone"] is None
+    assert body["digest_last_seen_at"] is None
+    assert "updated_at" in body
+    assert "user_id" not in body
+
+
+def test_update_digest_preferences_merges_with_defaults(client):
+    response = client.put(
+        "/preferences/digest",
+        json={
+            "digest_enabled": False,
+            "digest_time": "08:30",
+            "digest_lookahead_days": 14,
+            "timezone": "America/New_York",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["digest_enabled"] is False
+    assert body["digest_time"] == "08:30"
+    assert body["digest_lookahead_days"] == 14
+    assert body["timezone"] == "America/New_York"
+    assert "user_id" not in body
+
+    follow_up = client.put("/preferences/digest", json={"digest_enabled": True})
+    assert follow_up.status_code == 200
+    assert follow_up.json()["digest_enabled"] is True
+    assert follow_up.json()["digest_time"] == "08:30"
+    assert follow_up.json()["digest_lookahead_days"] == 14
+
+
+def test_digest_preferences_are_user_scoped(client):
+    set_auth_user("user-a")
+    response = client.put("/preferences/digest", json={"digest_enabled": False, "digest_time": "07:15"})
+    assert response.status_code == 200
+
+    set_auth_user("user-b")
+    other_user_response = client.get("/preferences/digest")
+    assert other_user_response.status_code == 200
+    assert other_user_response.json()["digest_enabled"] is True
+    assert other_user_response.json()["digest_time"] == "09:00"
+
+    set_auth_user("user-a")
+    original_user_response = client.get("/preferences/digest")
+    assert original_user_response.status_code == 200
+    assert original_user_response.json()["digest_enabled"] is False
+    assert original_user_response.json()["digest_time"] == "07:15"
+
+
+def test_update_digest_preferences_records_last_seen(client):
+    seen_at = datetime.now(timezone.utc).isoformat()
+
+    response = client.put("/preferences/digest", json={"digest_last_seen_at": seen_at})
+
+    assert response.status_code == 200
+    assert response.json()["digest_last_seen_at"].startswith(seen_at[:19])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"digest_time": "25:00"},
+        {"digest_time": "9am"},
+        {"digest_lookahead_days": 10},
+    ],
+)
+def test_update_digest_preferences_validates_schedule_fields(client, payload):
+    response = client.put("/preferences/digest", json=payload)
+
+    assert response.status_code == 422
 
 
 def test_create_and_fetch_reminder(client):

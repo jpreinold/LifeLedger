@@ -331,3 +331,61 @@ class ReminderAlertResponse(ReminderResponse):
 
 class AlertSnoozeRequest(BaseModel):
     snoozed_until: datetime | None = None
+
+
+class DigestPreferencesBase(BaseModel):
+    digest_enabled: bool = True
+    digest_time: str = Field(default="09:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    digest_lookahead_days: int = Field(default=30)
+    timezone: str | None = Field(default=None, max_length=120)
+    digest_last_seen_at: datetime | None = None
+
+    @field_validator("digest_lookahead_days")
+    @classmethod
+    def validate_lookahead(cls, value: int) -> int:
+        if value not in {7, 14, 30}:
+            raise ValueError("Digest lookahead must be 7, 14, or 30 days")
+
+        return value
+
+    @field_validator("timezone", mode="before")
+    @classmethod
+    def normalize_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class DigestPreferences(DigestPreferencesBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    updated_at: datetime
+
+
+class DigestPreferencesUpdate(BaseModel):
+    digest_enabled: bool | None = None
+    digest_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    digest_lookahead_days: int | None = None
+    timezone: str | None = Field(default=None, max_length=120)
+    digest_last_seen_at: datetime | None = None
+
+    @field_validator("digest_lookahead_days")
+    @classmethod
+    def validate_lookahead(cls, value: int | None) -> int | None:
+        if value is not None and value not in {7, 14, 30}:
+            raise ValueError("Digest lookahead must be 7, 14, or 30 days")
+
+        return value
+
+    @field_validator("timezone", mode="before")
+    @classmethod
+    def normalize_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value

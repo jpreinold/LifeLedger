@@ -1,4 +1,5 @@
 import {
+  CalendarDays,
   ChevronRight,
   FileText,
   Gift,
@@ -10,21 +11,26 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
+import { getDigestSummaryText, hasDigestItems, type DailyDigest } from '../lib/digest'
 import { formatReminderDueLabel, parseDateOnly, startOfDay } from '../lib/reminderDisplay'
 import { toAttentionReminder, type AttentionReminder } from '../lib/reminderSchedule'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
+import type { DigestPreferences } from '../types/preferences'
 import type { Reminder, ReminderAlert, ReminderType } from '../types/reminder'
 import { getCategoryVisual } from './categoryVisuals'
 
 interface HomeDashboardProps {
   reminders: Reminder[]
   alerts: ReminderAlert[]
+  digest: DailyDigest
+  digestPreferences: DigestPreferences
   isLoading: boolean
   userName?: string | null
   onAddReminder: () => void
   onBrowseTemplates: () => void
   onViewReminders: () => void
   onViewAlerts: () => void
+  onOpenDigest: () => void
   onViewRecords: () => void
   onViewReminder: (reminder: Reminder) => void
 }
@@ -45,12 +51,15 @@ const maxUpcomingItems = 4
 export function HomeDashboard({
   reminders,
   alerts,
+  digest,
+  digestPreferences,
   isLoading,
   userName,
   onAddReminder,
   onBrowseTemplates,
   onViewReminders,
   onViewAlerts,
+  onOpenDigest,
   onViewReminder,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter((reminder) => !reminder.completed)
@@ -108,6 +117,23 @@ export function HomeDashboard({
         </div>
         <button type="button" className="home-hero-link" onClick={onViewAlerts} aria-label="View alerts">
           <ChevronRight size={21} aria-hidden="true" />
+        </button>
+      </section>
+
+      <section className="home-digest-card" aria-labelledby="daily-digest-card-heading">
+        <div className="home-digest-icon" aria-hidden="true">
+          <CalendarDays size={24} />
+        </div>
+        <div className="home-digest-copy">
+          <div className="home-card-header home-digest-header">
+            <h2 id="daily-digest-card-heading">Daily Digest</h2>
+            <span className="digest-seen-badge">{getDigestSeenLabel(digestPreferences.digest_last_seen_at)}</span>
+          </div>
+          <p>{getDigestCardSummary(digest, digestPreferences.digest_enabled)}</p>
+          <small>{getDigestCardSubcopy(digest, digestPreferences)}</small>
+        </div>
+        <button type="button" className="primary-button home-digest-button" onClick={onOpenDigest}>
+          View digest
         </button>
       </section>
 
@@ -296,6 +322,39 @@ function formatAttentionSummary(count: number) {
   return `${count} ${count === 1 ? 'item needs' : 'items need'} attention today.`
 }
 
+function getDigestCardSummary(digest: DailyDigest, isEnabled: boolean) {
+  if (!isEnabled) {
+    return 'Daily Digest is paused.'
+  }
+
+  return hasDigestItems(digest) ? getDigestSummaryText(digest) : "You're all caught up today."
+}
+
+function getDigestCardSubcopy(digest: DailyDigest, preferences: DigestPreferences) {
+  if (!preferences.digest_enabled) {
+    return 'Turn it back on in Settings when you want the daily briefing.'
+  }
+
+  if (digest.totals.comingUp > 0) {
+    return `Looking ahead ${preferences.digest_lookahead_days} days.`
+  }
+
+  return 'No reminders need attention today.'
+}
+
+function getDigestSeenLabel(lastSeenAt: string | null) {
+  if (!lastSeenAt) {
+    return 'Not viewed today'
+  }
+
+  const lastSeenDate = new Date(lastSeenAt)
+  if (Number.isNaN(lastSeenDate.getTime())) {
+    return 'Not viewed today'
+  }
+
+  return sameCalendarDate(lastSeenDate, new Date()) ? 'Viewed today' : 'Not viewed today'
+}
+
 function formatOverviewSublabel(count: number, label: string) {
   return count === 0 ? 'All clear' : `${count} ${label}`
 }
@@ -346,4 +405,12 @@ function addDays(value: Date, days: number) {
   const next = new Date(value)
   next.setDate(next.getDate() + days)
   return startOfDay(next)
+}
+
+function sameCalendarDate(left: Date, right: Date) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  )
 }

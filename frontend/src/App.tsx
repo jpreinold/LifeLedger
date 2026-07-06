@@ -18,10 +18,12 @@ import {
 } from 'lucide-react'
 
 import { remindersApi } from './api/remindersApi'
+import { preferencesApi } from './api/preferencesApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { AddTypeSelector } from './components/AddTypeSelector'
 import { AlertCenter } from './components/AlertCenter'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { DailyDigestDrawer } from './components/DailyDigestDrawer'
 import { Dashboard } from './components/Dashboard'
 import { EditReminderModal } from './components/EditReminderModal'
 import { HomeDashboard } from './components/HomeDashboard'
@@ -30,8 +32,17 @@ import { ReminderDetailDrawer } from './components/ReminderDetailDrawer'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
+import { buildDailyDigest } from './lib/digest'
 import { formatCompletionNotice, type ReminderStatusFilter, type ReminderTypeFilter } from './lib/reminderDisplay'
 import { createBirthdayReminderInput, createMaintenanceReminderInput, createRenewalReminderInput } from './lib/reminderInput'
+import {
+  defaultDigestPreferences,
+  digestLookaheadOptions,
+  getBrowserTimeZone,
+  type DigestLookaheadDays,
+  type DigestPreferences,
+  type DigestPreferencesUpdate,
+} from './types/preferences'
 import type { Reminder, ReminderAlert, ReminderInput } from './types/reminder'
 
 function App() {
@@ -107,8 +118,11 @@ type AppPage = 'home' | 'reminders' | 'records' | 'settings'
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [alerts, setAlerts] = useState<ReminderAlert[]>([])
+  const [digestPreferences, setDigestPreferences] = useState<DigestPreferences>(() => defaultDigestPreferences())
   const [isLoading, setIsLoading] = useState(true)
+  const [isDigestPreferencesLoading, setIsDigestPreferencesLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isSavingDigestPreferences, setIsSavingDigestPreferences] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -123,6 +137,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
   const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
   const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false)
+  const [isDigestOpen, setIsDigestOpen] = useState(false)
 
   async function loadReminderData() {
     setIsLoading(true)
@@ -139,9 +154,59 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
+  async function loadDigestPreferences() {
+    setIsDigestPreferencesLoading(true)
+
+    try {
+      const preferences = await preferencesApi.getDigest()
+      const browserTimeZone = getBrowserTimeZone()
+      setDigestPreferences({
+        ...preferences,
+        timezone: preferences.timezone ?? browserTimeZone,
+      })
+    } catch (requestError) {
+      setDigestPreferences(defaultDigestPreferences())
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load Daily Digest settings.')
+    } finally {
+      setIsDigestPreferencesLoading(false)
+    }
+  }
+
   useEffect(() => {
     void loadReminderData()
+    void loadDigestPreferences()
   }, [])
+
+  async function updateDigestPreferences(
+    input: DigestPreferencesUpdate,
+    options: { showNotice?: boolean } = {},
+  ) {
+    setIsSavingDigestPreferences(true)
+    setError(null)
+    if (options.showNotice) {
+      setNotice(null)
+    }
+
+    try {
+      const updated = await preferencesApi.updateDigest({
+        timezone: digestPreferences.timezone ?? getBrowserTimeZone(),
+        ...input,
+      })
+      setDigestPreferences({
+        ...updated,
+        timezone: updated.timezone ?? getBrowserTimeZone(),
+      })
+      if (options.showNotice) {
+        setNotice('Daily Digest settings saved.')
+      }
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to save Daily Digest settings.')
+      return false
+    } finally {
+      setIsSavingDigestPreferences(false)
+    }
+  }
 
   async function handleCreate(input: ReminderInput) {
     setIsSaving(true)
@@ -251,6 +316,23 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setViewingReminder({ reminder, fromAlert: true })
   }
 
+  function openDailyDigest() {
+    const seenAt = new Date().toISOString()
+    const timezone = getBrowserTimeZone()
+    setIsDigestOpen(true)
+    setDigestPreferences((current) => ({
+      ...current,
+      timezone: current.timezone ?? timezone,
+      digest_last_seen_at: seenAt,
+    }))
+    void updateDigestPreferences({ digest_last_seen_at: seenAt, timezone })
+  }
+
+  function openDigestReminderDetail(reminder: Reminder) {
+    setIsDigestOpen(false)
+    openReminderDetail(reminder)
+  }
+
   function openDetailEdit(reminder: Reminder) {
     setViewingReminder(null)
     setEditingReminder(reminder)
@@ -335,6 +417,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   const attentionCount = alerts.length
+  const dailyDigest = buildDailyDigest(reminders, alerts, { lookaheadDays: digestPreferences.digest_lookahead_days })
   const displayName = getUserDisplayName(userLabel)
   const pageTitle = getPageTitle(activePage)
 
@@ -393,12 +476,15 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         <HomeDashboard
           reminders={reminders}
           alerts={alerts}
+          digest={dailyDigest}
+          digestPreferences={digestPreferences}
           isLoading={isLoading}
           userName={displayName}
           onAddReminder={openAddReminder}
           onBrowseTemplates={openTemplates}
           onViewReminders={() => showPage('reminders')}
           onViewAlerts={() => setIsAlertCenterOpen(true)}
+          onOpenDigest={openDailyDigest}
           onViewRecords={() => showPage('records')}
           onViewReminder={openReminderDetail}
         />
@@ -442,7 +528,16 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       {activePage === 'records' ? <RecordsView /> : null}
 
-      {activePage === 'settings' ? <SettingsView userLabel={userLabel} onSignOut={onSignOut} /> : null}
+      {activePage === 'settings' ? (
+        <SettingsView
+          digestPreferences={digestPreferences}
+          isDigestPreferencesLoading={isDigestPreferencesLoading}
+          isSavingDigestPreferences={isSavingDigestPreferences}
+          userLabel={userLabel}
+          onSignOut={onSignOut}
+          onUpdateDigestPreferences={(input) => updateDigestPreferences(input, { showNotice: true })}
+        />
+      ) : null}
 
       <nav className="bottom-nav" aria-label="Primary actions">
         <button type="button" className={getNavClass('home')} onClick={() => showPage('home')} aria-current={activePage === 'home' ? 'page' : undefined}>
@@ -502,6 +597,15 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onSnooze={handleSnoozeAlert}
         onView={openAlertDetail}
       />
+      <DailyDigestDrawer
+        digest={dailyDigest}
+        isLoading={isLoading}
+        isOpen={isDigestOpen}
+        onClose={() => setIsDigestOpen(false)}
+        onComplete={handleComplete}
+        onDismiss={handleDismissAlert}
+        onViewReminder={openDigestReminderDetail}
+      />
       {viewingReminder ? (
         <ReminderDetailDrawer
           reminder={viewingReminder.reminder}
@@ -549,8 +653,23 @@ function RecordsView() {
   )
 }
 
-function SettingsView({ userLabel, onSignOut }: { userLabel?: string | null; onSignOut?: () => void }) {
+function SettingsView({
+  digestPreferences,
+  isDigestPreferencesLoading,
+  isSavingDigestPreferences,
+  userLabel,
+  onSignOut,
+  onUpdateDigestPreferences,
+}: {
+  digestPreferences: DigestPreferences
+  isDigestPreferencesLoading: boolean
+  isSavingDigestPreferences: boolean
+  userLabel?: string | null
+  onSignOut?: () => void
+  onUpdateDigestPreferences: (input: DigestPreferencesUpdate) => Promise<boolean>
+}) {
   const accountLabel = userLabel?.trim() || (isCognitoAuthEnabled ? 'Signed in' : 'Local development mode')
+  const controlsDisabled = isDigestPreferencesLoading || isSavingDigestPreferences
 
   return (
     <section className="settings-view" aria-labelledby="settings-heading">
@@ -579,6 +698,71 @@ function SettingsView({ userLabel, onSignOut }: { userLabel?: string | null; onS
             <strong>App updates appear through the refresh prompt when available.</strong>
           </div>
         </div>
+
+        <section className="settings-digest-card" aria-labelledby="settings-digest-heading">
+          <div className="settings-card-header settings-digest-header">
+            <div>
+              <h3 id="settings-digest-heading">Daily Digest</h3>
+              <p>Configure your in-app briefing. Push delivery is not enabled yet.</p>
+            </div>
+            <span className="settings-save-state">
+              {isDigestPreferencesLoading ? 'Loading' : isSavingDigestPreferences ? 'Saving' : 'Saved'}
+            </span>
+          </div>
+
+          <label className="settings-control-row">
+            <span>
+              <strong>Daily Digest enabled</strong>
+              <small>Controls the in-app digest and prepares future push scheduling.</small>
+            </span>
+            <input
+              checked={digestPreferences.digest_enabled}
+              disabled={controlsDisabled}
+              type="checkbox"
+              onChange={(event) => void onUpdateDigestPreferences({ digest_enabled: event.currentTarget.checked })}
+            />
+          </label>
+
+          <label className="settings-control-row">
+            <span>
+              <strong>Digest time</strong>
+              <small>Future notifications will use this local time.</small>
+            </span>
+            <input
+              disabled={controlsDisabled}
+              type="time"
+              value={digestPreferences.digest_time}
+              onChange={(event) => void onUpdateDigestPreferences({ digest_time: event.currentTarget.value })}
+            />
+          </label>
+
+          <label className="settings-control-row">
+            <span>
+              <strong>Lookahead window</strong>
+              <small>How far the digest looks for upcoming reminders.</small>
+            </span>
+            <select
+              disabled={controlsDisabled}
+              value={digestPreferences.digest_lookahead_days}
+              onChange={(event) =>
+                void onUpdateDigestPreferences({
+                  digest_lookahead_days: Number(event.currentTarget.value) as DigestLookaheadDays,
+                })
+              }
+            >
+              {digestLookaheadOptions.map((days) => (
+                <option key={days} value={days}>
+                  {days} days
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="settings-row settings-digest-timezone-row">
+            <span>Timezone</span>
+            <strong>{digestPreferences.timezone ?? getBrowserTimeZone() ?? 'Detected by browser'}</strong>
+          </div>
+        </section>
 
         {onSignOut ? (
           <button type="button" className="secondary-button settings-sign-out-button" onClick={onSignOut}>

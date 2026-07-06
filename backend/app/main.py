@@ -28,6 +28,8 @@ from app.maintenance import (
     prepare_maintenance_details,
 )
 from app.models import Reminder
+from app.preferences import default_digest_preferences
+from app.preferences_repository import PreferencesRepository
 from app.recurrence import advance_due_date, calculate_status, get_next_due_date
 from app.renewals import (
     advance_renewal_details,
@@ -37,9 +39,11 @@ from app.renewals import (
     get_renewal_window_label,
 )
 from app.repository import ReminderRepository
-from app.repository_factory import create_repository
+from app.repository_factory import create_preferences_repository, create_repository
 from app.schemas import (
     AlertSnoozeRequest,
+    DigestPreferences,
+    DigestPreferencesUpdate,
     MaintenanceDetails,
     ReminderCreate,
     ReminderAlertResponse,
@@ -63,10 +67,15 @@ app.add_middleware(
 )
 
 repository = create_repository()
+preferences_repository = create_preferences_repository()
 
 
 def get_repository() -> ReminderRepository:
     return repository
+
+
+def get_preferences_repository() -> PreferencesRepository:
+    return preferences_repository
 
 
 @app.get("/health")
@@ -98,6 +107,29 @@ def list_alerts(
             alert_reminders.append((reminder, eligibility))
 
     return [to_alert_response(reminder, eligibility) for reminder, eligibility in sort_alerts(alert_reminders)]
+
+
+@app.get("/preferences/digest", response_model=DigestPreferences)
+def get_digest_preferences(
+    current_user: UserContext = Depends(get_current_user),
+    repo: PreferencesRepository = Depends(get_preferences_repository),
+) -> DigestPreferences:
+    preferences = repo.get_preferences(current_user.user_id) or default_digest_preferences(current_user.user_id, utc_now())
+    return to_digest_preferences_response(preferences)
+
+
+@app.put("/preferences/digest", response_model=DigestPreferences)
+def update_digest_preferences(
+    payload: DigestPreferencesUpdate,
+    current_user: UserContext = Depends(get_current_user),
+    repo: PreferencesRepository = Depends(get_preferences_repository),
+) -> DigestPreferences:
+    now = utc_now()
+    current = repo.get_preferences(current_user.user_id) or default_digest_preferences(current_user.user_id, now)
+    updates = payload.model_dump(exclude_unset=True)
+    updated = current.model_copy(update={**updates, "updated_at": now})
+
+    return to_digest_preferences_response(repo.save_preferences(updated))
 
 
 @app.post("/reminders/{reminder_id}/alert/dismiss", response_model=ReminderResponse)
@@ -293,6 +325,10 @@ def to_alert_response(reminder: Reminder, eligibility) -> ReminderAlertResponse:
             "alert_reminder_start_date": eligibility.reminder_start_date,
         }
     )
+
+
+def to_digest_preferences_response(preferences) -> DigestPreferences:
+    return DigestPreferences.model_validate(preferences)
 
 
 def utc_now() -> datetime:

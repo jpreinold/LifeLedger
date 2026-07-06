@@ -54,3 +54,13 @@ class ReminderPatch(BaseModel):
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
     maintenance_details: MaintenanceDetails | None = None
+
+
+class UserPreferences(BaseModel):
+    user_id: str
+    digest_enabled: bool = True
+    digest_time: str = "09:00"
+    digest_lookahead_days: int = 30
+    timezone: str | None = None
+    digest_last_seen_at: datetime | None = None
+    updated_at: datetime

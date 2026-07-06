@@ -27,6 +27,9 @@ Parameters:
   RemindersTableName:
     Type: String
     Default: lifeledger-reminders-auth
+  PreferencesTableName:
+    Type: String
+    Default: lifeledger-preferences-auth
   CorsAllowedOrigins:
     Type: String
     Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
@@ -117,11 +120,15 @@ Resources:
           LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
+          PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
+          LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RemindersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PreferencesTable
       Events:
         Health:
           Type: HttpApi
@@ -164,6 +171,20 @@ Resources:
         - AttributeName: id
           KeyType: RANGE
 
+  PreferencesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref PreferencesTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+
 Outputs:
   ApiUrl:
     Description: HTTP API endpoint for the LifeLedger backend.
@@ -171,6 +192,9 @@ Outputs:
   RemindersTable:
     Description: DynamoDB reminders table name.
     Value: !Ref RemindersTable
+  PreferencesTable:
+    Description: DynamoDB user preferences table name.
+    Value: !Ref PreferencesTable
   UserPoolId:
     Description: Cognito User Pool ID.
     Value: !Ref LifeLedgerUserPool
