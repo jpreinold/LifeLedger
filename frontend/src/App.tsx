@@ -19,6 +19,7 @@ import {
 import { remindersApi } from './api/remindersApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { AddTypeSelector } from './components/AddTypeSelector'
+import { AlertCenter } from './components/AlertCenter'
 import { Dashboard } from './components/Dashboard'
 import { EditReminderModal } from './components/EditReminderModal'
 import { HomeDashboard } from './components/HomeDashboard'
@@ -26,10 +27,9 @@ import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
-import { formatCompletionNotice } from './lib/reminderDisplay'
+import { formatCompletionNotice, type ReminderStatusFilter, type ReminderTypeFilter } from './lib/reminderDisplay'
 import { createBirthdayReminderInput, createMaintenanceReminderInput, createRenewalReminderInput } from './lib/reminderInput'
-import { getNeedsAttention } from './lib/reminderSchedule'
-import type { Reminder, ReminderInput } from './types/reminder'
+import type { Reminder, ReminderAlert, ReminderInput } from './types/reminder'
 
 function App() {
   const {
@@ -103,6 +103,7 @@ type AppPage = 'home' | 'reminders' | 'records' | 'settings'
 
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
+  const [alerts, setAlerts] = useState<ReminderAlert[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -110,17 +111,21 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
   const [activePage, setActivePage] = useState<AppPage>('home')
+  const [reminderStatusFilter, setReminderStatusFilter] = useState<ReminderStatusFilter>('active')
+  const [reminderTypeFilter, setReminderTypeFilter] = useState<ReminderTypeFilter>('all')
   const [isReminderFormOpen, setIsReminderFormOpen] = useState(false)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
   const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
+  const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false)
 
-  async function loadReminders() {
+  async function loadReminderData() {
     setIsLoading(true)
     setError(null)
 
     try {
-      const data = await remindersApi.list()
-      setReminders(data)
+      const [reminderData, alertData] = await Promise.all([remindersApi.list(), remindersApi.alerts()])
+      setReminders(reminderData)
+      setAlerts(alertData)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load reminders.')
     } finally {
@@ -129,7 +134,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   useEffect(() => {
-    void loadReminders()
+    void loadReminderData()
   }, [])
 
   async function handleCreate(input: ReminderInput) {
@@ -139,7 +144,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       await remindersApi.create(input)
-      await loadReminders()
+      await loadReminderData()
       return true
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to create reminder.')
@@ -156,7 +161,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       const completedReminder = await remindersApi.complete(id)
-      await loadReminders()
+      await loadReminderData()
       setNotice(formatCompletionNotice(reminder, completedReminder))
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to complete reminder.')
@@ -170,7 +175,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       await remindersApi.update(id, input)
-      await loadReminders()
+      await loadReminderData()
       setNotice('Reminder updated.')
       return true
     } catch (requestError) {
@@ -187,12 +192,42 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       await remindersApi.remove(id)
-      await loadReminders()
+      await loadReminderData()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to delete reminder.')
     }
   }
 
+  async function handleDismissAlert(id: string) {
+    setError(null)
+    setNotice(null)
+
+    try {
+      await remindersApi.dismissAlert(id)
+      await loadReminderData()
+      setNotice('Alert dismissed for now.')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to dismiss alert.')
+    }
+  }
+
+  async function handleSnoozeAlert(id: string) {
+    setError(null)
+    setNotice(null)
+
+    try {
+      await remindersApi.snoozeAlert(id, getTomorrowMorningIso())
+      await loadReminderData()
+      setNotice('Reminder snoozed until tomorrow morning.')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to snooze alert.')
+    }
+  }
+
+  function openAlertReminder(reminder: Reminder) {
+    setIsAlertCenterOpen(false)
+    setEditingReminder(reminder)
+  }
   function openAddReminder() {
     setIsTemplateModalOpen(false)
     setIsReminderFormOpen(false)
@@ -267,7 +302,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     return activePage === page ? 'active' : undefined
   }
 
-  const attentionCount = getNeedsAttention(reminders).length
+  const attentionCount = alerts.length
   const displayName = getUserDisplayName(userLabel)
   const pageTitle = getPageTitle(activePage)
 
@@ -290,8 +325,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         <button
           type="button"
           className="icon-button header-notification-button"
-          onClick={() => showPage('reminders')}
-          aria-label="View reminders"
+          onClick={() => setIsAlertCenterOpen(true)}
+          aria-label="Open alerts"
         >
           <Bell size={19} aria-hidden="true" />
           {attentionCount > 0 ? (
@@ -319,11 +354,13 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       {activePage === 'home' ? (
         <HomeDashboard
           reminders={reminders}
+          alerts={alerts}
           isLoading={isLoading}
           userName={displayName}
           onAddReminder={openAddReminder}
           onBrowseTemplates={openTemplates}
           onViewReminders={() => showPage('reminders')}
+          onViewAlerts={() => setIsAlertCenterOpen(true)}
           onViewRecords={() => showPage('records')}
           onEditReminder={setEditingReminder}
         />
@@ -331,12 +368,21 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       {activePage === 'reminders' ? (
         <>
-          <Dashboard reminders={reminders} />
+          <Dashboard
+            reminders={reminders}
+            activeStatusFilter={reminderStatusFilter}
+            activeTypeFilter={reminderTypeFilter}
+            onStatusFilterChange={setReminderStatusFilter}
+          />
 
           <section className="workspace" id="reminders-section">
             <ReminderList
               reminders={reminders}
               isLoading={isLoading}
+              activeStatusFilter={reminderStatusFilter}
+              activeTypeFilter={reminderTypeFilter}
+              onStatusFilterChange={setReminderStatusFilter}
+              onTypeFilterChange={setReminderTypeFilter}
               onComplete={handleComplete}
               onEdit={setEditingReminder}
               onDelete={handleDelete}
@@ -406,6 +452,16 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onUseTemplate={handleUseTemplate}
       />
 
+      <AlertCenter
+        alerts={alerts}
+        isLoading={isLoading}
+        isOpen={isAlertCenterOpen}
+        onClose={() => setIsAlertCenterOpen(false)}
+        onComplete={handleComplete}
+        onDismiss={handleDismissAlert}
+        onEdit={openAlertReminder}
+        onSnooze={handleSnoozeAlert}
+      />
       {editingReminder ? (
         <EditReminderModal
           reminder={editingReminder}
@@ -495,6 +551,12 @@ function getUserDisplayName(value?: string | null) {
   return `${firstToken.charAt(0).toUpperCase()}${firstToken.slice(1)}`
 }
 
+function getTomorrowMorningIso() {
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  tomorrow.setHours(9, 0, 0, 0)
+  return tomorrow.toISOString()
+}
 function getPageTitle(page: AppPage) {
   const titles: Record<AppPage, string> = {
     home: 'LifeLedger',

@@ -25,6 +25,8 @@ export const reminderStatuses = [
 
 export const reminderTypes = ['generic', 'birthday', 'renewal', 'maintenance'] as const
 
+export const reminderAlertReasons = ['Overdue', 'Due today', 'Reminder window'] as const
+
 export const renewalKinds = ['renewal', 'expiration', 'review'] as const
 
 export const maintenanceAreas = ['home', 'vehicle', 'pet', 'health', 'other'] as const
@@ -37,6 +39,7 @@ export type PriorityOption = (typeof priorityOptions)[number]
 export type ReminderLeadUnit = (typeof reminderLeadUnits)[number]
 export type ReminderStatus = (typeof reminderStatuses)[number]
 export type ReminderType = (typeof reminderTypes)[number]
+export type ReminderAlertReason = (typeof reminderAlertReasons)[number]
 export type RenewalKind = (typeof renewalKinds)[number]
 export type MaintenanceArea = (typeof maintenanceAreas)[number]
 export type MaintenanceIntervalUnit = (typeof maintenanceIntervalUnits)[number]
@@ -119,6 +122,10 @@ export interface Reminder {
   renewal_details: RenewalDetails | null
   maintenance_details: MaintenanceDetails | null
   completed: boolean
+  alert_dismissed_until: string | null
+  alert_last_seen_at: string | null
+  alert_last_action_at: string | null
+  alert_snoozed_until: string | null
   status: ReminderStatus
   created_at: string
   updated_at: string
@@ -129,6 +136,11 @@ export interface Reminder {
   renewal_status_label: string | null
   renewal_window_label: string | null
   maintenance_status_label: string | null
+}
+
+export interface ReminderAlert extends Reminder {
+  alert_reason: ReminderAlertReason
+  alert_reminder_start_date: string | null
 }
 
 export interface ReminderInput {

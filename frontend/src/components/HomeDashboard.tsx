@@ -11,18 +11,20 @@ import {
 import type { LucideIcon } from 'lucide-react'
 
 import { formatReminderDueLabel, parseDateOnly, startOfDay } from '../lib/reminderDisplay'
-import { getNeedsAttention, type AttentionReminder } from '../lib/reminderSchedule'
+import { toAttentionReminder, type AttentionReminder } from '../lib/reminderSchedule'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
-import type { Reminder } from '../types/reminder'
+import type { Reminder, ReminderAlert, ReminderType } from '../types/reminder'
 import { getCategoryVisual } from './categoryVisuals'
 
 interface HomeDashboardProps {
   reminders: Reminder[]
+  alerts: ReminderAlert[]
   isLoading: boolean
   userName?: string | null
   onAddReminder: () => void
   onBrowseTemplates: () => void
   onViewReminders: () => void
+  onViewAlerts: () => void
   onViewRecords: () => void
   onEditReminder: (reminder: Reminder) => void
 }
@@ -42,11 +44,13 @@ const maxUpcomingItems = 4
 
 export function HomeDashboard({
   reminders,
+  alerts,
   isLoading,
   userName,
   onAddReminder,
   onBrowseTemplates,
   onViewReminders,
+  onViewAlerts,
   onEditReminder,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter((reminder) => !reminder.completed)
@@ -54,14 +58,14 @@ export function HomeDashboard({
   const birthdayReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'birthday')
   const renewalReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'renewal')
   const maintenanceReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'maintenance')
-  const attentionItems = getNeedsAttention(reminders)
+  const attentionItems = alerts.map(toAttentionReminder)
   const visibleAttentionItems = attentionItems.slice(0, maxAttentionItems)
   const upcomingItems = getUpcomingReminders(activeReminders).slice(0, maxUpcomingItems)
   const overviewTiles: OverviewTileData[] = [
     {
       label: 'Reminders',
       value: String(genericReminders.length),
-      sublabel: formatOverviewSublabel(getNeedsAttention(genericReminders).length, 'need attention'),
+      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'generic'), 'need attention'),
       icon: ListChecks,
       tone: 'blue',
       onClick: onViewReminders,
@@ -69,7 +73,7 @@ export function HomeDashboard({
     {
       label: 'Birthdays',
       value: String(birthdayReminders.length),
-      sublabel: formatOverviewSublabel(getNeedsAttention(birthdayReminders).length, 'coming up'),
+      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'birthday'), 'coming up'),
       icon: Gift,
       tone: 'purple',
       onClick: onViewReminders,
@@ -77,7 +81,7 @@ export function HomeDashboard({
     {
       label: 'Renewals',
       value: String(renewalReminders.length),
-      sublabel: formatOverviewSublabel(getNeedsAttention(renewalReminders).length, 'need attention'),
+      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'renewal'), 'need attention'),
       icon: RefreshCcw,
       tone: 'orange',
       onClick: onViewReminders,
@@ -85,7 +89,7 @@ export function HomeDashboard({
     {
       label: 'Maintenance',
       value: String(maintenanceReminders.length),
-      sublabel: formatOverviewSublabel(getNeedsAttention(maintenanceReminders).length, 'due'),
+      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'maintenance'), 'due'),
       icon: Wrench,
       tone: 'teal',
       onClick: onViewReminders,
@@ -102,7 +106,7 @@ export function HomeDashboard({
           <h2>{getGreeting(userName)}</h2>
           <p>{formatAttentionSummary(attentionItems.length)}</p>
         </div>
-        <button type="button" className="home-hero-link" onClick={onViewReminders} aria-label="View reminders">
+        <button type="button" className="home-hero-link" onClick={onViewAlerts} aria-label="View alerts">
           <ChevronRight size={21} aria-hidden="true" />
         </button>
       </section>
@@ -127,11 +131,18 @@ export function HomeDashboard({
         ) : null}
 
         {!isLoading && visibleAttentionItems.length > 0 ? (
-          <div className="home-list">
-            {visibleAttentionItems.map((item) => (
-              <AttentionRow item={item} key={item.reminder.id} onClick={() => onEditReminder(item.reminder)} />
-            ))}
-          </div>
+          <>
+            <div className="home-list">
+              {visibleAttentionItems.map((item) => (
+                <AttentionRow item={item} key={item.reminder.id} onClick={() => onEditReminder(item.reminder)} />
+              ))}
+            </div>
+            {attentionItems.length > maxAttentionItems ? (
+              <button type="button" className="home-card-link" onClick={onViewAlerts}>
+                View all
+              </button>
+            ) : null}
+          </>
         ) : null}
       </section>
 
@@ -176,6 +187,9 @@ export function HomeDashboard({
   )
 }
 
+function countAlertsByType(alerts: ReminderAlert[], type: ReminderType) {
+  return alerts.filter((alert) => alert.reminder_type === type).length
+}
 function QuickAction({
   label,
   icon: Icon,

@@ -1,11 +1,11 @@
-import type { Reminder, ReminderInput, ReminderLeadUnit } from '../types/reminder'
+import type { Reminder, ReminderAlert, ReminderAlertReason, ReminderInput, ReminderLeadUnit } from '../types/reminder'
 
 export const DEFAULT_REMINDER_LEAD_VALUE = 1
 export const DEFAULT_REMINDER_LEAD_UNIT: ReminderLeadUnit = 'days'
 export const DEFAULT_REMINDER_TIME = '09:00'
 
 export type ReminderLeadPreset = 'same-day' | 'one-day' | 'one-week' | 'one-month' | 'custom'
-export type AttentionReason = 'Overdue' | 'Due today' | 'Reminder window' | 'Due this week'
+export type AttentionReason = ReminderAlertReason
 
 export interface ReminderTimingFields {
   reminder_lead_value: number | null
@@ -25,6 +25,12 @@ interface ReminderLeadOption {
   label: string
   value: number
   unit: ReminderLeadUnit
+}
+
+const attentionRanks: Record<AttentionReason, number> = {
+  Overdue: 0,
+  'Due today': 1,
+  'Reminder window': 2,
 }
 
 export const reminderLeadOptions: ReminderLeadOption[] = [
@@ -109,32 +115,40 @@ export function formatReminderTiming(input: ReminderTimingFields) {
   return `${leadValue} ${unitLabel} before at ${time}`
 }
 
+export function toAttentionReminder(alert: ReminderAlert): AttentionReminder {
+  return {
+    reminder: alert,
+    reason: alert.alert_reason,
+    rank: attentionRanks[alert.alert_reason],
+    reminderDate: alert.alert_reminder_start_date,
+  }
+}
+
 export function getNeedsAttention(reminders: Reminder[], today = new Date()): AttentionReminder[] {
+  const currentTime = today
   const currentDay = startOfDay(today)
 
   return reminders
     .flatMap((reminder): AttentionReminder[] => {
-      if (reminder.completed) {
+      if (reminder.completed || isAlertMuted(reminder, currentTime)) {
         return []
       }
 
       const dueDate = parseDateOnly(reminder.due_date)
 
       if (reminder.status === 'Overdue' || dueDate < currentDay) {
-        return [{ reminder, reason: 'Overdue', rank: 0, reminderDate: null }]
+        return [{ reminder, reason: 'Overdue', rank: attentionRanks.Overdue, reminderDate: null }]
       }
 
       if (reminder.status === 'Due today' || sameDate(dueDate, currentDay)) {
-        return [{ reminder, reason: 'Due today', rank: 1, reminderDate: formatDateOnly(currentDay) }]
+        return [{ reminder, reason: 'Due today', rank: attentionRanks['Due today'], reminderDate: formatDateOnly(currentDay) }]
       }
 
-      const reminderDate = getReminderStartDate(reminder)
-      if (reminderDate <= currentDay && dueDate >= currentDay) {
-        return [{ reminder, reason: 'Reminder window', rank: 2, reminderDate: formatDateOnly(reminderDate) }]
-      }
-
-      if (reminder.status === 'Due this week' || daysBetween(currentDay, dueDate) <= 7) {
-        return [{ reminder, reason: 'Due this week', rank: 3, reminderDate: null }]
+      if (hasReminderTiming(reminder)) {
+        const reminderDate = getReminderStartDate(reminder)
+        if (reminderDate <= currentDay && dueDate >= currentDay) {
+          return [{ reminder, reason: 'Reminder window', rank: attentionRanks['Reminder window'], reminderDate: formatDateOnly(reminderDate) }]
+        }
       }
 
       return []
@@ -167,6 +181,23 @@ export function getReminderStartDate(input: ReminderTimingFields & { due_date: s
   }
 
   return addDays(dueDate, -(timing.reminder_lead_value ?? DEFAULT_REMINDER_LEAD_VALUE))
+}
+
+function hasReminderTiming(input: ReminderTimingFields) {
+  return input.reminder_lead_value !== null && input.reminder_lead_unit !== null
+}
+
+function isAlertMuted(reminder: Reminder, now: Date) {
+  return isFutureDateTime(reminder.alert_dismissed_until, now) || isFutureDateTime(reminder.alert_snoozed_until, now)
+}
+
+function isFutureDateTime(value: string | null, now: Date) {
+  if (!value) {
+    return false
+  }
+
+  const target = new Date(value)
+  return !Number.isNaN(target.getTime()) && target.getTime() > now.getTime()
 }
 
 function formatReminderTime(value: string) {
@@ -208,10 +239,6 @@ function addMonths(value: Date, months: number) {
     firstOfTargetMonth.getMonth(),
     Math.min(value.getDate(), lastDayOfTargetMonth),
   )
-}
-
-function daysBetween(start: Date, end: Date) {
-  return Math.ceil((end.getTime() - start.getTime()) / 86_400_000)
 }
 
 function sameDate(left: Date, right: Date) {

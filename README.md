@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. Birthday reminders can calculate age context, renewal reminders can explain renewal or expiration timing, and maintenance reminders can calculate and advance the next due date from a date-based interval. Templates route into the matching smart flow, and reminder cards, dashboard rows, and filters use the same smart reminder type language. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. This is not push notification, email, or SMS delivery yet. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -79,11 +79,13 @@ Templates create user-scoped reminders only after the user confirms the form. Th
 
 Reminders can be created, edited, completed, and deleted from the React app. Editing uses the authenticated `PUT /reminders/{id}` route and only sends user-editable reminder fields.
 
-Reminder records now store optional delivery preference fields: `reminder_lead_value`, `reminder_lead_unit`, and `reminder_time`. The UI defaults new reminders to 1 day before at 9:00 AM and supports same day, 1 day before, 1 week before, 1 month before, and a simple custom lead time. These fields prepare LifeLedger for future notification, calendar, and email integrations; this phase does not send notifications.
+Reminder records store optional delivery preference fields: `reminder_lead_value`, `reminder_lead_unit`, and `reminder_time`. The UI defaults new reminders to 1 day before at 9:00 AM and supports same day, 1 day before, 1 week before, 1 month before, and a simple custom lead time. These fields now feed the in-app alert eligibility window and prepare LifeLedger for future notification, calendar, and email integrations; this phase still does not send push notifications, email, or SMS.
 
 Reminder records also support `reminder_type`. Existing reminders default to `generic`; smart types are `birthday`, `renewal`, and `maintenance`. Birthday reminders may include `birthday_details`; they calculate the next birthday date, infer birth year when the user enters the age someone is turning, and show labels such as turning age or age unknown on cards and dashboard rows. Renewal reminders may include `renewal_details` for safe renewal, expiration, review, subscription, free trial, warranty, or document dates. Maintenance reminders may include `maintenance_details` with item name, maintenance area, last completed date, interval, next due date, and general instructions. Maintenance is date-based only; mileage-based and usage-based maintenance are not included yet.
 
-The reminder list defaults to active reminders and includes filters for overdue items, today, this week, this month, upcoming reminders, completed reminders, and smart reminder type: Reminders, Birthdays, Renewals, and Maintenance. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list. The dashboard surfaces smart labels in attention and upcoming rows, plus real counts for each smart reminder type.
+The bell opens an in-app Alert Center backed by `GET /alerts`. Alerts are reminders that are active, have a due date, are overdue, due today, or inside their configured reminder timing window, and are not currently dismissed or snoozed. The same alert set powers the bell badge and Home dashboard Needs attention section. Alert actions can complete, dismiss for now, snooze until tomorrow morning, or open the existing edit flow.
+
+The reminder list now uses the top status cards as filters: All active, Overdue, Due today, and Due this month. The smart type chips remain as the only chip row: All types, Reminders, Birthdays, Renewals, and Maintenance. Status cards and type chips combine, and empty states describe the active filter where possible.
 
 ## Creating The First Cognito User
 
@@ -160,6 +162,9 @@ Deployed frontend flow:
 - `PUT /reminders/{id}` requires authentication in Cognito mode.
 - `DELETE /reminders/{id}` requires authentication in Cognito mode.
 - `POST /reminders/{id}/complete` requires authentication in Cognito mode.
+- `GET /alerts` requires authentication in Cognito mode.
+- `POST /reminders/{id}/alert/dismiss` requires authentication in Cognito mode.
+- `POST /reminders/{id}/alert/snooze` requires authentication in Cognito mode.
 
 ## Backend Architecture
 
@@ -176,7 +181,7 @@ Deployed frontend flow:
 - Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
 - `backend/template.yaml` describes the SAM serverless deployment shape.
 
-Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences, smart birthday fields, smart renewal fields, and smart maintenance fields are stored on each reminder item without changing the DynamoDB key schema.
+Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences, smart birthday fields, smart renewal fields, smart maintenance fields, and alert state fields such as `alert_dismissed_until`, `alert_snoozed_until`, and `alert_last_action_at` are stored on each reminder item without changing the DynamoDB key schema.
 
 ## Environment Variables
 

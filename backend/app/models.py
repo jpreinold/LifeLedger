@@ -32,6 +32,10 @@ class Reminder(BaseModel):
     maintenance_details: MaintenanceDetails | None = None
     completed: bool = False
     created_at: datetime
+    alert_dismissed_until: datetime | None = None
+    alert_last_seen_at: datetime | None = None
+    alert_last_action_at: datetime | None = None
+    alert_snoozed_until: datetime | None = None
     updated_at: datetime
     completed_at: datetime | None = None
 

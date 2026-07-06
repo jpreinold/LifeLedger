@@ -44,6 +44,12 @@ class ReminderStatus(str, Enum):
     UPCOMING = "Upcoming"
 
 
+class ReminderAlertReason(str, Enum):
+    OVERDUE = "Overdue"
+    DUE_TODAY = "Due today"
+    REMINDER_WINDOW = "Reminder window"
+
+
 class ReminderType(str, Enum):
     GENERIC = "generic"
     BIRTHDAY = "birthday"
@@ -302,6 +308,10 @@ class ReminderResponse(ReminderBase):
 
     id: str
     completed: bool
+    alert_dismissed_until: datetime | None = None
+    alert_last_seen_at: datetime | None = None
+    alert_last_action_at: datetime | None = None
+    alert_snoozed_until: datetime | None = None
     status: ReminderStatus
     created_at: datetime
     updated_at: datetime
@@ -312,3 +322,12 @@ class ReminderResponse(ReminderBase):
     renewal_status_label: str | None = None
     renewal_window_label: str | None = None
     maintenance_status_label: str | None = None
+
+
+class ReminderAlertResponse(ReminderResponse):
+    alert_reason: ReminderAlertReason
+    alert_reminder_start_date: date | None = None
+
+
+class AlertSnoozeRequest(BaseModel):
+    snoozed_until: datetime | None = None

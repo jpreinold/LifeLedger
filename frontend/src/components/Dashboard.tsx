@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CalendarCheck,
   CalendarClock,
+  Check,
   CheckCircle2,
   Edit3,
   LayoutTemplate,
@@ -9,7 +10,13 @@ import {
   Plus,
 } from 'lucide-react'
 
-import { formatReminderDueLabel } from '../lib/reminderDisplay'
+import {
+  formatReminderDueLabel,
+  matchesReminderStatusFilter,
+  matchesReminderTypeFilter,
+  type ReminderStatusFilter,
+  type ReminderTypeFilter,
+} from '../lib/reminderDisplay'
 import { getNeedsAttention, type AttentionReminder } from '../lib/reminderSchedule'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { Reminder } from '../types/reminder'
@@ -22,6 +29,9 @@ interface DashboardProps {
   onEdit?: (reminder: Reminder) => void
   onAddReminder?: () => void
   onBrowseTemplates?: () => void
+  activeStatusFilter?: ReminderStatusFilter
+  activeTypeFilter?: ReminderTypeFilter
+  onStatusFilterChange?: (filter: ReminderStatusFilter) => void
 }
 
 export function Dashboard({
@@ -32,19 +42,40 @@ export function Dashboard({
   onEdit,
   onAddReminder,
   onBrowseTemplates,
+  activeStatusFilter = 'active',
+  activeTypeFilter = 'all',
+  onStatusFilterChange,
 }: DashboardProps) {
-  const activeCount = reminders.filter((reminder) => !reminder.completed).length
-  const overdueCount = reminders.filter((reminder) => reminder.status === 'Overdue').length
-  const dueTodayCount = reminders.filter((reminder) => reminder.status === 'Due today').length
-  const dueThisWeekCount = reminders.filter((reminder) =>
-    ['Due today', 'Due this week'].includes(reminder.status),
-  ).length
-
-  const stats = [
-    { label: 'All active', value: activeCount, icon: ListChecks, tone: 'blue' },
-    { label: 'Overdue', value: overdueCount, icon: AlertTriangle, tone: 'red' },
-    { label: 'Due today', value: dueTodayCount, icon: CalendarClock, tone: 'orange' },
-    { label: 'Due this week', value: dueThisWeekCount, icon: CalendarCheck, tone: 'green' },
+  const scopedReminders = reminders.filter((reminder) => matchesReminderTypeFilter(reminder, activeTypeFilter))
+  const stats: Array<{ id: ReminderStatusFilter; label: string; value: number; icon: typeof ListChecks; tone: string }> = [
+    {
+      id: 'active',
+      label: 'All active',
+      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'active')).length,
+      icon: ListChecks,
+      tone: 'blue',
+    },
+    {
+      id: 'overdue',
+      label: 'Overdue',
+      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'overdue')).length,
+      icon: AlertTriangle,
+      tone: 'red',
+    },
+    {
+      id: 'today',
+      label: 'Due today',
+      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'today')).length,
+      icon: CalendarClock,
+      tone: 'orange',
+    },
+    {
+      id: 'month',
+      label: 'Due this month',
+      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'month')).length,
+      icon: CalendarCheck,
+      tone: 'green',
+    },
   ]
   const attentionItems = getNeedsAttention(reminders).slice(0, 5)
 
@@ -54,12 +85,25 @@ export function Dashboard({
         {stats.map((stat) => {
           const Icon = stat.icon
 
+          const isSelected = activeStatusFilter === stat.id
+
           return (
-            <article className={`stat-item stat-item-${stat.tone}`} key={stat.label}>
+            <button
+              type="button"
+              className={`stat-item stat-item-${stat.tone} ${isSelected ? 'stat-item-selected' : ''}`}
+              key={stat.id}
+              onClick={() => onStatusFilterChange?.(stat.id)}
+              aria-pressed={isSelected}
+            >
+              {isSelected ? (
+                <span className="stat-selected-indicator" aria-hidden="true">
+                  <Check size={12} />
+                </span>
+              ) : null}
               <Icon size={20} aria-hidden="true" />
               <strong>{stat.value}</strong>
               <span>{stat.label}</span>
-            </article>
+            </button>
           )
         })}
       </section>

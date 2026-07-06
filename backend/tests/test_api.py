@@ -1,9 +1,10 @@
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.alerts import get_alert_eligibility
 from app.auth import UserContext, get_current_user
 from app.config import get_settings
 from app.main import app, get_repository
@@ -67,11 +68,14 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
 @pytest.mark.parametrize(
     ("method", "path", "json_body"),
     [
+        ("get", "/alerts", None),
         ("get", "/reminders", None),
         ("post", "/reminders", make_payload()),
         ("get", "/reminders/example-id", None),
         ("put", "/reminders/example-id", {"title": "Updated"}),
         ("delete", "/reminders/example-id", None),
+        ("post", "/reminders/example-id/alert/dismiss", None),
+        ("post", "/reminders/example-id/alert/snooze", None),
         ("post", "/reminders/example-id/complete", None),
     ],
 )
@@ -813,6 +817,212 @@ def test_status_logic(client, due_date, expected_status):
     assert created["status"] == expected_status
 
 
+
+def test_alerts_include_due_today_reminders(client):
+    created = create_reminder(client, title="Due today alert", due_date=date.today().isoformat())
+
+    response = client.get("/alerts")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert [item["id"] for item in body] == [created["id"]]
+    assert body[0]["alert_reason"] == "Due today"
+    assert body[0]["alert_reminder_start_date"] == date.today().isoformat()
+
+
+def test_alerts_include_overdue_reminders(client):
+    created = create_reminder(client, title="Overdue alert", due_date=(date.today() - timedelta(days=2)).isoformat())
+
+    response = client.get("/alerts")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert [item["id"] for item in body] == [created["id"]]
+    assert body[0]["alert_reason"] == "Overdue"
+
+
+def test_alerts_include_reminders_inside_timing_window(client):
+    due_date = date.today() + timedelta(days=7)
+    created = create_reminder(
+        client,
+        title="Timing window alert",
+        due_date=due_date.isoformat(),
+        reminder_lead_value=1,
+        reminder_lead_unit="weeks",
+        reminder_time="09:00",
+    )
+
+    response = client.get("/alerts")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert [item["id"] for item in body] == [created["id"]]
+    assert body[0]["alert_reason"] == "Reminder window"
+    assert body[0]["alert_reminder_start_date"] == date.today().isoformat()
+
+
+def test_dismissed_alerts_do_not_appear(client):
+    created = create_reminder(client, title="Dismiss me", due_date=date.today().isoformat())
+
+    dismiss_response = client.post(f"/reminders/{created['id']}/alert/dismiss")
+    alerts_response = client.get("/alerts")
+
+    assert dismiss_response.status_code == 200
+    assert dismiss_response.json()["alert_dismissed_until"] is not None
+    assert dismiss_response.json()["alert_last_action_at"] is not None
+    assert alerts_response.status_code == 200
+    assert alerts_response.json() == []
+
+
+def test_snoozed_alerts_do_not_appear_before_snooze_time(client):
+    created = create_reminder(client, title="Snooze me", due_date=date.today().isoformat())
+    snoozed_until = datetime.now(timezone.utc) + timedelta(days=1)
+
+    snooze_response = client.post(
+        f"/reminders/{created['id']}/alert/snooze",
+        json={"snoozed_until": snoozed_until.isoformat()},
+    )
+    alerts_response = client.get("/alerts")
+
+    assert snooze_response.status_code == 200
+    assert snooze_response.json()["alert_snoozed_until"] is not None
+    assert snooze_response.json()["alert_last_action_at"] is not None
+    assert alerts_response.status_code == 200
+    assert alerts_response.json() == []
+
+
+def test_alerts_remain_user_scoped(client):
+    set_auth_user("user-a")
+    create_reminder(client, title="User A alert", due_date=date.today().isoformat())
+
+    set_auth_user("user-b")
+    response = client.get("/alerts")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_alert_eligibility_handles_legacy_reminders_without_alert_fields(tmp_path):
+    data_file = tmp_path / "reminders.json"
+    reminder_id = "legacy-alert-reminder"
+    now = "2026-01-01T00:00:00+00:00"
+    data_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": reminder_id,
+                    "user_id": "local-dev-user",
+                    "title": "Legacy alert reminder",
+                    "category": "Other",
+                    "due_date": date.today().isoformat(),
+                    "repeat": "None",
+                    "priority": "Medium",
+                    "notes": None,
+                    "completed": False,
+                    "created_at": now,
+                    "updated_at": now,
+                    "completed_at": None,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    repo = LocalReminderRepository(data_file)
+    loaded = repo.get_reminder("local-dev-user", reminder_id)
+    eligibility = get_alert_eligibility(loaded) if loaded else None
+
+    assert loaded is not None
+    assert loaded.alert_dismissed_until is None
+    assert loaded.alert_snoozed_until is None
+    assert eligibility is not None
+    assert eligibility.reason == "Due today"
+
+
+def test_complete_generic_reminder_from_alert_flow(client):
+    created = create_reminder(client, title="Complete from alerts", due_date=date.today().isoformat(), repeat="None")
+    assert [item["id"] for item in client.get("/alerts").json()] == [created["id"]]
+
+    complete_response = client.post(f"/reminders/{created['id']}/complete")
+
+    assert complete_response.status_code == 200
+    assert complete_response.json()["completed"] is True
+    assert client.get("/alerts").json() == []
+
+
+def test_complete_recurring_reminder_from_alert_flow_advances(client):
+    created = create_reminder(
+        client,
+        title="Recurring alert completion",
+        due_date=(date.today() - timedelta(days=1)).isoformat(),
+        repeat="Weekly",
+    )
+    assert [item["id"] for item in client.get("/alerts").json()] == [created["id"]]
+
+    complete_response = client.post(f"/reminders/{created['id']}/complete")
+    body = complete_response.json()
+
+    assert complete_response.status_code == 200
+    assert body["completed"] is False
+    assert date.fromisoformat(body["due_date"]) > date.today()
+    assert body["alert_dismissed_until"] is None
+    assert body["alert_snoozed_until"] is None
+    assert client.get("/alerts").json() == []
+
+
+def test_complete_maintenance_reminder_from_alert_flow_advances_next_due(client):
+    next_due_date = date.today() - timedelta(days=1)
+    created = create_reminder(
+        client,
+        title="Maintenance alert completion",
+        category="Home",
+        due_date=next_due_date.isoformat(),
+        repeat="None",
+        priority="Medium",
+        reminder_type="maintenance",
+        maintenance_details={
+            "item_name": "Maintenance alert completion",
+            "maintenance_area": "home",
+            "last_completed_date": (date.today() - timedelta(days=190)).isoformat(),
+            "interval_value": 6,
+            "interval_unit": "months",
+            "next_due_date": next_due_date.isoformat(),
+        },
+    )
+    assert [item["id"] for item in client.get("/alerts").json()] == [created["id"]]
+
+    complete_response = client.post(f"/reminders/{created['id']}/complete")
+    body = complete_response.json()
+
+    assert complete_response.status_code == 200
+    assert body["completed"] is False
+    assert date.fromisoformat(body["due_date"]) > date.today()
+    assert body["due_date"] == body["maintenance_details"]["next_due_date"]
+    assert body["alert_dismissed_until"] is None
+    assert body["alert_snoozed_until"] is None
+    assert client.get("/alerts").json() == []
+
+
+def test_local_json_repository_preserves_alert_state(tmp_path):
+    data_file = tmp_path / "reminders.json"
+    first_repo = LocalReminderRepository(data_file)
+    alert_time = datetime.now(timezone.utc) + timedelta(days=1)
+    created = create_reminder_model(date.today()).model_copy(
+        update={
+            "alert_dismissed_until": alert_time,
+            "alert_last_action_at": alert_time,
+            "alert_snoozed_until": alert_time,
+        }
+    )
+
+    first_repo.create_reminder(created)
+    second_repo = LocalReminderRepository(data_file)
+    loaded = second_repo.get_reminder("local-dev-user", created.id)
+
+    assert loaded is not None
+    assert loaded.alert_dismissed_until == alert_time
+    assert loaded.alert_last_action_at == alert_time
+    assert loaded.alert_snoozed_until == alert_time
 def create_reminder_model(due_date):
     from datetime import datetime, timezone
     from uuid import uuid4

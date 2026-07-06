@@ -1,9 +1,17 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.alerts import (
+    clear_alert_action_state,
+    dismiss_alert_state,
+    get_alert_eligibility,
+    normalize_alert_datetime,
+    snooze_alert_state,
+    sort_alerts,
+)
 from app.auth import UserContext, get_current_user
 from app.birthdays import (
     enrich_birthday_details,
@@ -31,8 +39,10 @@ from app.renewals import (
 from app.repository import ReminderRepository
 from app.repository_factory import create_repository
 from app.schemas import (
+    AlertSnoozeRequest,
     MaintenanceDetails,
     ReminderCreate,
+    ReminderAlertResponse,
     ReminderLeadUnit,
     ReminderResponse,
     ReminderType,
@@ -72,6 +82,52 @@ def list_reminders(
     reminders = repo.list_reminders(current_user.user_id)
     sorted_reminders = sorted(reminders, key=lambda item: (item.completed, item.due_date, item.created_at))
     return [to_response(reminder) for reminder in sorted_reminders]
+
+
+@app.get("/alerts", response_model=list[ReminderAlertResponse])
+def list_alerts(
+    current_user: UserContext = Depends(get_current_user),
+    repo: ReminderRepository = Depends(get_repository),
+) -> list[ReminderAlertResponse]:
+    now = utc_now()
+    alert_reminders = []
+
+    for reminder in repo.list_reminders(current_user.user_id):
+        eligibility = get_alert_eligibility(reminder, now)
+        if eligibility is not None:
+            alert_reminders.append((reminder, eligibility))
+
+    return [to_alert_response(reminder, eligibility) for reminder, eligibility in sort_alerts(alert_reminders)]
+
+
+@app.post("/reminders/{reminder_id}/alert/dismiss", response_model=ReminderResponse)
+def dismiss_reminder_alert(
+    reminder_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: ReminderRepository = Depends(get_repository),
+) -> ReminderResponse:
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
+    now = utc_now()
+    updated = reminder.model_copy(update={**dismiss_alert_state(now), "updated_at": now})
+
+    return to_response(repo.update_reminder(updated))
+
+
+@app.post("/reminders/{reminder_id}/alert/snooze", response_model=ReminderResponse)
+def snooze_reminder_alert(
+    reminder_id: str,
+    payload: AlertSnoozeRequest | None = Body(default=None),
+    current_user: UserContext = Depends(get_current_user),
+    repo: ReminderRepository = Depends(get_repository),
+) -> ReminderResponse:
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
+    now = utc_now()
+    snoozed_until = normalize_alert_datetime(payload.snoozed_until) if payload and payload.snoozed_until else None
+    if snoozed_until is not None and snoozed_until <= now:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Snooze time must be in the future")
+
+    updated = reminder.model_copy(update={**snooze_alert_state(now, snoozed_until), "updated_at": now})
+    return to_response(repo.update_reminder(updated))
 
 
 @app.post("/reminders", response_model=ReminderResponse, status_code=status.HTTP_201_CREATED)
@@ -140,6 +196,7 @@ def complete_reminder(
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
+    alert_updates = clear_alert_action_state(now)
 
     if (
         reminder.reminder_type == ReminderType.MAINTENANCE
@@ -152,6 +209,7 @@ def complete_reminder(
         if next_due_date is not None:
             advanced_reminder = reminder.model_copy(
                 update={
+                    **alert_updates,
                     "completed": False,
                     "completed_at": now,
                     "due_date": next_due_date,
@@ -164,6 +222,7 @@ def complete_reminder(
     if reminder.repeat == RepeatOption.NONE:
         completed_reminder = reminder.model_copy(
             update={
+                **alert_updates,
                 "completed": True,
                 "completed_at": now,
                 "updated_at": now,
@@ -182,6 +241,7 @@ def complete_reminder(
 
     advanced_reminder = reminder.model_copy(
         update={
+            **alert_updates,
             "completed": False,
             "completed_at": now,
             "due_date": next_due_date,
@@ -221,6 +281,16 @@ def to_response(reminder: Reminder) -> ReminderResponse:
             "maintenance_status_label": get_maintenance_status_label(reminder.maintenance_details)
             if reminder.reminder_type == ReminderType.MAINTENANCE
             else None,
+        }
+    )
+
+
+def to_alert_response(reminder: Reminder, eligibility) -> ReminderAlertResponse:
+    return ReminderAlertResponse.model_validate(
+        {
+            **to_response(reminder).model_dump(),
+            "alert_reason": eligibility.reason,
+            "alert_reminder_start_date": eligibility.reminder_start_date,
         }
     )
 

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.dynamo_repository import DynamoReminderRepository
@@ -189,6 +189,26 @@ def test_dynamo_repository_preserves_maintenance_fields():
     assert loaded.maintenance_details.item_name == "Change HVAC filter"
     assert loaded.maintenance_details.next_due_date == next_due_date
 
+
+def test_dynamo_repository_preserves_alert_state():
+    table = FakeDynamoTable()
+    repo = DynamoReminderRepository(table_name="test-table", region_name="us-east-1", table=table)
+    alert_time = datetime.now(timezone.utc) + timedelta(days=1)
+    reminder = build_reminder().model_copy(
+        update={
+            "alert_dismissed_until": alert_time,
+            "alert_last_action_at": alert_time,
+            "alert_snoozed_until": alert_time,
+        }
+    )
+
+    repo.create_reminder(reminder)
+    loaded = repo.get_reminder(reminder.user_id, reminder.id)
+
+    assert loaded is not None
+    assert loaded.alert_dismissed_until == alert_time
+    assert loaded.alert_last_action_at == alert_time
+    assert loaded.alert_snoozed_until == alert_time
 def test_dynamo_repository_module_imports_without_aws_credentials():
     assert DynamoReminderRepository.__name__ == "DynamoReminderRepository"
 

@@ -1,4 +1,4 @@
-import type { Reminder, ReminderInput } from '../types/reminder'
+import type { Reminder, ReminderAlert, ReminderInput } from '../types/reminder'
 import { getAuthorizationHeaders } from '../auth/session'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -43,6 +43,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const remindersApi = {
   list: () => request<Reminder[]>('/reminders'),
 
+  alerts: () => request<ReminderAlert[]>('/alerts'),
+
   get: (id: string) => request<Reminder>(`/reminders/${id}`),
 
   create: (input: ReminderInput) =>
@@ -60,6 +62,17 @@ export const remindersApi = {
   complete: (id: string) =>
     request<Reminder>(`/reminders/${id}/complete`, {
       method: 'POST',
+    }),
+
+  dismissAlert: (id: string) =>
+    request<Reminder>(`/reminders/${id}/alert/dismiss`, {
+      method: 'POST',
+    }),
+
+  snoozeAlert: (id: string, snoozedUntil?: string) =>
+    request<Reminder>(`/reminders/${id}/alert/snooze`, {
+      method: 'POST',
+      body: snoozedUntil ? JSON.stringify({ snoozed_until: snoozedUntil }) : undefined,
     }),
 
   remove: (id: string) =>
