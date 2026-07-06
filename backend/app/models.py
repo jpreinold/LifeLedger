@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas import (
     BirthdayDetails,
+    MaintenanceDetails,
     PriorityOption,
     ReminderCategory,
     ReminderLeadUnit,
@@ -28,6 +29,7 @@ class Reminder(BaseModel):
     reminder_type: ReminderType = ReminderType.GENERIC
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
+    maintenance_details: MaintenanceDetails | None = None
     completed: bool = False
     created_at: datetime
     updated_at: datetime
@@ -47,3 +49,4 @@ class ReminderPatch(BaseModel):
     reminder_type: ReminderType | None = None
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
+    maintenance_details: MaintenanceDetails | None = None

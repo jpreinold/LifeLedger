@@ -1,4 +1,11 @@
-import type { PriorityOption, ReminderCategory, ReminderLeadUnit, RepeatOption } from './reminder'
+import type {
+  MaintenanceArea,
+  MaintenanceIntervalUnit,
+  PriorityOption,
+  ReminderCategory,
+  ReminderLeadUnit,
+  RepeatOption,
+} from './reminder'
 import type { RenewalDisplayKind } from '../lib/renewalUx'
 
 export type DefaultDueDateStrategy =
@@ -8,7 +15,7 @@ export type DefaultDueDateStrategy =
   | 'next-review'
   | 'before-expiration'
 
-export type TemplateTargetType = 'generic' | 'birthday' | 'renewal' | 'comingSoon'
+export type TemplateTargetType = 'generic' | 'birthday' | 'renewal' | 'maintenance' | 'comingSoon'
 
 export type TemplateFilterGroup =
   | 'Smart'
@@ -43,6 +50,11 @@ export interface LifeAdminTemplate {
   defaultReminderTiming?: TemplateReminderTiming
   smartBadge?: string
   renewalItemName?: string
+  maintenanceItemName?: string
+  maintenanceArea?: MaintenanceArea
+  maintenanceIntervalValue?: number
+  maintenanceIntervalUnit?: MaintenanceIntervalUnit
+  maintenanceInstructions?: string
   renewalWindowDays?: number
   reviewLeadDays?: number
   featured?: boolean

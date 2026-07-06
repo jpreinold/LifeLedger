@@ -12,6 +12,13 @@ from app.birthdays import (
     get_next_birthday_due_date,
 )
 from app.config import get_settings
+from app.maintenance import (
+    advance_maintenance_details,
+    get_maintenance_computed_label,
+    get_maintenance_due_date,
+    get_maintenance_status_label,
+    prepare_maintenance_details,
+)
 from app.models import Reminder
 from app.recurrence import advance_due_date, calculate_status, get_next_due_date
 from app.renewals import (
@@ -24,6 +31,7 @@ from app.renewals import (
 from app.repository import ReminderRepository
 from app.repository_factory import create_repository
 from app.schemas import (
+    MaintenanceDetails,
     ReminderCreate,
     ReminderLeadUnit,
     ReminderResponse,
@@ -133,6 +141,26 @@ def complete_reminder(
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
 
+    if (
+        reminder.reminder_type == ReminderType.MAINTENANCE
+        and reminder.maintenance_details is not None
+        and reminder.maintenance_details.interval_value is not None
+        and reminder.maintenance_details.interval_unit is not None
+    ):
+        maintenance_details = advance_maintenance_details(reminder.maintenance_details, now.date())
+        next_due_date = get_maintenance_due_date(maintenance_details)
+        if next_due_date is not None:
+            advanced_reminder = reminder.model_copy(
+                update={
+                    "completed": False,
+                    "completed_at": now,
+                    "due_date": next_due_date,
+                    "maintenance_details": maintenance_details,
+                    "updated_at": now,
+                }
+            )
+            return to_response(repo.update_reminder(advanced_reminder))
+
     if reminder.repeat == RepeatOption.NONE:
         completed_reminder = reminder.model_copy(
             update={
@@ -146,6 +174,7 @@ def complete_reminder(
     next_due_date = advance_due_date(reminder.due_date, reminder.repeat, today=now.date())
     birthday_details = reminder.birthday_details
     renewal_details = reminder.renewal_details
+    maintenance_details = reminder.maintenance_details
     if reminder.reminder_type == ReminderType.BIRTHDAY and birthday_details is not None:
         birthday_details = enrich_birthday_details(birthday_details, next_due_date)
     if reminder.reminder_type == ReminderType.RENEWAL and renewal_details is not None:
@@ -158,6 +187,7 @@ def complete_reminder(
             "due_date": next_due_date,
             "birthday_details": birthday_details,
             "renewal_details": renewal_details,
+            "maintenance_details": maintenance_details,
             "updated_at": now,
         }
     )
@@ -177,7 +207,7 @@ def to_response(reminder: Reminder) -> ReminderResponse:
         {
             **reminder.model_dump(),
             "status": calculate_status(reminder),
-            "next_due_date": get_next_due_date(reminder.due_date, reminder.repeat),
+            "next_due_date": get_response_next_due_date(reminder),
             "computed_label": get_computed_label(reminder),
             "birthday_age_label": get_birthday_age_label(reminder.birthday_details)
             if reminder.reminder_type == ReminderType.BIRTHDAY
@@ -187,6 +217,9 @@ def to_response(reminder: Reminder) -> ReminderResponse:
             else None,
             "renewal_window_label": get_renewal_window_label(reminder.renewal_details)
             if reminder.reminder_type == ReminderType.RENEWAL
+            else None,
+            "maintenance_status_label": get_maintenance_status_label(reminder.maintenance_details)
+            if reminder.reminder_type == ReminderType.MAINTENANCE
             else None,
         }
     )
@@ -211,10 +244,15 @@ def prepare_update_fields(reminder: Reminder, updates: dict) -> dict:
         merged = {**reminder.model_dump(), **updates}
         return prepare_renewal_fields(merged, keep_existing_timing=True)
 
+    if is_reminder_type(reminder_type, ReminderType.MAINTENANCE):
+        merged = {**reminder.model_dump(), **updates}
+        return prepare_maintenance_fields(merged, keep_existing_timing=True)
+
     if is_reminder_type(reminder_type, ReminderType.GENERIC):
         updates["reminder_type"] = ReminderType.GENERIC
         updates["birthday_details"] = None
         updates["renewal_details"] = None
+        updates["maintenance_details"] = None
 
     return updates
 
@@ -227,9 +265,13 @@ def prepare_smart_fields(data: dict) -> dict:
     if is_reminder_type(reminder_type, ReminderType.RENEWAL):
         return prepare_renewal_fields(data)
 
+    if is_reminder_type(reminder_type, ReminderType.MAINTENANCE):
+        return prepare_maintenance_fields(data)
+
     data["reminder_type"] = ReminderType.GENERIC
     data["birthday_details"] = None
     data["renewal_details"] = None
+    data["maintenance_details"] = None
     return data
 
 
@@ -238,6 +280,7 @@ def prepare_birthday_fields(data: dict, keep_existing_timing: bool = False) -> d
         data["reminder_type"] = ReminderType.GENERIC
         data["birthday_details"] = None
         data["renewal_details"] = None
+        data["maintenance_details"] = None
         return data
 
     details = data.get("birthday_details")
@@ -258,6 +301,7 @@ def prepare_birthday_fields(data: dict, keep_existing_timing: bool = False) -> d
     data["reminder_type"] = ReminderType.BIRTHDAY
     data["birthday_details"] = enriched_details
     data["renewal_details"] = None
+    data["maintenance_details"] = None
     data["due_date"] = due_date
     data["repeat"] = RepeatOption.YEARLY
 
@@ -276,6 +320,7 @@ def prepare_renewal_fields(data: dict, keep_existing_timing: bool = False) -> di
         data["reminder_type"] = ReminderType.GENERIC
         data["birthday_details"] = None
         data["renewal_details"] = None
+        data["maintenance_details"] = None
         return data
 
     details = data.get("renewal_details")
@@ -292,11 +337,52 @@ def prepare_renewal_fields(data: dict, keep_existing_timing: bool = False) -> di
     data["reminder_type"] = ReminderType.RENEWAL
     data["birthday_details"] = None
     data["renewal_details"] = details
+    data["maintenance_details"] = None
 
     if not keep_existing_timing or data.get("reminder_lead_value") is None:
         data["reminder_lead_value"] = data.get("reminder_lead_value") if data.get("reminder_lead_value") is not None else 1
     if not keep_existing_timing or data.get("reminder_lead_unit") is None:
         data["reminder_lead_unit"] = data.get("reminder_lead_unit") or ReminderLeadUnit.MONTHS
+    if not keep_existing_timing or data.get("reminder_time") is None:
+        data["reminder_time"] = data.get("reminder_time") or "09:00"
+
+    return data
+
+
+def prepare_maintenance_fields(data: dict, keep_existing_timing: bool = False) -> dict:
+    if not is_reminder_type(data.get("reminder_type"), ReminderType.MAINTENANCE):
+        data["reminder_type"] = ReminderType.GENERIC
+        data["birthday_details"] = None
+        data["renewal_details"] = None
+        data["maintenance_details"] = None
+        return data
+
+    details = data.get("maintenance_details")
+    if details is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Maintenance details are required")
+
+    if not hasattr(details, "item_name"):
+        details = MaintenanceDetails.model_validate(details)
+
+    details = prepare_maintenance_details(details)
+    due_date = get_maintenance_due_date(details)
+    if due_date is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Choose the next maintenance due date")
+
+    data["reminder_type"] = ReminderType.MAINTENANCE
+    data["birthday_details"] = None
+    data["renewal_details"] = None
+    data["maintenance_details"] = details
+    data["due_date"] = due_date
+    if data.get("repeat") in (None, RepeatOption.NONE, RepeatOption.NONE.value):
+        data["repeat"] = get_repeat_from_maintenance_interval(details)
+    if data.get("priority") is None:
+        data["priority"] = "Medium"
+
+    if not keep_existing_timing or data.get("reminder_lead_value") is None:
+        data["reminder_lead_value"] = data.get("reminder_lead_value") if data.get("reminder_lead_value") is not None else 1
+    if not keep_existing_timing or data.get("reminder_lead_unit") is None:
+        data["reminder_lead_unit"] = data.get("reminder_lead_unit") or ReminderLeadUnit.WEEKS
     if not keep_existing_timing or data.get("reminder_time") is None:
         data["reminder_time"] = data.get("reminder_time") or "09:00"
 
@@ -310,7 +396,35 @@ def get_computed_label(reminder: Reminder) -> str | None:
     if reminder.reminder_type == ReminderType.RENEWAL:
         return get_renewal_computed_label(reminder.renewal_details)
 
+    if reminder.reminder_type == ReminderType.MAINTENANCE:
+        return get_maintenance_computed_label(reminder.maintenance_details)
+
     return None
+
+
+def get_response_next_due_date(reminder: Reminder):
+    if reminder.reminder_type == ReminderType.MAINTENANCE:
+        return get_maintenance_due_date(reminder.maintenance_details)
+
+    return get_next_due_date(reminder.due_date, reminder.repeat)
+
+
+def get_repeat_from_maintenance_interval(details: MaintenanceDetails) -> RepeatOption:
+    if details.interval_value is None or details.interval_unit is None:
+        return RepeatOption.NONE
+
+    interval_value = details.interval_value
+    interval_unit = details.interval_unit.value
+    if interval_unit == "weeks" and interval_value == 1:
+        return RepeatOption.WEEKLY
+    if interval_unit == "months" and interval_value == 1:
+        return RepeatOption.MONTHLY
+    if interval_unit == "months" and interval_value == 3:
+        return RepeatOption.QUARTERLY
+    if (interval_unit == "years" and interval_value == 1) or (interval_unit == "months" and interval_value == 12):
+        return RepeatOption.YEARLY
+
+    return RepeatOption.NONE
 
 
 def is_reminder_type(value: ReminderType | str | None, expected: ReminderType) -> bool:

@@ -1,5 +1,5 @@
 import { buildReminderInputWithDefaultTiming } from './reminderSchedule'
-import type { BirthdayDetailsInput, ReminderInput, RenewalDetailsInput } from '../types/reminder'
+import type { BirthdayDetailsInput, MaintenanceDetailsInput, ReminderInput, RenewalDetailsInput } from '../types/reminder'
 import {
   getBackendRenewalKind,
   getRenewalDefaults,
@@ -8,6 +8,12 @@ import {
   getRelevantRenewalDate,
   withRenewalDisplayKind,
 } from './renewalUx'
+import {
+  getMaintenanceDefaults,
+  getMaintenanceDueDate,
+  getMaintenanceRepeat,
+  getMaintenanceValidationMessage,
+} from './maintenanceUx'
 
 const today = new Date().toISOString().slice(0, 10)
 
@@ -34,6 +40,20 @@ export function emptyRenewalDetails(): RenewalDetailsInput {
     renewal_window_days: null,
     review_lead_days: null,
     frequency: null,
+  }
+}
+
+export function emptyMaintenanceDetails(): MaintenanceDetailsInput {
+  const defaults = getMaintenanceDefaults('home')
+
+  return {
+    item_name: '',
+    maintenance_area: 'home',
+    last_completed_date: null,
+    interval_value: defaults.interval_value,
+    interval_unit: defaults.interval_unit,
+    next_due_date: null,
+    instructions: null,
   }
 }
 
@@ -85,6 +105,30 @@ export function createRenewalReminderInput(overrides: Partial<ReminderInput> = {
   })
 }
 
+export function createMaintenanceReminderInput(overrides: Partial<ReminderInput> = {}): ReminderInput {
+  const mergedDetails = {
+    ...emptyMaintenanceDetails(),
+    ...(overrides.maintenance_details ?? {}),
+  }
+  const defaults = getMaintenanceDefaults(mergedDetails.maintenance_area)
+  const dueDate = getMaintenanceDueDate(mergedDetails, overrides.due_date ?? '')
+
+  return buildReminderInputWithDefaultTiming({
+    title: 'Maintenance reminder',
+    category: defaults.category,
+    repeat: getMaintenanceRepeat(mergedDetails),
+    priority: defaults.priority,
+    notes: null,
+    reminder_lead_value: defaults.reminder_lead_value,
+    reminder_lead_unit: defaults.reminder_lead_unit,
+    reminder_time: defaults.reminder_time,
+    reminder_type: 'maintenance',
+    ...overrides,
+    due_date: dueDate,
+    maintenance_details: mergedDetails,
+  })
+}
+
 export function isReminderReady(form: ReminderInput) {
   if (!form.title.trim()) {
     return false
@@ -97,6 +141,10 @@ export function isReminderReady(form: ReminderInput) {
 
   if (form.reminder_type === 'renewal') {
     return getRenewalValidationMessage(form) === null
+  }
+
+  if (form.reminder_type === 'maintenance') {
+    return getMaintenanceValidationMessage(form) === null
   }
 
   return true
@@ -117,10 +165,15 @@ export function buildReminderSubmitInput(form: ReminderInput): ReminderInput {
     return buildRenewalSubmitInput(baseInput)
   }
 
+  if (baseInput.reminder_type === 'maintenance') {
+    return buildMaintenanceSubmitInput(baseInput)
+  }
+
   return {
     ...baseInput,
     birthday_details: null,
     renewal_details: null,
+    maintenance_details: null,
   }
 }
 
@@ -145,6 +198,7 @@ function buildBirthdaySubmitInput(baseInput: ReminderInput): ReminderInput {
       relationship: details.relationship?.trim() || null,
     },
     renewal_details: null,
+    maintenance_details: null,
   }
 }
 
@@ -181,6 +235,32 @@ function buildRenewalSubmitInput(baseInput: ReminderInput): ReminderInput {
       review_lead_days: toOptionalNumber(details.review_lead_days),
       frequency: detailsWithDisplayKind.frequency,
     },
+    maintenance_details: null,
+  }
+}
+
+function buildMaintenanceSubmitInput(baseInput: ReminderInput): ReminderInput {
+  const details = baseInput.maintenance_details ?? emptyMaintenanceDetails()
+  const nextDueDate = getMaintenanceDueDate(details, baseInput.due_date)
+  const intervalValue = toOptionalNumber(details.interval_value)
+  const intervalUnit = details.interval_unit || null
+
+  return {
+    ...baseInput,
+    due_date: nextDueDate,
+    repeat: getMaintenanceRepeat({ ...details, interval_value: intervalValue, interval_unit: intervalUnit }),
+    priority: baseInput.priority || 'Medium',
+    birthday_details: null,
+    renewal_details: null,
+    maintenance_details: {
+      item_name: details.item_name.trim(),
+      maintenance_area: details.maintenance_area,
+      last_completed_date: toOptionalDate(details.last_completed_date),
+      interval_value: intervalValue,
+      interval_unit: intervalUnit,
+      next_due_date: toOptionalDate(nextDueDate),
+      instructions: details.instructions?.trim() || null,
+    },
   }
 }
 
@@ -196,4 +276,3 @@ function toOptionalNumber(value: string | number | null | undefined) {
   const numericValue = Number(value)
   return Number.isFinite(numericValue) ? numericValue : null
 }
-

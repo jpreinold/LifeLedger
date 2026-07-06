@@ -2337,6 +2337,75 @@ textarea:focus-visible {
   font-weight: 620;
 }
 
+
+.maintenance-details-section {
+  --maintenance-accent: #22735d;
+  --maintenance-border: #bfe2d7;
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--maintenance-border);
+  border-radius: var(--radius-md);
+  background: #f3fbf8;
+}
+
+.maintenance-details-section .form-section-heading {
+  color: var(--maintenance-accent);
+}
+
+.maintenance-helper-text,
+.maintenance-safety-note,
+.maintenance-preview {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+.maintenance-details-section .form-row {
+  gap: var(--space-2);
+}
+
+.maintenance-today-button {
+  justify-self: start;
+}
+
+.maintenance-safety-note {
+  font-size: 0.72rem;
+  font-weight: 620;
+  line-height: 1.35;
+}
+
+.maintenance-preview {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-3);
+  border: 1px solid var(--maintenance-border);
+  border-radius: var(--radius-md);
+  color: #135c49;
+  background: #ffffff;
+  font-weight: 680;
+}
+
+.maintenance-preview strong,
+.maintenance-preview span,
+.maintenance-preview small {
+  overflow-wrap: anywhere;
+}
+
+.maintenance-preview strong {
+  color: #135c49;
+  font-size: 0.8rem;
+}
+
+.maintenance-preview span,
+.maintenance-preview small {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 620;
+}
+
 @media (max-width: 360px) {
   .renewal-kind-grid {
     grid-template-columns: 1fr;

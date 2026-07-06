@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-LifeLedger supports smart birthday reminders and smart renewal/expiration reminders. Birthday reminders can calculate age context when a birth year or turning age is known. Renewal reminders can store safe renewal details and calculate context such as renewal timing, expiration status, review lead time, and renewal windows. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger supports smart birthday reminders, smart renewal/expiration reminders, and smart maintenance reminders. Birthday reminders can calculate age context when a birth year or turning age is known. Renewal reminders can store safe renewal details and calculate context such as renewal timing, expiration status, review lead time, and renewal windows. Maintenance reminders can calculate the next due date from a last completed date and interval, then advance after completion. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -69,9 +69,9 @@ Local development uses `AUTH_MODE=local` and `LOCAL_DEV_USER_ID=local-dev-user`,
 
 ## Life Admin Templates
 
-The frontend includes a Life Admin Templates modal for curated shortcuts into the add experience. Each template declares an explicit target type: `generic`, `birthday`, `renewal`, or `comingSoon`.
+The frontend includes a Life Admin Templates modal for curated shortcuts into the add experience. Each template declares an explicit target type: `generic`, `birthday`, `renewal`, `maintenance`, or `comingSoon`.
 
-Choosing **Browse templates** opens searchable templates with recommended smart starters first. Generic templates prefill the normal reminder form. Smart birthday templates open the Birthday flow, and smart renewal templates open the Renewal flow with the correct renewal kind preselected, such as expiration, subscription, free trial, warranty, or document. Coming soon templates preview future areas without opening a form or storing data.
+Choosing **Browse templates** opens searchable templates with recommended smart starters first. Generic templates prefill the normal reminder form. Smart birthday templates open the Birthday flow, smart renewal templates open the Renewal flow with the correct renewal kind preselected, and smart maintenance templates open the Maintenance flow with a safe date-based interval prefilled. Coming soon templates preview future areas without opening a form or storing data.
 
 Templates create user-scoped reminders only after the user confirms the form. They do not send or accept `user_id`; the backend still assigns ownership from Cognito or local auth. Templates avoid sensitive fields and should not store policy numbers, account numbers, card numbers, SSNs, passwords, medical details, contact details, addresses, uploaded documents, or government ID numbers.
 
@@ -81,7 +81,7 @@ Reminders can be created, edited, completed, and deleted from the React app. Edi
 
 Reminder records now store optional delivery preference fields: `reminder_lead_value`, `reminder_lead_unit`, and `reminder_time`. The UI defaults new reminders to 1 day before at 9:00 AM and supports same day, 1 day before, 1 week before, 1 month before, and a simple custom lead time. These fields prepare LifeLedger for future notification, calendar, and email integrations; this phase does not send notifications.
 
-Reminder records also support `reminder_type`. Existing reminders default to `generic`; birthday reminders use `birthday` and may include `birthday_details`. Birthday reminders calculate the next birthday date, infer birth year when the user enters the age someone is turning, and show labels such as turning age or age unknown on cards and dashboard rows.
+Reminder records also support `reminder_type`. Existing reminders default to `generic`; smart types are `birthday`, `renewal`, and `maintenance`. Birthday reminders may include `birthday_details`; they calculate the next birthday date, infer birth year when the user enters the age someone is turning, and show labels such as turning age or age unknown on cards and dashboard rows. Renewal reminders may include `renewal_details` for safe renewal, expiration, review, subscription, free trial, warranty, or document dates. Maintenance reminders may include `maintenance_details` with item name, maintenance area, last completed date, interval, next due date, and general instructions. Maintenance is date-based only; mileage-based and usage-based maintenance are not included yet.
 
 The reminder list defaults to active reminders and includes simple filters for overdue items, today, this week, this month, upcoming reminders, and completed reminders. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list. The dashboard includes an **On your radar** section that prioritizes overdue reminders, due today reminders, reminders whose reminder window has started, and reminders due this week.
 
@@ -168,6 +168,7 @@ Deployed frontend flow:
 - Pydantic validates request and response models in `backend/app/schemas.py`.
 - Status, recurrence, and `next_due_date` logic live in `backend/app/recurrence.py`.
 - Birthday reminder date, age, and label helpers live in `backend/app/birthdays.py`.
+- Maintenance reminder interval, due-date, completion, and label helpers live in `backend/app/maintenance.py`.
 - Route handlers depend on a repository abstraction, not a concrete storage backend.
 - Local mode uses JSON-file persistence at `backend/data/reminders.json`.
 - DynamoDB mode uses `DynamoReminderRepository` for AWS deployment.
@@ -175,7 +176,7 @@ Deployed frontend flow:
 - Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
 - `backend/template.yaml` describes the SAM serverless deployment shape.
 
-Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences, smart birthday fields, and smart renewal fields are stored on each reminder item without changing the DynamoDB key schema.
+Reminder records include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and reminder `id` as the sort key, so users cannot read or mutate each other's reminders through the repository layer. Reminder timing preferences, smart birthday fields, smart renewal fields, and smart maintenance fields are stored on each reminder item without changing the DynamoDB key schema.
 
 ## Environment Variables
 
@@ -246,4 +247,4 @@ sam deploy --guided
 
 ## Not In This Phase
 
-This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, or another frontend redesign. Do not store policy numbers, account numbers, card numbers, government ID numbers, passwords, medical details, or uploaded documents in reminders. Future smart reminder types may include subscriptions, warranties, document expirations, maintenance cycles, and anniversaries.
+This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, mileage-based maintenance, usage-based maintenance, supply inventory, or another frontend redesign. Do not store policy numbers, account numbers, card numbers, government ID numbers, passwords, medical details, or uploaded documents in reminders. Future smart reminder work may include usage-based maintenance, records, secure vault features, and calendar or notification integrations.

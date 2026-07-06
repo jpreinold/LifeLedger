@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from app.dynamo_repository import DynamoReminderRepository
 from app.models import Reminder
-from app.schemas import BirthdayDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
+from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
 
 
 class FakeDynamoTable:
@@ -94,6 +94,7 @@ def test_dynamo_repository_loads_legacy_items_without_timing_fields():
     assert loaded.reminder_time is None
     assert loaded.reminder_type == ReminderType.GENERIC
     assert loaded.birthday_details is None
+    assert loaded.maintenance_details is None
 
 
 def test_dynamo_repository_preserves_birthday_fields():
@@ -156,6 +157,38 @@ def test_dynamo_repository_preserves_renewal_fields():
     assert loaded.renewal_details is not None
     assert loaded.renewal_details.item_name == "Passport"
     assert loaded.renewal_details.expiration_date == expiration_date
+
+def test_dynamo_repository_preserves_maintenance_fields():
+    table = FakeDynamoTable()
+    repo = DynamoReminderRepository(table_name="test-table", region_name="us-east-1", table=table)
+    next_due_date = date.today()
+    reminder = build_reminder().model_copy(
+        update={
+            "title": "Change HVAC filter",
+            "category": ReminderCategory.HOME,
+            "due_date": next_due_date,
+            "repeat": RepeatOption.QUARTERLY,
+            "reminder_type": ReminderType.MAINTENANCE,
+            "maintenance_details": MaintenanceDetails(
+                item_name="Change HVAC filter",
+                maintenance_area="home",
+                last_completed_date=date.today(),
+                interval_value=3,
+                interval_unit="months",
+                next_due_date=next_due_date,
+            ),
+        }
+    )
+
+    repo.create_reminder(reminder)
+    loaded = repo.get_reminder(reminder.user_id, reminder.id)
+
+    assert loaded is not None
+    assert loaded.reminder_type == ReminderType.MAINTENANCE
+    assert loaded.maintenance_details is not None
+    assert loaded.maintenance_details.item_name == "Change HVAC filter"
+    assert loaded.maintenance_details.next_due_date == next_due_date
+
 def test_dynamo_repository_module_imports_without_aws_credentials():
     assert DynamoReminderRepository.__name__ == "DynamoReminderRepository"
 
