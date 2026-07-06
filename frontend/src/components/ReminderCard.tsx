@@ -1,7 +1,12 @@
-import { Bell, Cake, CalendarDays, CheckCircle2, Flag, Pencil, RefreshCcw, Repeat2, Trash2, Wrench } from 'lucide-react'
+import { Cake, CalendarDays, CheckCircle2, Flag, Pencil, RefreshCcw, Repeat2, Trash2, Wrench } from 'lucide-react'
 
 import type { Reminder } from '../types/reminder'
-import { formatReminderTiming } from '../lib/reminderSchedule'
+import {
+  formatReminderDueLabel,
+  formatReminderStatusLabel,
+  formatRepeatLabel,
+  getReminderTypeLabel,
+} from '../lib/reminderDisplay'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import { getCategoryVisual } from './categoryVisuals'
 
@@ -23,7 +28,11 @@ const statusClassNames: Record<Reminder['status'], string> = {
 
 export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: ReminderCardProps) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
-  const smartLabel = getSmartReminderLabel(reminder)
+  const smartLabel = reminder.completed ? null : getSmartReminderLabel(reminder)
+  const repeatLabel = formatRepeatLabel(reminder.repeat)
+  const shouldShowRepeat = repeatLabel && reminder.reminder_type !== 'birthday' && reminder.reminder_type !== 'maintenance'
+  const shouldShowPriority = reminder.priority === 'High'
+  const summaryLabel = smartLabel ?? formatReminderDueLabel(reminder, { includeDate: false })
   const SmartIcon = reminder.reminder_type === 'maintenance'
     ? Wrench
     : reminder.reminder_type === 'renewal'
@@ -41,41 +50,53 @@ export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: Reminde
 
         <div className="reminder-card-content">
           <div className="card-topline">
-            <span className="category-chip">{reminder.category}</span>
-            <span className={`status-chip ${statusClassNames[reminder.status]}`}>{getStatusLabel(reminder)}</span>
+            <span className="card-chip-row">
+              <span className="category-chip">{reminder.category}</span>
+              <span className="type-chip">{getReminderTypeLabel(reminder.reminder_type)}</span>
+            </span>
+            <span className={`status-chip ${statusClassNames[reminder.status]}`}>
+              {formatReminderStatusLabel(reminder)}
+            </span>
           </div>
 
           <div>
             <h3>{reminder.title}</h3>
-            <p className="due-date">
-              <CalendarDays size={15} aria-hidden="true" />
-              {getDueLabel(reminder)}
+            <p className="reminder-summary-line">
+              <span>{reminder.category}</span>
+              <span aria-hidden="true">{'\u2022'}</span>
+              <span className={smartLabel ? 'smart-summary-text' : undefined}>
+                {smartLabel ? (
+                  <>
+                    <SmartIcon size={14} aria-hidden="true" />
+                    {smartLabel}
+                  </>
+                ) : summaryLabel}
+              </span>
             </p>
+            {smartLabel ? (
+              <p className="due-date">
+                <CalendarDays size={15} aria-hidden="true" />
+                {formatReminderDueLabel(reminder)}
+              </p>
+            ) : null}
           </div>
 
-          <div className="reminder-meta-row" aria-label="Reminder details">
-            <span>
-              <Repeat2 size={14} aria-hidden="true" />
-              {reminder.repeat}
-            </span>
-            <span className={`priority-chip priority-${reminder.priority.toLowerCase()}`}>
-              <Flag size={14} aria-hidden="true" />
-              {reminder.priority}
-            </span>
-            <span>
-              <Bell size={14} aria-hidden="true" />
-              {formatReminderTiming(reminder)}
-            </span>
-            {smartLabel ? (
-              <span className="smart-context-chip">
-                <SmartIcon size={14} aria-hidden="true" />
-                {smartLabel}
-              </span>
-            ) : null}
-            {reminder.next_due_date && reminder.reminder_type !== 'maintenance' ? (
-              <span>Next {formatShortDate(reminder.next_due_date)}</span>
-            ) : null}
-          </div>
+          {shouldShowRepeat || shouldShowPriority ? (
+            <div className="reminder-meta-row" aria-label="Reminder details">
+              {shouldShowRepeat ? (
+                <span>
+                  <Repeat2 size={14} aria-hidden="true" />
+                  {repeatLabel}
+                </span>
+              ) : null}
+              {shouldShowPriority ? (
+                <span className={`priority-chip priority-${reminder.priority.toLowerCase()}`}>
+                  <Flag size={14} aria-hidden="true" />
+                  {reminder.priority} priority
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -89,7 +110,7 @@ export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: Reminde
           disabled={reminder.completed}
         >
           <CheckCircle2 size={18} aria-hidden="true" />
-          Complete
+          {reminder.completed ? 'Completed' : 'Complete'}
         </button>
         <button type="button" className="action-button edit-button" onClick={() => onEdit(reminder)}>
           <Pencil size={17} aria-hidden="true" />
@@ -102,85 +123,4 @@ export function ReminderCard({ reminder, onComplete, onEdit, onDelete }: Reminde
       </div>
     </article>
   )
-}
-
-function getStatusLabel(reminder: Reminder) {
-  if (reminder.status !== 'Overdue' || reminder.completed) {
-    return reminder.status
-  }
-
-  const overdueDays = getDaysOverdue(reminder.due_date)
-
-  if (overdueDays >= 14) {
-    const weeks = Math.floor(overdueDays / 7)
-    return `Overdue by ${weeks} ${weeks === 1 ? 'week' : 'weeks'}`
-  }
-
-  return `Overdue by ${overdueDays} ${overdueDays === 1 ? 'day' : 'days'}`
-}
-
-function getDaysOverdue(value: string) {
-  const dueDate = parseDateOnly(value)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const difference = today.getTime() - dueDate.getTime()
-  const days = Math.ceil(difference / 86_400_000)
-
-  return Math.max(days, 1)
-}
-
-function formatDate(value: string) {
-  const date = parseDateOnly(value)
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(date)
-}
-
-function formatShortDate(value: string) {
-  const date = parseDateOnly(value)
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
-function getDueLabel(reminder: Reminder) {
-  if (reminder.completed) {
-    return `Completed ${reminder.completed_at ? formatShortDate(reminder.completed_at) : ''}`.trim()
-  }
-
-  if (reminder.status === 'Overdue') {
-    return `Due ${formatShortDate(reminder.due_date)}`
-  }
-
-  if (reminder.status === 'Due today') {
-    return `Due today \u00b7 ${formatShortDate(reminder.due_date)}`
-  }
-
-  const daysUntilDue = getDaysUntilDue(reminder.due_date)
-
-  if (daysUntilDue > 0 && daysUntilDue <= 14) {
-    return `Due in ${daysUntilDue} ${daysUntilDue === 1 ? 'day' : 'days'} \u00b7 ${formatShortDate(reminder.due_date)}`
-  }
-
-  return `Due ${formatDate(reminder.due_date)}`
-}
-
-function getDaysUntilDue(value: string) {
-  const dueDate = parseDateOnly(value)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const difference = dueDate.getTime() - today.getTime()
-  return Math.ceil(difference / 86_400_000)
-}
-
-function parseDateOnly(value: string) {
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
-  return new Date(year, month - 1, day)
 }

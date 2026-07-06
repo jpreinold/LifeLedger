@@ -605,7 +605,12 @@ textarea:focus-visible {
 
 .filter-tabs {
   margin: 0 calc(var(--space-4) * -1);
-  padding: var(--space-1) var(--space-4) var(--space-4);
+  padding: var(--space-1) var(--space-4) var(--space-2);
+}
+
+.reminder-type-tabs {
+  padding-top: 0;
+  padding-bottom: var(--space-4);
 }
 
 .filter-tab,
@@ -696,9 +701,16 @@ textarea:focus-visible {
 
 .card-topline {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
+}
+
+.card-chip-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .category-icon {
@@ -754,6 +766,7 @@ textarea:focus-visible {
 }
 
 .category-chip,
+.type-chip,
 .status-chip {
   min-height: 24px;
   display: inline-flex;
@@ -769,6 +782,12 @@ textarea:focus-visible {
 .category-chip {
   color: var(--tone);
   background: var(--tone-soft);
+  white-space: nowrap;
+}
+
+.type-chip {
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
   white-space: nowrap;
 }
 
@@ -808,14 +827,24 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.reminder-summary-line,
 .due-date {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 5px 0 0;
   color: var(--color-text-muted);
   font-size: 0.82rem;
   font-weight: 690;
+  line-height: 1.35;
+}
+
+.smart-summary-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #5b4bd8;
 }
 
 .reminder-meta-row {
@@ -2008,6 +2037,10 @@ textarea:focus-visible {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
   padding: 0 var(--space-3) var(--space-3);
+}
+
+.overview-grid-smart {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .overview-tile {

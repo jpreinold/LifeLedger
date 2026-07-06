@@ -9,6 +9,7 @@ import type {
   RenewalKind,
   RepeatOption,
 } from '../types/reminder'
+import { formatCount, formatRelativeDatePhrase, getDaysUntilDate } from './reminderDisplay'
 import { formatReminderTiming } from './reminderSchedule'
 
 export const renewalDisplayKinds = [
@@ -463,7 +464,7 @@ function getRenewalPreviewPrimary(
 
 function getRenewalCardLabelFromParts(kind: RenewalDisplayKind, relevantDate: string, repeat: RepeatOption) {
   if (kind === 'review') {
-    return `Review before ${formatMonthDay(relevantDate)}`
+    return getReviewLabel(relevantDate)
   }
 
   if (kind === 'subscription') {
@@ -471,26 +472,50 @@ function getRenewalCardLabelFromParts(kind: RenewalDisplayKind, relevantDate: st
       return `Renews on the ${formatOrdinalDay(relevantDate)}`
     }
 
-    return `Subscription renews ${formatRelativeDate(relevantDate)}`
+    return getActionDateLabel(relevantDate, 'Subscription renews', 'Subscription renewal overdue by')
   }
 
   if (kind === 'free_trial') {
-    return `Trial ends ${formatRelativeDate(relevantDate)}`
+    return getActionDateLabel(relevantDate, 'Trial ends', 'Trial ended')
   }
 
   if (kind === 'warranty') {
-    return `Warranty expires ${formatRelativeDate(relevantDate, 'months')}`
+    return getActionDateLabel(relevantDate, 'Warranty expires', 'Warranty expired', { monthApproximation: true })
   }
 
   if (kind === 'document') {
-    return `Document expires ${formatRelativeDate(relevantDate)}`
+    return getActionDateLabel(relevantDate, 'Document expires', 'Document expired')
   }
 
   if (kind === 'expiration') {
-    return `Expires ${formatRelativeDate(relevantDate)}`
+    return getActionDateLabel(relevantDate, 'Expires', 'Expired')
   }
 
-  return `Renews ${formatCardDate(relevantDate)}`
+  return getActionDateLabel(relevantDate, 'Renews', 'Renewal overdue by')
+}
+
+function getReviewLabel(value: string) {
+  const daysUntil = getDaysUntilDate(value)
+  if (daysUntil < 0) {
+    return `Review overdue by ${formatCount(Math.abs(daysUntil), 'day')}`
+  }
+
+  return `Review ${formatRelativeDatePhrase(value)}`
+}
+
+function getActionDateLabel(
+  value: string,
+  futurePrefix: string,
+  pastPrefix: string,
+  options: { monthApproximation?: boolean } = {},
+) {
+  const daysUntil = getDaysUntilDate(value)
+  if (daysUntil < 0) {
+    const distance = formatCount(Math.abs(daysUntil), 'day')
+    return pastPrefix.endsWith('by') ? `${pastPrefix} ${distance}` : `${pastPrefix} ${distance} ago`
+  }
+
+  return `${futurePrefix} ${formatRelativeDatePhrase(value, options)}`
 }
 
 function getOwnedItemName(details: RenewalDetailsLike) {
@@ -515,47 +540,6 @@ function containsSensitiveText(values: Array<string | null | undefined>) {
   )
 }
 
-function formatRelativeDate(value: string, mode: 'days' | 'months' = 'days') {
-  const targetDate = parseDateOnly(value)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const daysUntil = Math.ceil((targetDate.getTime() - today.getTime()) / 86_400_000)
-
-  if (daysUntil === 0) {
-    return 'today'
-  }
-
-  if (daysUntil === 1) {
-    return 'tomorrow'
-  }
-
-  if (daysUntil === -1) {
-    return 'yesterday'
-  }
-
-  if (daysUntil < 0) {
-    const daysPast = Math.abs(daysUntil)
-    return `${daysPast} ${daysPast === 1 ? 'day' : 'days'} ago`
-  }
-
-  if (mode === 'months' && daysUntil >= 45) {
-    const months = Math.max(1, Math.round(daysUntil / 30))
-    return `in ${months} ${months === 1 ? 'month' : 'months'}`
-  }
-
-  return `in ${daysUntil} ${daysUntil === 1 ? 'day' : 'days'}`
-}
-
-function formatCardDate(value: string) {
-  const date = parseDateOnly(value)
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(date)
-}
-
 function formatFullDate(value: string) {
   const date = parseDateOnly(value)
 
@@ -567,15 +551,6 @@ function formatFullDate(value: string) {
 }
 
 function formatShortDate(value: string) {
-  const date = parseDateOnly(value)
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
-function formatMonthDay(value: string) {
   const date = parseDateOnly(value)
 
   return new Intl.DateTimeFormat(undefined, {

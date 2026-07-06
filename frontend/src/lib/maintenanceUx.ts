@@ -10,6 +10,7 @@ import type {
   ReminderLeadUnit,
   RepeatOption,
 } from '../types/reminder'
+import { formatDueDateLabel } from './reminderDisplay'
 import { formatReminderTiming } from './reminderSchedule'
 
 interface MaintenanceAreaOption {
@@ -266,7 +267,7 @@ export function addMaintenanceInterval(value: string, amount: number, unit: Main
 }
 
 function getMaintenanceCardLabelFromParts(details: MaintenanceDetailsLike, dueDate: string | null | undefined) {
-  const parts = [getMaintenanceAreaLabel(details.maintenance_area)]
+  const parts = []
   const cadence = getMaintenanceCadenceLabel(details)
   const dueLabel = dueDate ? getMaintenanceDueLabel(dueDate) : null
 
@@ -278,7 +279,7 @@ function getMaintenanceCardLabelFromParts(details: MaintenanceDetailsLike, dueDa
     parts.push(dueLabel)
   }
 
-  return parts.length > 1 ? parts.join(' \u2022 ') : null
+  return parts.length > 0 ? parts.join(' \u2022 ') : null
 }
 
 function getMaintenanceSchedulePhrase(details: MaintenanceDetailsLike) {
@@ -318,33 +319,7 @@ function getMaintenanceCadenceLabel(details: MaintenanceDetailsLike) {
 }
 
 function getMaintenanceDueLabel(value: string) {
-  const targetDate = parseDateOnly(value)
-  const today = startOfDay(new Date())
-  const daysUntil = Math.ceil((targetDate.getTime() - today.getTime()) / 86_400_000)
-
-  if (daysUntil === 0) {
-    return 'Due today'
-  }
-
-  if (daysUntil === 1) {
-    return 'Due tomorrow'
-  }
-
-  if (daysUntil < 0) {
-    const daysPast = Math.abs(daysUntil)
-    return `Overdue by ${daysPast} ${daysPast === 1 ? 'day' : 'days'}`
-  }
-
-  if (daysUntil <= 13) {
-    return `Due in ${daysUntil} ${daysUntil === 1 ? 'day' : 'days'}`
-  }
-
-  if (daysUntil < 60) {
-    const weeks = Math.max(2, Math.round(daysUntil / 7))
-    return `Due in ${weeks} ${weeks === 1 ? 'week' : 'weeks'}`
-  }
-
-  return `Due ${formatMonthDay(value)}`
+  return formatDueDateLabel(value, { includeDate: false })
 }
 
 function containsSensitiveText(values: Array<string | null | undefined>) {
@@ -379,10 +354,6 @@ function parseDateOnly(value: string) {
   return new Date(year, month - 1, day)
 }
 
-function startOfDay(value: Date) {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate())
-}
-
 function formatDateOnly(value: Date) {
   const year = value.getFullYear()
   const month = String(value.getMonth() + 1).padStart(2, '0')
@@ -397,14 +368,5 @@ function formatFullDate(value: string) {
     month: 'long',
     day: 'numeric',
     year: 'numeric',
-  }).format(date)
-}
-
-function formatMonthDay(value: string) {
-  const date = parseDateOnly(value)
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
   }).format(date)
 }

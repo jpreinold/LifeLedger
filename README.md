@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-LifeLedger supports smart birthday reminders, smart renewal/expiration reminders, and smart maintenance reminders. Birthday reminders can calculate age context when a birth year or turning age is known. Renewal reminders can store safe renewal details and calculate context such as renewal timing, expiration status, review lead time, and renewal windows. Maintenance reminders can calculate the next due date from a last completed date and interval, then advance after completion. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. Birthday reminders can calculate age context, renewal reminders can explain renewal or expiration timing, and maintenance reminders can calculate and advance the next due date from a date-based interval. Templates route into the matching smart flow, and reminder cards, dashboard rows, and filters use the same smart reminder type language. Local development still defaults to JSON persistence and a local dev user; deployed reminders are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -83,7 +83,7 @@ Reminder records now store optional delivery preference fields: `reminder_lead_v
 
 Reminder records also support `reminder_type`. Existing reminders default to `generic`; smart types are `birthday`, `renewal`, and `maintenance`. Birthday reminders may include `birthday_details`; they calculate the next birthday date, infer birth year when the user enters the age someone is turning, and show labels such as turning age or age unknown on cards and dashboard rows. Renewal reminders may include `renewal_details` for safe renewal, expiration, review, subscription, free trial, warranty, or document dates. Maintenance reminders may include `maintenance_details` with item name, maintenance area, last completed date, interval, next due date, and general instructions. Maintenance is date-based only; mileage-based and usage-based maintenance are not included yet.
 
-The reminder list defaults to active reminders and includes simple filters for overdue items, today, this week, this month, upcoming reminders, and completed reminders. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list. The dashboard includes an **On your radar** section that prioritizes overdue reminders, due today reminders, reminders whose reminder window has started, and reminders due this week.
+The reminder list defaults to active reminders and includes filters for overdue items, today, this week, this month, upcoming reminders, completed reminders, and smart reminder type: Reminders, Birthdays, Renewals, and Maintenance. Overdue reminders show how long they have been overdue, and completed reminders can be reviewed separately without cluttering the main active list. The dashboard surfaces smart labels in attention and upcoming rows, plus real counts for each smart reminder type.
 
 ## Creating The First Cognito User
 

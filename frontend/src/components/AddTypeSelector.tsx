@@ -101,7 +101,7 @@ export function AddTypeSelector({
     },
     {
       title: 'Birthday',
-      description: 'Track birthdays and calculate age when you know the birth year or turning age.',
+      description: 'Track birthdays and calculate age.',
       icon: Cake,
       tone: 'pink',
       onClick: () => closeWithAction(onChooseBirthday),

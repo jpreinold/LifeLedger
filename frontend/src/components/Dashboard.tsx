@@ -9,6 +9,7 @@ import {
   Plus,
 } from 'lucide-react'
 
+import { formatReminderDueLabel } from '../lib/reminderDisplay'
 import { getNeedsAttention, type AttentionReminder } from '../lib/reminderSchedule'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { Reminder } from '../types/reminder'
@@ -207,25 +208,8 @@ function getRadarDueLabel(item: AttentionReminder) {
   }
 
   if (item.reason === 'Reminder window' && item.reminderDate) {
-    return `Window opened ${formatShortDate(item.reminderDate)}. Due ${formatShortDate(item.reminder.due_date)}`
+    return `Reminder started. ${formatReminderDueLabel(item.reminder, { includeDate: false })}`
   }
 
-  if (item.reason === 'Overdue') {
-    return `Due ${formatShortDate(item.reminder.due_date)}`
-  }
-
-  if (item.reason === 'Due today') {
-    return `Due today at ${formatShortDate(item.reminder.due_date)}`
-  }
-
-  return `Due ${formatShortDate(item.reminder.due_date)}`
-}
-
-function formatShortDate(value: string) {
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(year, month - 1, day))
+  return formatReminderDueLabel(item.reminder, { includeDate: false })
 }
