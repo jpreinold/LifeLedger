@@ -291,7 +291,7 @@ function getTemplateBadge(template: LifeAdminTemplate) {
   }
 
   if (template.targetType === 'generic') {
-    return 'Generic'
+    return 'Reminder'
   }
 
   return 'Smart'

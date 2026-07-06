@@ -2,6 +2,14 @@ import { useMemo, useState } from 'react'
 import { LayoutTemplate, Plus } from 'lucide-react'
 
 import { ReminderCard } from './ReminderCard'
+import {
+  getReminderTypeFilterLabel,
+  matchesReminderTypeFilter,
+  parseDateOnly,
+  reminderTypeFilters,
+  startOfDay,
+  type ReminderTypeFilter,
+} from '../lib/reminderDisplay'
 import type { Reminder } from '../types/reminder'
 
 type ReminderFilter = 'active' | 'overdue' | 'today' | 'week' | 'month' | 'upcoming' | 'completed'
@@ -36,11 +44,12 @@ export function ReminderList({
   onAddReminder,
 }: ReminderListProps) {
   const [activeFilter, setActiveFilter] = useState<ReminderFilter>('active')
+  const [activeTypeFilter, setActiveTypeFilter] = useState<ReminderTypeFilter>('all')
   const visibleReminders = useMemo(
-    () => reminders.filter((reminder) => matchesFilter(reminder, activeFilter)),
-    [activeFilter, reminders],
+    () => reminders.filter((reminder) => matchesDateFilter(reminder, activeFilter) && matchesReminderTypeFilter(reminder, activeTypeFilter)),
+    [activeFilter, activeTypeFilter, reminders],
   )
-  const emptyState = getEmptyState(activeFilter, reminders.length === 0)
+  const emptyState = getEmptyState(activeFilter, activeTypeFilter, reminders)
 
   return (
     <section className="reminders-panel" aria-labelledby="reminders-heading">
@@ -49,9 +58,11 @@ export function ReminderList({
         <span>{isLoading ? 'Loading' : `${visibleReminders.length} shown`}</span>
       </div>
 
-      <div className="filter-tabs" aria-label="Filter reminders">
+      <div className="filter-tabs" aria-label="Filter reminders by date or status">
         {filters.map((filter) => {
-          const count = reminders.filter((reminder) => matchesFilter(reminder, filter.id)).length
+          const count = reminders.filter(
+            (reminder) => matchesDateFilter(reminder, filter.id) && matchesReminderTypeFilter(reminder, activeTypeFilter),
+          ).length
 
           return (
             <button
@@ -68,12 +79,33 @@ export function ReminderList({
         })}
       </div>
 
+      <div className="filter-tabs reminder-type-tabs" aria-label="Filter reminders by type">
+        {reminderTypeFilters.map((filter) => {
+          const count = reminders.filter(
+            (reminder) => matchesDateFilter(reminder, activeFilter) && matchesReminderTypeFilter(reminder, filter.id),
+          ).length
+
+          return (
+            <button
+              type="button"
+              className={`filter-tab type-filter-tab ${activeTypeFilter === filter.id ? 'active' : ''}`}
+              onClick={() => setActiveTypeFilter(filter.id)}
+              aria-pressed={activeTypeFilter === filter.id}
+              key={filter.id}
+            >
+              <span>{filter.label}</span>
+              <strong>{count}</strong>
+            </button>
+          )
+        })}
+      </div>
+
       {isLoading ? <p className="empty-state">Loading reminders...</p> : null}
 
       {!isLoading && visibleReminders.length === 0 ? (
         <div className="empty-state empty-state-card">
           <p>{emptyState}</p>
-          {reminders.length === 0 && activeFilter === 'active' ? (
+          {reminders.length === 0 && activeFilter === 'active' && activeTypeFilter === 'all' ? (
             <div className="empty-state-actions">
               <button type="button" className="secondary-button empty-template-button" onClick={onBrowseTemplates}>
                 <LayoutTemplate size={17} aria-hidden="true" />
@@ -103,7 +135,7 @@ export function ReminderList({
   )
 }
 
-function matchesFilter(reminder: Reminder, filter: ReminderFilter) {
+function matchesDateFilter(reminder: Reminder, filter: ReminderFilter) {
   if (filter === 'completed') {
     return reminder.completed
   }
@@ -137,8 +169,7 @@ function matchesFilter(reminder: Reminder, filter: ReminderFilter) {
 
 function isDueThisMonth(value: string) {
   const dueDate = parseDateOnly(value)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const today = startOfDay(new Date())
 
   return (
     dueDate >= today &&
@@ -147,14 +178,25 @@ function isDueThisMonth(value: string) {
   )
 }
 
-function parseDateOnly(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
+function getEmptyState(filter: ReminderFilter, typeFilter: ReminderTypeFilter, reminders: Reminder[]) {
+  if (reminders.length === 0 && filter === 'active' && typeFilter === 'all') {
+    return 'Add your first reminder or start from a template.'
+  }
 
-function getEmptyState(filter: ReminderFilter, hasNoReminders: boolean) {
-  if (hasNoReminders && filter === 'active') {
-    return 'Start with a life admin template like vehicle registration, annual checkup, or subscription review.'
+  const hasType = typeFilter === 'all' || reminders.some((reminder) => matchesReminderTypeFilter(reminder, typeFilter))
+  if (!hasType) {
+    const typeEmptyStates: Record<Exclude<ReminderTypeFilter, 'all'>, string> = {
+      generic: 'Add your first reminder or start from a template.',
+      birthday: 'Add a birthday to track important dates and calculate ages.',
+      renewal: 'Add a renewal or expiration to keep important dates from sneaking up on you.',
+      maintenance: 'Add maintenance reminders for recurring home, vehicle, pet, or personal tasks.',
+    }
+
+    return typeEmptyStates[typeFilter as Exclude<ReminderTypeFilter, 'all'>]
+  }
+
+  if (typeFilter !== 'all') {
+    return `No ${getReminderTypeFilterLabel(typeFilter).toLowerCase()} match this filter.`
   }
 
   const emptyStates: Record<ReminderFilter, string> = {

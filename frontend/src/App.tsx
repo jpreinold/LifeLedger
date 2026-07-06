@@ -26,6 +26,7 @@ import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
+import { formatCompletionNotice } from './lib/reminderDisplay'
 import { createBirthdayReminderInput, createMaintenanceReminderInput, createRenewalReminderInput } from './lib/reminderInput'
 import { getNeedsAttention } from './lib/reminderSchedule'
 import type { Reminder, ReminderInput } from './types/reminder'
@@ -154,15 +155,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     const reminder = reminders.find((item) => item.id === id)
 
     try {
-      await remindersApi.complete(id)
+      const completedReminder = await remindersApi.complete(id)
       await loadReminders()
-      setNotice(
-        reminder?.reminder_type === 'maintenance'
-          ? 'Completed. Maintenance moved to the next due date.'
-          : reminder?.repeat && reminder.repeat !== 'None'
-            ? 'Moved to next due date.'
-            : 'Reminder completed.',
-      )
+      setNotice(formatCompletionNotice(reminder, completedReminder))
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to complete reminder.')
     }

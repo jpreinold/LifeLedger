@@ -1,6 +1,5 @@
 import {
   ChevronRight,
-  CreditCard,
   FileText,
   Gift,
   ListChecks,
@@ -11,6 +10,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
+import { formatReminderDueLabel, parseDateOnly, startOfDay } from '../lib/reminderDisplay'
 import { getNeedsAttention, type AttentionReminder } from '../lib/reminderSchedule'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { Reminder } from '../types/reminder'
@@ -47,62 +47,47 @@ export function HomeDashboard({
   onAddReminder,
   onBrowseTemplates,
   onViewReminders,
-  onViewRecords,
   onEditReminder,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter((reminder) => !reminder.completed)
+  const genericReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'generic')
+  const birthdayReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'birthday')
+  const renewalReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'renewal')
+  const maintenanceReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'maintenance')
   const attentionItems = getNeedsAttention(reminders)
   const visibleAttentionItems = attentionItems.slice(0, maxAttentionItems)
   const upcomingItems = getUpcomingReminders(activeReminders).slice(0, maxUpcomingItems)
-  const renewalReminders = activeReminders.filter(isRenewalReminder)
   const overviewTiles: OverviewTileData[] = [
     {
       label: 'Reminders',
-      value: String(activeReminders.length),
-      sublabel: `${attentionItems.length} due`,
+      value: String(genericReminders.length),
+      sublabel: formatOverviewSublabel(getNeedsAttention(genericReminders).length, 'need attention'),
       icon: ListChecks,
       tone: 'blue',
       onClick: onViewReminders,
     },
     {
-      label: 'Records',
-      value: 'Soon',
-      sublabel: 'Coming soon',
-      icon: FileText,
-      tone: 'green',
-      onClick: onViewRecords,
-    },
-    {
-      label: 'Renewals',
-      value: renewalReminders.length > 0 ? String(renewalReminders.length) : 'Soon',
-      sublabel: renewalReminders.length > 0 ? `${getNeedsAttention(renewalReminders).length} due` : 'Coming soon',
-      icon: RefreshCcw,
-      tone: 'orange',
-      disabled: renewalReminders.length === 0,
-      onClick: onViewReminders,
-    },
-    {
-      label: 'Maintenance',
-      value: String(countByCategory(activeReminders, 'Home')),
-      sublabel: `${getNeedsAttention(activeReminders.filter((reminder) => reminder.category === 'Home')).length} due`,
-      icon: Wrench,
-      tone: 'teal',
-      onClick: onViewReminders,
-    },
-    {
-      label: 'Family dates',
-      value: String(countByCategory(activeReminders, 'Family')),
-      sublabel: `${getNeedsAttention(activeReminders.filter((reminder) => reminder.category === 'Family')).length} upcoming`,
+      label: 'Birthdays',
+      value: String(birthdayReminders.length),
+      sublabel: formatOverviewSublabel(getNeedsAttention(birthdayReminders).length, 'coming up'),
       icon: Gift,
       tone: 'purple',
       onClick: onViewReminders,
     },
     {
-      label: 'Subscriptions',
-      value: String(countByCategory(activeReminders, 'Subscriptions')),
-      sublabel: `${getNeedsAttention(activeReminders.filter((reminder) => reminder.category === 'Subscriptions')).length} due`,
-      icon: CreditCard,
-      tone: 'cyan',
+      label: 'Renewals',
+      value: String(renewalReminders.length),
+      sublabel: formatOverviewSublabel(getNeedsAttention(renewalReminders).length, 'need attention'),
+      icon: RefreshCcw,
+      tone: 'orange',
+      onClick: onViewReminders,
+    },
+    {
+      label: 'Maintenance',
+      value: String(maintenanceReminders.length),
+      sublabel: formatOverviewSublabel(getNeedsAttention(maintenanceReminders).length, 'due'),
+      icon: Wrench,
+      tone: 'teal',
       onClick: onViewReminders,
     },
   ]
@@ -178,10 +163,10 @@ export function HomeDashboard({
 
       <section className="home-card" aria-labelledby="overview-heading">
         <div className="home-card-header">
-          <h2 id="overview-heading">Life admin overview</h2>
+          <h2 id="overview-heading">Smart reminder overview</h2>
         </div>
 
-        <div className="overview-grid">
+        <div className="overview-grid overview-grid-smart">
           {overviewTiles.map((tile) => (
             <OverviewTile tile={tile} key={tile.label} />
           ))}
@@ -225,6 +210,7 @@ function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () 
   const { reminder } = item
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = getSmartReminderLabel(reminder)
+  const detail = smartLabel ?? formatAttentionStatus(item)
 
   return (
     <button type="button" className="home-list-row" onClick={onClick}>
@@ -233,17 +219,11 @@ function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () 
       </span>
       <span className="home-row-copy">
         <strong>{reminder.title}</strong>
-        {smartLabel ? (
-          <span>
-            <em className={`attention-text attention-text-${getAttentionTone(item)}`}>{smartLabel}</em>
-          </span>
-        ) : (
-          <span>
-            {reminder.category}
-            {' \u00b7 '}
-            <em className={`attention-text attention-text-${getAttentionTone(item)}`}>{formatAttentionStatus(item)}</em>
-          </span>
-        )}
+        <span>
+          {reminder.category}
+          {' \u2022 '}
+          <em className={`attention-text attention-text-${getAttentionTone(item)}`}>{detail}</em>
+        </span>
       </span>
       <ChevronRight size={18} aria-hidden="true" className="home-row-chevron" />
     </button>
@@ -253,6 +233,7 @@ function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () 
 function UpcomingRow({ reminder, onClick }: { reminder: Reminder; onClick: () => void }) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = getSmartReminderLabel(reminder)
+  const detail = smartLabel ?? formatReminderDueLabel(reminder, { includeDate: false })
 
   return (
     <button type="button" className="home-list-row" onClick={onClick}>
@@ -261,7 +242,7 @@ function UpcomingRow({ reminder, onClick }: { reminder: Reminder; onClick: () =>
       </span>
       <span className="home-row-copy">
         <strong>{reminder.title}</strong>
-        <span>{smartLabel ?? `${reminder.category} \u00b7 ${formatShortDate(reminder.due_date)}`}</span>
+        <span>{reminder.category} {'\u2022'} {detail}</span>
       </span>
       <ChevronRight size={18} aria-hidden="true" className="home-row-chevron" />
     </button>
@@ -301,27 +282,16 @@ function formatAttentionSummary(count: number) {
   return `${count} ${count === 1 ? 'item needs' : 'items need'} attention today.`
 }
 
+function formatOverviewSublabel(count: number, label: string) {
+  return count === 0 ? 'All clear' : `${count} ${label}`
+}
+
 function formatAttentionStatus(item: AttentionReminder) {
-  if (item.reason === 'Overdue') {
-    const days = getDaysOverdue(item.reminder.due_date)
-    return `Overdue by ${days} ${days === 1 ? 'day' : 'days'}`
-  }
-
-  if (item.reason === 'Due today') {
-    return `Due today \u00b7 ${formatReminderTime(item.reminder.reminder_time)}`
-  }
-
-  const daysUntilDue = getDaysUntilDue(item.reminder.due_date)
-
-  if (daysUntilDue > 0 && daysUntilDue <= 7) {
-    return `Due in ${daysUntilDue} ${daysUntilDue === 1 ? 'day' : 'days'}`
-  }
-
   if (item.reason === 'Reminder window') {
-    return `Reminder started \u00b7 Due ${formatShortDate(item.reminder.due_date)}`
+    return `Reminder started \u2022 ${formatReminderDueLabel(item.reminder, { includeDate: false })}`
   }
 
-  return `Due ${formatShortDate(item.reminder.due_date)}`
+  return formatReminderDueLabel(item.reminder, { includeDate: false })
 }
 
 function getAttentionTone(item: AttentionReminder) {
@@ -356,73 +326,6 @@ function getUpcomingReminders(reminders: Reminder[]) {
 
       return left.title.localeCompare(right.title)
     })
-}
-
-function isRenewalReminder(reminder: Reminder) {
-  if (reminder.reminder_type === 'renewal') {
-    return true
-  }
-
-  const title = reminder.title.toLowerCase()
-
-  return (
-    reminder.repeat === 'Yearly' ||
-    title.includes('renew') ||
-    title.includes('registration') ||
-    title.includes('insurance') ||
-    title.includes('license') ||
-    title.includes('membership') ||
-    title.includes('tag')
-  )
-}
-
-function countByCategory(reminders: Reminder[], category: Reminder['category']) {
-  return reminders.filter((reminder) => reminder.category === category).length
-}
-
-function getDaysOverdue(value: string) {
-  const dueDate = parseDateOnly(value)
-  const today = startOfDay(new Date())
-
-  const difference = today.getTime() - dueDate.getTime()
-  const days = Math.ceil(difference / 86_400_000)
-
-  return Math.max(days, 1)
-}
-
-function getDaysUntilDue(value: string) {
-  const dueDate = parseDateOnly(value)
-  const today = startOfDay(new Date())
-
-  return Math.ceil((dueDate.getTime() - today.getTime()) / 86_400_000)
-}
-
-function formatReminderTime(value: string | null) {
-  const [hour = '9', minute = '00'] = (value ?? '09:00').split(':')
-  const date = new Date(2000, 0, 1, Number(hour), Number(minute))
-
-  return new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
-}
-
-function formatShortDate(value: string) {
-  const date = parseDateOnly(value)
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
-function parseDateOnly(value: string) {
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-function startOfDay(value: Date) {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate())
 }
 
 function addDays(value: Date, days: number) {
