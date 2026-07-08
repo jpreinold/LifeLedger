@@ -2506,6 +2506,43 @@ textarea:focus-visible {
   gap: var(--space-3);
 }
 
+.settings-save-bar {
+  position: fixed;
+  right: 50%;
+  bottom: calc(92px + env(safe-area-inset-bottom));
+  z-index: 30;
+  width: min(calc(100% - 24px), 448px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(200, 212, 230, 0.9);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 18px 50px rgba(15, 32, 61, 0.18);
+  transform: translateX(50%);
+  backdrop-filter: blur(18px);
+}
+
+.settings-save-bar-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.settings-save-bar-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.settings-save-bar-button {
+  width: auto;
+  padding-inline: var(--space-3);
+  white-space: nowrap;
+}
+
 .settings-card {
   display: grid;
   gap: var(--space-4);
@@ -2674,6 +2711,10 @@ textarea:focus-visible {
 }
 
 .update-toast {
+  bottom: calc(108px + env(safe-area-inset-bottom));
+}
+
+.settings-save-bar {
   bottom: calc(108px + env(safe-area-inset-bottom));
 }
 

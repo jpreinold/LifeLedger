@@ -695,6 +695,34 @@ function SettingsView({
   const accountLabel = userLabel?.trim() || (isCognitoAuthEnabled ? 'Signed in' : 'Local development mode')
   const controlsDisabled = isDigestPreferencesLoading || isSavingDigestPreferences
 
+  const savedDigestEnabled = digestPreferences.digest_enabled
+  const savedDigestTime = digestPreferences.digest_time
+  const savedDigestLookahead = digestPreferences.digest_lookahead_days
+  const [digestDraft, setDigestDraft] = useState<DigestDraft>(() => toDigestDraft(digestPreferences))
+
+  useEffect(() => {
+    setDigestDraft({
+      digest_enabled: savedDigestEnabled,
+      digest_time: savedDigestTime,
+      digest_lookahead_days: savedDigestLookahead,
+    })
+  }, [savedDigestEnabled, savedDigestTime, savedDigestLookahead])
+
+  const pendingDigestChanges = buildDigestChanges(digestPreferences, digestDraft)
+  const hasUnsavedChanges = Object.keys(pendingDigestChanges).length > 0
+
+  async function handleSaveDigestSettings() {
+    if (!hasUnsavedChanges) {
+      return
+    }
+
+    await onUpdateDigestPreferences(pendingDigestChanges)
+  }
+
+  function handleDiscardDigestSettings() {
+    setDigestDraft(toDigestDraft(digestPreferences))
+  }
+
   return (
     <section className="settings-view" aria-labelledby="settings-heading">
       <div className="settings-card">
@@ -730,7 +758,13 @@ function SettingsView({
               <p>Configure your in-app briefing and push schedule.</p>
             </div>
             <span className="settings-save-state">
-              {isDigestPreferencesLoading ? 'Loading' : isSavingDigestPreferences ? 'Saving' : 'Saved'}
+              {isDigestPreferencesLoading
+                ? 'Loading'
+                : isSavingDigestPreferences
+                  ? 'Saving'
+                  : hasUnsavedChanges
+                    ? 'Unsaved changes'
+                    : 'Saved'}
             </span>
           </div>
 
@@ -740,10 +774,13 @@ function SettingsView({
               <small>Controls the in-app digest and Daily Digest push eligibility.</small>
             </span>
             <input
-              checked={digestPreferences.digest_enabled}
+              checked={digestDraft.digest_enabled}
               disabled={controlsDisabled}
               type="checkbox"
-              onChange={(event) => void onUpdateDigestPreferences({ digest_enabled: event.currentTarget.checked })}
+              onChange={(event) => {
+                const digest_enabled = event.currentTarget.checked
+                setDigestDraft((current) => ({ ...current, digest_enabled }))
+              }}
             />
           </label>
 
@@ -755,8 +792,11 @@ function SettingsView({
             <input
               disabled={controlsDisabled}
               type="time"
-              value={digestPreferences.digest_time}
-              onChange={(event) => void onUpdateDigestPreferences({ digest_time: event.currentTarget.value })}
+              value={digestDraft.digest_time}
+              onChange={(event) => {
+                const digest_time = event.currentTarget.value
+                setDigestDraft((current) => ({ ...current, digest_time }))
+              }}
             />
           </label>
 
@@ -767,12 +807,11 @@ function SettingsView({
             </span>
             <select
               disabled={controlsDisabled}
-              value={digestPreferences.digest_lookahead_days}
-              onChange={(event) =>
-                void onUpdateDigestPreferences({
-                  digest_lookahead_days: Number(event.currentTarget.value) as DigestLookaheadDays,
-                })
-              }
+              value={digestDraft.digest_lookahead_days}
+              onChange={(event) => {
+                const digest_lookahead_days = Number(event.currentTarget.value) as DigestLookaheadDays
+                setDigestDraft((current) => ({ ...current, digest_lookahead_days }))
+              }}
             >
               {digestLookaheadOptions.map((days) => (
                 <option key={days} value={days}>
@@ -800,8 +839,62 @@ function SettingsView({
           </button>
         ) : null}
       </div>
+
+      {hasUnsavedChanges ? (
+        <div className="settings-save-bar" role="region" aria-label="Unsaved settings changes">
+          <span className="settings-save-bar-text">You have unsaved changes</span>
+          <div className="settings-save-bar-actions">
+            <button
+              type="button"
+              className="secondary-button settings-save-bar-button"
+              disabled={isSavingDigestPreferences}
+              onClick={handleDiscardDigestSettings}
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              className="primary-button settings-save-bar-button"
+              disabled={isSavingDigestPreferences}
+              onClick={() => void handleSaveDigestSettings()}
+            >
+              {isSavingDigestPreferences ? 'Saving...' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
+}
+
+interface DigestDraft {
+  digest_enabled: boolean
+  digest_time: string
+  digest_lookahead_days: DigestLookaheadDays
+}
+
+function toDigestDraft(preferences: DigestPreferences): DigestDraft {
+  return {
+    digest_enabled: preferences.digest_enabled,
+    digest_time: preferences.digest_time,
+    digest_lookahead_days: preferences.digest_lookahead_days,
+  }
+}
+
+function buildDigestChanges(saved: DigestPreferences, draft: DigestDraft): DigestPreferencesUpdate {
+  const changes: DigestPreferencesUpdate = {}
+
+  if (draft.digest_enabled !== saved.digest_enabled) {
+    changes.digest_enabled = draft.digest_enabled
+  }
+  if (draft.digest_time !== saved.digest_time) {
+    changes.digest_time = draft.digest_time
+  }
+  if (draft.digest_lookahead_days !== saved.digest_lookahead_days) {
+    changes.digest_lookahead_days = draft.digest_lookahead_days
+  }
+
+  return changes
 }
 
 
