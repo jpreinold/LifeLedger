@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.config import Settings, get_settings
 from app.digest import build_daily_digest_summary
 from app.models import UserPreferences
+from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository
 from app.push_sender import InvalidPushSubscriptionError, PushPayload, PushSendError, PushSender, PyWebPushSender
@@ -69,8 +70,8 @@ def run_daily_digest_push(
         checked_users += 1
         preferences = preferences_repo.get_preferences(user_id)
         if preferences is None:
-            skipped_no_preferences += 1
-            continue
+            preferences = default_digest_preferences(user_id, now_utc)
+            preferences_repo.save_preferences(preferences)
 
         local_now = to_user_local_datetime(now_utc, preferences.timezone)
         if not is_digest_due(preferences, local_now, schedule_window_minutes):

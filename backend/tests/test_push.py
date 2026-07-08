@@ -273,6 +273,36 @@ def test_scheduled_digest_push_sends_user_scoped_summaries(local_repositories):
     assert bodies["https://push.example/b"] == "0 needs attention \u2022 0 due today \u2022 1 coming up"
 
 
+def test_scheduled_digest_push_defaults_and_saves_missing_preferences(local_repositories):
+    reminder_repo, preferences_repo, push_repo = local_repositories
+    now = datetime(2026, 7, 8, 9, 5, tzinfo=timezone.utc)
+    reminder_repo.create_reminder(create_reminder("user-a", date(2026, 7, 8), "A due today"))
+    reminder_repo.create_reminder(create_reminder("user-b", date(2026, 7, 8), "B due today"))
+    push_repo.save_subscription(create_subscription("user-a", "https://push.example/a", now))
+    sender = RecordingPushSender()
+
+    result = run_daily_digest_push(
+        now=now,
+        settings=push_settings(),
+        reminder_repository=reminder_repo,
+        preferences_repository=preferences_repo,
+        push_repository=push_repo,
+        sender=sender,
+    )
+
+    saved = preferences_repo.get_preferences("user-a")
+    assert saved is not None
+    assert saved.user_id == "user-a"
+    assert saved.digest_time == "09:00"
+    assert saved.timezone is None
+    assert saved.digest_last_pushed_at == now
+    assert preferences_repo.get_preferences("user-b") is None
+    assert result.checked_users == 1
+    assert result.sent == 1
+    assert result.skipped_no_preferences == 0
+    assert sender.sent[0][0] == "https://push.example/a"
+
+
 def test_scheduled_digest_push_skips_empty_digest(local_repositories):
     reminder_repo, preferences_repo, push_repo = local_repositories
     now = datetime(2026, 7, 8, 13, 5, tzinfo=timezone.utc)
