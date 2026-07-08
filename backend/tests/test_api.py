@@ -73,6 +73,10 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
     [
         ("get", "/alerts", None),
         ("get", "/preferences/digest", None),
+        ("get", "/push/config", None),
+        ("get", "/push/subscriptions", None),
+        ("post", "/push/subscriptions", {"endpoint": "https://push.example/test", "keys": {"p256dh": "key", "auth": "secret"}}),
+        ("delete", "/push/subscriptions/example-id", None),
         ("get", "/reminders", None),
         ("put", "/preferences/digest", {"digest_enabled": False}),
         ("post", "/reminders", make_payload()),

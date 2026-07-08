@@ -63,4 +63,20 @@ class UserPreferences(BaseModel):
     digest_lookahead_days: int = 30
     timezone: str | None = None
     digest_last_seen_at: datetime | None = None
+    digest_last_pushed_at: datetime | None = None
     updated_at: datetime
+
+
+class PushSubscription(BaseModel):
+    user_id: str
+    subscription_id: str
+    endpoint: str
+    p256dh: str
+    auth: str
+    user_agent: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    disabled_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    failure_count: int = 0

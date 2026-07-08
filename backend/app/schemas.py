@@ -389,3 +389,35 @@ class DigestPreferencesUpdate(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+class PushSubscriptionKeys(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    p256dh: str = Field(..., min_length=1, max_length=512)
+    auth: str = Field(..., min_length=1, max_length=256)
+
+
+class PushSubscriptionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint: str = Field(..., min_length=1, max_length=2048)
+    keys: PushSubscriptionKeys
+    user_agent: str | None = Field(default=None, max_length=512)
+
+
+class PushSubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    subscription_id: str
+    endpoint: str
+    user_agent: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    disabled_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    failure_count: int = 0
+
+
+class PushConfigurationResponse(BaseModel):
+    configured: bool

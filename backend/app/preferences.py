@@ -16,5 +16,6 @@ def default_digest_preferences(user_id: str, now: datetime | None = None) -> Use
         digest_lookahead_days=DEFAULT_DIGEST_LOOKAHEAD_DAYS,
         timezone=None,
         digest_last_seen_at=None,
+        digest_last_pushed_at=None,
         updated_at=resolved_now,
     )

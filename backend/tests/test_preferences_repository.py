@@ -28,6 +28,7 @@ def test_default_digest_preferences_are_push_ready_defaults():
     assert preferences.digest_lookahead_days == 30
     assert preferences.timezone is None
     assert preferences.digest_last_seen_at is None
+    assert preferences.digest_last_pushed_at is None
 
 
 def test_local_preferences_repository_round_trips_by_user(tmp_path):

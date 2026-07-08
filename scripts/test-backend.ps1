@@ -2,7 +2,12 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendDir = Join-Path $repoRoot "backend"
+$tmpDir = Join-Path $repoRoot ".tmp"
 $venvActivate = Join-Path $backendDir ".venv\Scripts\Activate.ps1"
+
+New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+$env:TMP = $tmpDir
+$env:TEMP = $tmpDir
 
 Set-Location $backendDir
 

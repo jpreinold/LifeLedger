@@ -5,10 +5,12 @@ from app.config import (
     DEFAULT_CORS_ALLOWED_ORIGINS,
     DEFAULT_LOCAL_DEV_USER_ID,
     DEFAULT_PREFERENCES_TABLE_NAME,
+    DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME,
     DEFAULT_REMINDERS_TABLE_NAME,
     DYNAMODB_PERSISTENCE,
     LAMBDA_LOCAL_DATA_FILE,
     LAMBDA_LOCAL_PREFERENCES_FILE,
+    LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE,
     LOCAL_AUTH_MODE,
     LOCAL_PERSISTENCE,
     load_settings,
@@ -24,6 +26,7 @@ def test_config_defaults_are_local_safe():
     assert settings.persistence_mode == LOCAL_PERSISTENCE
     assert settings.reminders_table_name == DEFAULT_REMINDERS_TABLE_NAME
     assert settings.preferences_table_name == DEFAULT_PREFERENCES_TABLE_NAME
+    assert settings.push_subscriptions_table_name == DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME
     assert settings.aws_region == "us-east-1"
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
@@ -31,6 +34,10 @@ def test_config_defaults_are_local_safe():
     assert settings.local_preferences_file.endswith(
         "backend\\data\\preferences.json"
     ) or settings.local_preferences_file.endswith("backend/data/preferences.json")
+    assert settings.local_push_subscriptions_file.endswith(
+        "backend\\data\\push-subscriptions.json"
+    ) or settings.local_push_subscriptions_file.endswith("backend/data/push-subscriptions.json")
+    assert settings.push_notifications_configured is False
     assert settings.cors_allowed_origins == DEFAULT_CORS_ALLOWED_ORIGINS
     assert "https://lifeledger.jpreinold.com" in settings.cors_allowed_origins
     assert "https://www.lifeledger.jpreinold.com" in settings.cors_allowed_origins
@@ -45,6 +52,10 @@ def test_config_reads_environment_values():
             "PERSISTENCE_MODE": "dynamodb",
             "REMINDERS_TABLE_NAME": "custom-table",
             "PREFERENCES_TABLE_NAME": "custom-preferences",
+            "PUSH_SUBSCRIPTIONS_TABLE_NAME": "custom-push",
+            "VAPID_PUBLIC_KEY": "public",
+            "VAPID_PRIVATE_KEY": "private",
+            "VAPID_SUBJECT": "mailto:test@example.com",
             "AWS_REGION": "us-west-2",
             "CORS_ALLOWED_ORIGINS": "https://example.com, http://localhost:5173",
         }
@@ -56,6 +67,8 @@ def test_config_reads_environment_values():
     assert settings.persistence_mode == DYNAMODB_PERSISTENCE
     assert settings.reminders_table_name == "custom-table"
     assert settings.preferences_table_name == "custom-preferences"
+    assert settings.push_subscriptions_table_name == "custom-push"
+    assert settings.push_notifications_configured is True
     assert settings.aws_region == "us-west-2"
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
@@ -75,12 +88,19 @@ def test_config_allows_explicit_local_preferences_file():
     assert settings.local_preferences_file == "/tmp/custom-preferences.json"
 
 
+def test_config_allows_explicit_local_push_subscriptions_file():
+    settings = load_settings({"LOCAL_PUSH_SUBSCRIPTIONS_FILE": "/tmp/custom-push.json"})
+
+    assert settings.local_push_subscriptions_file == "/tmp/custom-push.json"
+
+
 def test_sam_local_defaults_to_writable_tmp_data_file():
     settings = load_settings({"AWS_SAM_LOCAL": "true"})
 
     assert settings.persistence_mode == LOCAL_PERSISTENCE
     assert settings.local_data_file == LAMBDA_LOCAL_DATA_FILE
     assert settings.local_preferences_file == LAMBDA_LOCAL_PREFERENCES_FILE
+    assert settings.local_push_subscriptions_file == LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE
 
 
 def test_config_rejects_unknown_persistence_mode():

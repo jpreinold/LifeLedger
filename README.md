@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. This is not push notification, email, SMS, or calendar sync delivery yet. Local development still defaults to JSON persistence and a local dev user; deployed reminders and digest preferences are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Email, SMS, public sign-up, Google Calendar sync, records, and document uploads are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -79,13 +79,13 @@ Templates create user-scoped reminders only after the user confirms the form. Th
 
 Reminders can be created, edited, completed, and deleted from the React app. Editing uses the authenticated `PUT /reminders/{id}` route and only sends user-editable reminder fields.
 
-Reminder records store optional delivery preference fields: `reminder_lead_value`, `reminder_lead_unit`, and `reminder_time`. The UI defaults new reminders to 1 day before at 9:00 AM and supports same day, 1 day before, 1 week before, 1 month before, and a simple custom lead time. These fields now feed the in-app alert eligibility window and prepare LifeLedger for future notification, calendar, and email integrations; this phase still does not send push notifications, email, or SMS.
+Reminder records store optional delivery preference fields: `reminder_lead_value`, `reminder_lead_unit`, and `reminder_time`. The UI defaults new reminders to 1 day before at 9:00 AM and supports same day, 1 day before, 1 week before, 1 month before, and a simple custom lead time. These fields now feed the in-app alert eligibility window and prepare LifeLedger for future per-reminder delivery, calendar, and email integrations; this phase only sends the optional Daily Digest push summary, not per-reminder custom pushes, email, or SMS.
 
 Reminder records also support `reminder_type`. Existing reminders default to `generic`; smart types are `birthday`, `renewal`, and `maintenance`. Birthday reminders may include `birthday_details`; they calculate the next birthday date, infer birth year when the user enters the age someone is turning, and show labels such as turning age or age unknown on cards and dashboard rows. Renewal reminders may include `renewal_details` for safe renewal, expiration, review, subscription, free trial, warranty, or document dates. Maintenance reminders may include `maintenance_details` with item name, maintenance area, last completed date, interval, next due date, and general instructions. Maintenance is date-based only; mileage-based and usage-based maintenance are not included yet.
 
 The bell opens an in-app Alert Center backed by `GET /alerts`. Alerts are reminders that are active, have a due date, are overdue, due today, or inside their configured reminder timing window, and are not currently dismissed or snoozed. The same alert set powers the bell badge and Home dashboard Needs attention section. Alert actions can complete, dismiss for now, snooze until tomorrow morning, or open the existing edit flow.
 
-The Home dashboard includes a Daily Digest card. Opening it shows a near-full-height briefing drawer with Needs attention, Due today, Coming up, and compact smart reminder summaries. Digest items open the existing reminder detail drawer. Digest preferences live in Settings and include enabled status, digest time, lookahead window, timezone, and last-seen tracking. These preferences prepare the app for future push notification scheduling, but browser push subscriptions, notification permissions, VAPID, scheduled sending, and calendar sync are not implemented yet.
+The Home dashboard includes a Daily Digest card. Opening it shows a near-full-height briefing drawer with Needs attention, Due today, Coming up, and compact smart reminder summaries. Digest items open the existing reminder detail drawer. Digest preferences live in Settings and include enabled status, digest time, lookahead window, timezone, and last-seen tracking. Push Notifications in Settings are optional and user-enabled; they use the same Daily Digest preferences and timezone, store subscriptions under the authenticated user only, and send summary-level content such as counts for needs attention, due today, and coming up. Calendar sync is not implemented yet.
 
 The reminder list now uses the top status cards as filters: All active, Overdue, Due today, and Due this month. The smart type chips remain as the only chip row: All types, Reminders, Birthdays, Renewals, and Maintenance. Status cards and type chips combine, and empty states describe the active filter where possible.
 
@@ -134,6 +134,7 @@ Cloudflare Pages environment variables:
 | `VITE_COGNITO_REGION` | `us-east-1` |
 | `VITE_COGNITO_USER_POOL_ID` | SAM output `UserPoolId` |
 | `VITE_COGNITO_USER_POOL_CLIENT_ID` | SAM output `UserPoolClientId` |
+| `VITE_VAPID_PUBLIC_KEY` | Public VAPID key for browser Push API subscription |
 
 These `VITE_*` values are public frontend configuration. Do not put API keys, tokens, passwords, AWS credentials, or private values in Vite environment variables.
 
@@ -169,6 +170,10 @@ Deployed frontend flow:
 - `POST /reminders/{id}/alert/snooze` requires authentication in Cognito mode.
 - `GET /preferences/digest` requires authentication in Cognito mode.
 - `PUT /preferences/digest` requires authentication in Cognito mode.
+- `GET /push/config` requires authentication in Cognito mode.
+- `GET /push/subscriptions` requires authentication in Cognito mode and returns only the current user's active subscriptions.
+- `POST /push/subscriptions` requires authentication in Cognito mode and stores/updates only the current user's subscription. The frontend must not send `user_id`.
+- `DELETE /push/subscriptions/{subscription_id}` requires authentication in Cognito mode and disables only a subscription owned by the current user.
 
 ## Backend Architecture
 
@@ -203,6 +208,11 @@ Backend local development works without setting any variables.
 | `AWS_REGION` | `us-east-1` | Region used by the DynamoDB repository. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
 | `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences when `PERSISTENCE_MODE=local`. |
+| `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name when DynamoDB mode is enabled. |
+| `LOCAL_PUSH_SUBSCRIPTIONS_FILE` | `backend/data/push-subscriptions.json` locally, `/tmp/lifeledger-push-subscriptions.json` in Lambda/SAM local | JSON file used for push subscriptions when `PERSISTENCE_MODE=local`. |
+| `VAPID_PUBLIC_KEY` | empty | Public VAPID key. Also set `VITE_VAPID_PUBLIC_KEY` in the frontend. |
+| `VAPID_PRIVATE_KEY` | empty | Private VAPID key used only by the backend sender. Do not commit a real value. |
+| `VAPID_SUBJECT` | empty | VAPID contact subject, such as `mailto:you@example.com`. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
 ## Serverless Notes
@@ -254,10 +264,12 @@ sam deploy --guided
 - AWS `/health` works without signing in.
 - AWS `/reminders` rejects requests without a bearer token.
 - Cognito admin-created user can sign in.
-- Cloudflare Pages has all required `VITE_*` environment variables.
+- Cloudflare Pages has all required `VITE_*` environment variables, including `VITE_VAPID_PUBLIC_KEY` for push subscriptions.
 - Cloudflare frontend can load, create, complete, and delete reminders after sign-in.
+- AWS is redeployed with the push subscription table, scheduled sender, and VAPID backend parameters.
+- Cloudflare is redeployed with `VITE_VAPID_PUBLIC_KEY`.
 - `frontend/.env.local`, AWS credentials, tokens, and local deployment files are not committed.
 
 ## Not In This Phase
 
-This phase does not add push notifications, Google Calendar sync, email sending, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, mileage-based maintenance, usage-based maintenance, supply inventory, or another frontend redesign. Do not store policy numbers, account numbers, card numbers, government ID numbers, passwords, medical details, or uploaded documents in reminders. Future smart reminder work may include usage-based maintenance, records, secure vault features, and calendar or notification integrations.
+This phase does not add Google Calendar sync, email sending, SMS, secure vault features, AI/RAG, sensitive data fields, file uploads, social login, public registration, mileage-based maintenance, usage-based maintenance, supply inventory, custom per-reminder push rules, notification history, shared households, roles/admin dashboards, or another frontend redesign. Do not store policy numbers, account numbers, card numbers, government ID numbers, passwords, medical details, or uploaded documents in reminders. Future smart reminder work may include usage-based maintenance, records, secure vault features, and calendar or notification integrations.

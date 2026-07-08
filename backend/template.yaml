@@ -30,6 +30,19 @@ Parameters:
   PreferencesTableName:
     Type: String
     Default: lifeledger-preferences-auth
+  PushSubscriptionsTableName:
+    Type: String
+    Default: lifeledger-push-subscriptions-auth
+  VapidPublicKey:
+    Type: String
+    Default: ""
+  VapidPrivateKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+  VapidSubject:
+    Type: String
+    Default: ""
   CorsAllowedOrigins:
     Type: String
     Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
@@ -121,14 +134,21 @@ Resources:
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
+          PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
+          LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
+          VAPID_PUBLIC_KEY: !Ref VapidPublicKey
+          VAPID_PRIVATE_KEY: !Ref VapidPrivateKey
+          VAPID_SUBJECT: !Ref VapidSubject
           CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RemindersTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PushSubscriptionsTable
       Events:
         Health:
           Type: HttpApi
@@ -152,6 +172,41 @@ Resources:
             ApiId: !Ref LifeLedgerHttpApi
             Path: /{proxy+}
             Method: ANY
+
+  LifeLedgerDigestPushFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-digest-push"
+      CodeUri: .
+      Handler: digest_push_handler.handler
+      Environment:
+        Variables:
+          APP_ENV: !Ref AppEnv
+          AUTH_MODE: !Ref AuthMode
+          LOCAL_DEV_USER_ID: !Ref LocalDevUserId
+          PERSISTENCE_MODE: !Ref PersistenceMode
+          REMINDERS_TABLE_NAME: !Ref RemindersTable
+          PREFERENCES_TABLE_NAME: !Ref PreferencesTable
+          PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
+          LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
+          LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
+          LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
+          VAPID_PUBLIC_KEY: !Ref VapidPublicKey
+          VAPID_PRIVATE_KEY: !Ref VapidPrivateKey
+          VAPID_SUBJECT: !Ref VapidSubject
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RemindersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PreferencesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PushSubscriptionsTable
+      Events:
+        DailyDigestSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Enabled: true
 
   RemindersTable:
     Type: AWS::DynamoDB::Table
@@ -185,6 +240,24 @@ Resources:
         - AttributeName: user_id
           KeyType: HASH
 
+  PushSubscriptionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref PushSubscriptionsTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: subscription_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: subscription_id
+          KeyType: RANGE
+
 Outputs:
   ApiUrl:
     Description: HTTP API endpoint for the LifeLedger backend.
@@ -195,6 +268,9 @@ Outputs:
   PreferencesTable:
     Description: DynamoDB user preferences table name.
     Value: !Ref PreferencesTable
+  PushSubscriptionsTable:
+    Description: DynamoDB push subscriptions table name.
+    Value: !Ref PushSubscriptionsTable
   UserPoolId:
     Description: Cognito User Pool ID.
     Value: !Ref LifeLedgerUserPool

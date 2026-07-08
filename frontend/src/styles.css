@@ -3351,3 +3351,37 @@ textarea:focus-visible {
 .alerts-empty-card p {
   margin: 0;
 }
+.settings-push-card {
+  background: #ffffff;
+}
+
+.settings-push-status-row {
+  border-radius: var(--radius-md);
+}
+
+.settings-push-note,
+.settings-push-error,
+.settings-push-message {
+  margin: 0;
+  padding: 0 var(--space-1);
+  font-size: 0.72rem;
+  font-weight: 620;
+  line-height: 1.4;
+}
+
+.settings-push-note {
+  color: var(--color-text-muted);
+}
+
+.settings-push-error {
+  color: var(--color-danger);
+}
+
+.settings-push-message {
+  color: #08764e;
+}
+
+.settings-push-button {
+  width: 100%;
+  margin-top: var(--space-1);
+}

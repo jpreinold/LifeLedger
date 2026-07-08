@@ -4,6 +4,7 @@ from typing import Any
 from app.config import DYNAMODB_PERSISTENCE, Settings, get_settings
 from app.dynamo_repository import DynamoReminderRepository
 from app.preferences_repository import DynamoPreferencesRepository, LocalPreferencesRepository, PreferencesRepository
+from app.push_repository import DynamoPushSubscriptionRepository, LocalPushSubscriptionRepository, PushSubscriptionRepository
 from app.repository import LocalReminderRepository, ReminderRepository
 
 
@@ -41,3 +42,21 @@ def create_preferences_repository(
         )
 
     return LocalPreferencesRepository(local_file_path or resolved_settings.local_preferences_file)
+
+
+def create_push_subscription_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> PushSubscriptionRepository:
+    resolved_settings = settings or get_settings()
+
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoPushSubscriptionRepository(
+            table_name=resolved_settings.push_subscriptions_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+
+    return LocalPushSubscriptionRepository(local_file_path or resolved_settings.local_push_subscriptions_file)

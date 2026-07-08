@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Response, status
@@ -27,9 +27,10 @@ from app.maintenance import (
     get_maintenance_status_label,
     prepare_maintenance_details,
 )
-from app.models import Reminder
+from app.models import PushSubscription, Reminder
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
+from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
 from app.recurrence import advance_due_date, calculate_status, get_next_due_date
 from app.renewals import (
     advance_renewal_details,
@@ -39,12 +40,15 @@ from app.renewals import (
     get_renewal_window_label,
 )
 from app.repository import ReminderRepository
-from app.repository_factory import create_preferences_repository, create_repository
+from app.repository_factory import create_preferences_repository, create_push_subscription_repository, create_repository
 from app.schemas import (
     AlertSnoozeRequest,
     DigestPreferences,
     DigestPreferencesUpdate,
     MaintenanceDetails,
+    PushConfigurationResponse,
+    PushSubscriptionCreate,
+    PushSubscriptionResponse,
     ReminderCreate,
     ReminderAlertResponse,
     ReminderLeadUnit,
@@ -68,6 +72,7 @@ app.add_middleware(
 
 repository = create_repository()
 preferences_repository = create_preferences_repository()
+push_subscription_repository = create_push_subscription_repository()
 
 
 def get_repository() -> ReminderRepository:
@@ -76,6 +81,9 @@ def get_repository() -> ReminderRepository:
 
 def get_preferences_repository() -> PreferencesRepository:
     return preferences_repository
+
+def get_push_subscription_repository() -> PushSubscriptionRepository:
+    return push_subscription_repository
 
 
 @app.get("/health")
@@ -99,10 +107,11 @@ def list_alerts(
     repo: ReminderRepository = Depends(get_repository),
 ) -> list[ReminderAlertResponse]:
     now = utc_now()
+    current_day = date.today()
     alert_reminders = []
 
     for reminder in repo.list_reminders(current_user.user_id):
-        eligibility = get_alert_eligibility(reminder, now)
+        eligibility = get_alert_eligibility(reminder, now, current_day=current_day)
         if eligibility is not None:
             alert_reminders.append((reminder, eligibility))
 
@@ -131,6 +140,61 @@ def update_digest_preferences(
 
     return to_digest_preferences_response(repo.save_preferences(updated))
 
+
+
+
+@app.get("/push/config", response_model=PushConfigurationResponse)
+def get_push_configuration(
+    _current_user: UserContext = Depends(get_current_user),
+) -> PushConfigurationResponse:
+    return PushConfigurationResponse(configured=get_settings().push_notifications_configured)
+
+
+@app.get("/push/subscriptions", response_model=list[PushSubscriptionResponse])
+def list_push_subscriptions(
+    current_user: UserContext = Depends(get_current_user),
+    repo: PushSubscriptionRepository = Depends(get_push_subscription_repository),
+) -> list[PushSubscriptionResponse]:
+    return [to_push_subscription_response(subscription) for subscription in repo.list_subscriptions(current_user.user_id)]
+
+
+@app.post("/push/subscriptions", response_model=PushSubscriptionResponse)
+def save_push_subscription(
+    payload: PushSubscriptionCreate,
+    current_user: UserContext = Depends(get_current_user),
+    repo: PushSubscriptionRepository = Depends(get_push_subscription_repository),
+) -> PushSubscriptionResponse:
+    now = utc_now()
+    existing = repo.get_subscription_by_endpoint(current_user.user_id, payload.endpoint)
+    subscription = PushSubscription(
+        user_id=current_user.user_id,
+        subscription_id=existing.subscription_id if existing else push_subscription_id_for_endpoint(payload.endpoint),
+        endpoint=payload.endpoint,
+        p256dh=payload.keys.p256dh,
+        auth=payload.keys.auth,
+        user_agent=payload.user_agent,
+        created_at=existing.created_at if existing else now,
+        updated_at=now,
+        disabled_at=None,
+        last_success_at=existing.last_success_at if existing else None,
+        last_failure_at=None,
+        failure_count=0,
+    )
+
+    return to_push_subscription_response(repo.save_subscription(subscription))
+
+
+@app.delete("/push/subscriptions/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_push_subscription(
+    subscription_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: PushSubscriptionRepository = Depends(get_push_subscription_repository),
+) -> Response:
+    disabled = repo.disable_subscription(current_user.user_id, subscription_id, utc_now())
+    if not disabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Push subscription not found")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @app.post("/reminders/{reminder_id}/alert/dismiss", response_model=ReminderResponse)
 def dismiss_reminder_alert(
@@ -329,6 +393,9 @@ def to_alert_response(reminder: Reminder, eligibility) -> ReminderAlertResponse:
 
 def to_digest_preferences_response(preferences) -> DigestPreferences:
     return DigestPreferences.model_validate(preferences)
+
+def to_push_subscription_response(subscription: PushSubscription) -> PushSubscriptionResponse:
+    return PushSubscriptionResponse.model_validate(subscription)
 
 
 def utc_now() -> datetime:

@@ -1,7 +1,8 @@
 from app.config import load_settings
 from app.dynamo_repository import DynamoReminderRepository
+from app.push_repository import DynamoPushSubscriptionRepository, LocalPushSubscriptionRepository
 from app.repository import LocalReminderRepository
-from app.repository_factory import create_repository
+from app.repository_factory import create_push_subscription_repository, create_repository
 
 
 class FakeDynamoTable:
@@ -29,4 +30,20 @@ def test_repository_factory_selects_dynamodb_without_real_aws_call():
     repo = create_repository(settings, dynamo_table=fake_table)
 
     assert isinstance(repo, DynamoReminderRepository)
+    assert repo.table is fake_table
+
+
+def test_push_repository_factory_defaults_to_local(tmp_path):
+    repo = create_push_subscription_repository(load_settings({}), local_file_path=tmp_path / "push.json")
+
+    assert isinstance(repo, LocalPushSubscriptionRepository)
+
+
+def test_push_repository_factory_selects_dynamodb_without_real_aws_call():
+    fake_table = FakeDynamoTable()
+    settings = load_settings({"PERSISTENCE_MODE": "dynamodb"})
+
+    repo = create_push_subscription_repository(settings, dynamo_table=fake_table)
+
+    assert isinstance(repo, DynamoPushSubscriptionRepository)
     assert repo.table is fake_table

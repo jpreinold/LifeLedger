@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Authenticator } from '@aws-amplify/ui-react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import {
@@ -19,6 +19,7 @@ import {
 
 import { remindersApi } from './api/remindersApi'
 import { preferencesApi } from './api/preferencesApi'
+import { pushApi, type PushConfiguration, type PushSubscriptionSummary } from './api/pushApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { AddTypeSelector } from './components/AddTypeSelector'
 import { AlertCenter } from './components/AlertCenter'
@@ -138,6 +139,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
   const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false)
   const [isDigestOpen, setIsDigestOpen] = useState(false)
+  const didHandleDigestUrl = useRef(false)
+  const openDailyDigestRef = useRef<() => void>(() => undefined)
 
   async function loadReminderData() {
     setIsLoading(true)
@@ -328,6 +331,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     void updateDigestPreferences({ digest_last_seen_at: seenAt, timezone })
   }
 
+  openDailyDigestRef.current = openDailyDigest
+
   function openDigestReminderDetail(reminder: Reminder) {
     setIsDigestOpen(false)
     openReminderDetail(reminder)
@@ -416,6 +421,25 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     return activePage === page ? 'active' : undefined
   }
 
+
+  useEffect(() => {
+    if (didHandleDigestUrl.current || window.location.search.length === 0) {
+      return
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('openDigest') !== '1') {
+      return
+    }
+
+    didHandleDigestUrl.current = true
+    setActivePage('home')
+    openDailyDigestRef.current()
+    params.delete('openDigest')
+    const nextSearch = params.toString()
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
+    window.history.replaceState(null, '', nextUrl || '/')
+  }, [])
   const attentionCount = alerts.length
   const dailyDigest = buildDailyDigest(reminders, alerts, { lookaheadDays: digestPreferences.digest_lookahead_days })
   const displayName = getUserDisplayName(userLabel)
@@ -703,7 +727,7 @@ function SettingsView({
           <div className="settings-card-header settings-digest-header">
             <div>
               <h3 id="settings-digest-heading">Daily Digest</h3>
-              <p>Configure your in-app briefing. Push delivery is not enabled yet.</p>
+              <p>Configure your in-app briefing and push schedule.</p>
             </div>
             <span className="settings-save-state">
               {isDigestPreferencesLoading ? 'Loading' : isSavingDigestPreferences ? 'Saving' : 'Saved'}
@@ -713,7 +737,7 @@ function SettingsView({
           <label className="settings-control-row">
             <span>
               <strong>Daily Digest enabled</strong>
-              <small>Controls the in-app digest and prepares future push scheduling.</small>
+              <small>Controls the in-app digest and Daily Digest push eligibility.</small>
             </span>
             <input
               checked={digestPreferences.digest_enabled}
@@ -726,7 +750,7 @@ function SettingsView({
           <label className="settings-control-row">
             <span>
               <strong>Digest time</strong>
-              <small>Future notifications will use this local time.</small>
+              <small>Daily Digest push notifications use this local time.</small>
             </span>
             <input
               disabled={controlsDisabled}
@@ -764,6 +788,11 @@ function SettingsView({
           </div>
         </section>
 
+        <PushNotificationsSection
+          digestPreferences={digestPreferences}
+          isDigestPreferencesLoading={isDigestPreferencesLoading}
+        />
+
         {onSignOut ? (
           <button type="button" className="secondary-button settings-sign-out-button" onClick={onSignOut}>
             <LogOut size={17} aria-hidden="true" />
@@ -775,6 +804,260 @@ function SettingsView({
   )
 }
 
+
+function PushNotificationsSection({
+  digestPreferences,
+  isDigestPreferencesLoading,
+}: {
+  digestPreferences: DigestPreferences
+  isDigestPreferencesLoading: boolean
+}) {
+  const [pushConfig, setPushConfig] = useState<PushConfiguration | null>(null)
+  const [subscriptions, setSubscriptions] = useState<PushSubscriptionSummary[]>([])
+  const [permission, setPermission] = useState<NotificationPermission>(() => getNotificationPermission())
+  const [isLoadingPush, setIsLoadingPush] = useState(true)
+  const [isSavingPush, setIsSavingPush] = useState(false)
+  const [pushMessage, setPushMessage] = useState<string | null>(null)
+  const [pushError, setPushError] = useState<string | null>(null)
+  const supportState = getPushSupportState()
+  const frontendPublicKey = getVapidPublicKey()
+  const isCheckingConfig = supportState === 'supported' && isLoadingPush
+  const isConfigMissing = supportState === 'supported' && !isLoadingPush && (!frontendPublicKey || pushConfig?.configured === false)
+  const isEnabled = subscriptions.length > 0
+  const isBusy = isLoadingPush || isSavingPush || isDigestPreferencesLoading
+
+  useEffect(() => {
+    if (supportState !== 'supported') {
+      setIsLoadingPush(false)
+      return
+    }
+
+    let isCancelled = false
+
+    async function loadPushState() {
+      setIsLoadingPush(true)
+      setPushError(null)
+
+      try {
+        const [config, savedSubscriptions] = await Promise.all([
+          pushApi.getConfig(),
+          pushApi.listSubscriptions(),
+        ])
+        if (!isCancelled) {
+          setPushConfig(config)
+          setSubscriptions(savedSubscriptions)
+          setPermission(getNotificationPermission())
+        }
+      } catch (requestError) {
+        if (!isCancelled) {
+          setPushConfig({ configured: false })
+          setPushError(requestError instanceof Error ? requestError.message : 'Unable to load push notification settings.')
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingPush(false)
+        }
+      }
+    }
+
+    void loadPushState()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [supportState])
+
+  async function enablePushNotifications() {
+    setIsSavingPush(true)
+    setPushError(null)
+    setPushMessage(null)
+
+    try {
+      if (supportState !== 'supported') {
+        throw new Error('Push notifications are not supported in this browser.')
+      }
+      if (!frontendPublicKey || pushConfig?.configured === false) {
+        throw new Error('Push notifications are not configured for this environment.')
+      }
+
+      const nextPermission = await Notification.requestPermission()
+      setPermission(nextPermission)
+      if (nextPermission !== 'granted') {
+        setPushMessage('Notifications are blocked. You can re-enable them in your browser settings.')
+        return
+      }
+
+      const registration = await navigator.serviceWorker.ready
+      let browserSubscription = await registration.pushManager.getSubscription()
+      if (!browserSubscription) {
+        browserSubscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(frontendPublicKey),
+        })
+      }
+
+      await pushApi.saveSubscription(toPushSubscriptionInput(browserSubscription))
+      const savedSubscriptions = await pushApi.listSubscriptions()
+      setSubscriptions(savedSubscriptions)
+      setPushMessage('Daily Digest push notifications are enabled.')
+    } catch (requestError) {
+      setPushError(requestError instanceof Error ? requestError.message : 'Unable to enable push notifications.')
+    } finally {
+      setIsSavingPush(false)
+    }
+  }
+
+  async function disablePushNotifications() {
+    setIsSavingPush(true)
+    setPushError(null)
+    setPushMessage(null)
+
+    try {
+      if (supportState === 'supported') {
+        const registration = await navigator.serviceWorker.ready
+        const browserSubscription = await registration.pushManager.getSubscription()
+        if (browserSubscription) {
+          await browserSubscription.unsubscribe()
+        }
+      }
+
+      await Promise.all(subscriptions.map((subscription) => pushApi.removeSubscription(subscription.subscription_id)))
+      setSubscriptions([])
+      setPushMessage('Daily Digest push notifications are disabled.')
+    } catch (requestError) {
+      setPushError(requestError instanceof Error ? requestError.message : 'Unable to disable push notifications.')
+    } finally {
+      setIsSavingPush(false)
+    }
+  }
+
+  return (
+    <section className="settings-digest-card settings-push-card" aria-labelledby="settings-push-heading">
+      <div className="settings-card-header settings-digest-header">
+        <div>
+          <h3 id="settings-push-heading">Push Notifications</h3>
+          <p>Daily Digest push notifications send one summary when reminders need attention.</p>
+        </div>
+        <span className="settings-save-state">{isCheckingConfig ? 'Checking' : isEnabled ? 'Enabled' : 'Optional'}</span>
+      </div>
+
+      <div className="settings-row settings-push-status-row">
+        <span>Status</span>
+        <strong>{getPushStatusText(supportState, permission, isConfigMissing, isEnabled, isCheckingConfig)}</strong>
+      </div>
+
+      <div className="settings-row settings-push-status-row">
+        <span>Daily Digest</span>
+        <strong>
+          {digestPreferences.digest_enabled ? 'Enabled' : 'Disabled'} at {digestPreferences.digest_time}
+        </strong>
+      </div>
+
+      <p className="settings-push-note">
+        Some browsers require LifeLedger to be installed as a PWA before push notifications can be delivered.
+      </p>
+
+      {pushError ? <p className="settings-push-error" role="alert">{pushError}</p> : null}
+      {pushMessage ? <p className="settings-push-message" role="status">{pushMessage}</p> : null}
+
+      {supportState === 'unsupported' || isConfigMissing ? null : isEnabled ? (
+        <button type="button" className="secondary-button settings-push-button" disabled={isBusy} onClick={() => void disablePushNotifications()}>
+          {isSavingPush ? 'Disabling...' : 'Disable push notifications'}
+        </button>
+      ) : (
+        <button type="button" className="primary-button settings-push-button" disabled={isBusy || permission === 'denied'} onClick={() => void enablePushNotifications()}>
+          {isSavingPush ? 'Enabling...' : 'Enable push notifications'}
+        </button>
+      )}
+    </section>
+  )
+}
+
+function getPushSupportState(): 'supported' | 'unsupported' {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    return 'unsupported'
+  }
+
+  return 'supported'
+}
+
+function getNotificationPermission(): NotificationPermission {
+  if (!('Notification' in window)) {
+    return 'default'
+  }
+
+  return Notification.permission
+}
+
+function getVapidPublicKey() {
+  return (import.meta.env.VITE_VAPID_PUBLIC_KEY ?? '').trim()
+}
+
+function getPushStatusText(
+  supportState: 'supported' | 'unsupported',
+  permission: NotificationPermission,
+  isConfigMissing: boolean,
+  isEnabled: boolean,
+  isCheckingConfig: boolean,
+) {
+  if (supportState === 'unsupported') {
+    return 'Push notifications are not supported in this browser.'
+  }
+
+  if (isCheckingConfig) {
+    return 'Checking push notification support.'
+  }
+
+  if (isConfigMissing) {
+    return 'Push notifications are not configured for this environment.'
+  }
+
+  if (permission === 'denied') {
+    return 'Notifications are blocked. You can re-enable them in your browser settings.'
+  }
+
+  if (isEnabled) {
+    return 'Daily Digest push notifications are enabled.'
+  }
+
+  return 'Push notifications are available.'
+}
+
+function toPushSubscriptionInput(subscription: PushSubscription): {
+  endpoint: string
+  keys: {
+    p256dh: string
+    auth: string
+  }
+  user_agent: string
+} {
+  const serialized = subscription.toJSON()
+  const p256dh = serialized.keys?.p256dh
+  const auth = serialized.keys?.auth
+
+  if (!serialized.endpoint || !p256dh || !auth) {
+    throw new Error('Browser push subscription is incomplete.')
+  }
+
+  return {
+    endpoint: serialized.endpoint,
+    keys: { p256dh, auth },
+    user_agent: navigator.userAgent,
+  }
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = '='.repeat((4 - (value.length % 4)) % 4)
+  const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const outputArray = new Uint8Array(rawData.length)
+
+  for (let index = 0; index < rawData.length; index += 1) {
+    outputArray[index] = rawData.charCodeAt(index)
+  }
+
+  return outputArray
+}
 function getUserDisplayName(value?: string | null) {
   const trimmedValue = value?.trim()
 

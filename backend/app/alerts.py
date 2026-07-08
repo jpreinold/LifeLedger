@@ -16,9 +16,10 @@ class ReminderAlertEligibility:
 def get_alert_eligibility(
     reminder: Reminder,
     now: datetime | None = None,
+    current_day: date | None = None,
 ) -> ReminderAlertEligibility | None:
     current_time = normalize_alert_datetime(now or datetime.now(timezone.utc))
-    current_day = current_time.date()
+    resolved_current_day = current_day or (current_time.date() if now is not None else date.today())
 
     if reminder.completed:
         return None
@@ -26,14 +27,14 @@ def get_alert_eligibility(
     if is_alert_muted(reminder, current_time):
         return None
 
-    if reminder.due_date < current_day:
+    if reminder.due_date < resolved_current_day:
         return ReminderAlertEligibility(ReminderAlertReason.OVERDUE, 0, None)
 
-    if reminder.due_date == current_day:
-        return ReminderAlertEligibility(ReminderAlertReason.DUE_TODAY, 1, current_day)
+    if reminder.due_date == resolved_current_day:
+        return ReminderAlertEligibility(ReminderAlertReason.DUE_TODAY, 1, resolved_current_day)
 
     reminder_start_date = get_reminder_window_start_date(reminder)
-    if reminder_start_date is not None and reminder_start_date <= current_day <= reminder.due_date:
+    if reminder_start_date is not None and reminder_start_date <= resolved_current_day <= reminder.due_date:
         return ReminderAlertEligibility(ReminderAlertReason.REMINDER_WINDOW, 2, reminder_start_date)
 
     return None

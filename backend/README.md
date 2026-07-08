@@ -1,6 +1,6 @@
 # LifeLedger Backend
 
-FastAPI backend for LifeLedger reminders. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays plus renewal/expiration context without changing the DynamoDB key schema.
+FastAPI backend for LifeLedger reminders. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, and optional Daily Digest push notifications without changing the reminders table key schema.
 
 ## Run Locally
 
@@ -33,7 +33,7 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `GET /reminders/{id}` requires authentication in Cognito mode.
 - `PUT /reminders/{id}` requires authentication in Cognito mode.
 - `DELETE /reminders/{id}` requires authentication in Cognito mode.
-- `POST /reminders/{id}/complete` requires authentication in Cognito mode.
+- `POST /reminders/{id}/complete` requires authentication in Cognito mode.`r`n- `GET /preferences/digest` and `PUT /preferences/digest` require authentication in Cognito mode.`r`n- `GET /push/config`, `GET /push/subscriptions`, `POST /push/subscriptions`, and `DELETE /push/subscriptions/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
 
 ## Architecture
 
@@ -63,7 +63,7 @@ Local development does not require environment variables.
 | `PERSISTENCE_MODE` | `local` | `local` uses JSON; `dynamodb` uses DynamoDB. |
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name. |
 | `AWS_REGION` | `us-east-1` | DynamoDB region. Lambda also provides this automatically. |
-| `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
+| `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |`r`n| `PREFERENCES_TABLE_NAME` | `lifeledger-preferences-auth` | DynamoDB preferences table name. |`r`n| `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name. |`r`n| `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences in local persistence. |`r`n| `LOCAL_PUSH_SUBSCRIPTIONS_FILE` | `backend/data/push-subscriptions.json` locally, `/tmp/lifeledger-push-subscriptions.json` in Lambda/SAM local | JSON file used for push subscriptions in local persistence. |`r`n| `VAPID_PUBLIC_KEY` | empty | Public VAPID key. |`r`n| `VAPID_PRIVATE_KEY` | empty | Private VAPID key used only by the backend sender. |`r`n| `VAPID_SUBJECT` | empty | VAPID contact subject such as `mailto:you@example.com`. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
 ## Authentication Modes
@@ -116,7 +116,7 @@ Reminder records are scoped by `user_id`. The deployed DynamoDB table uses `user
 handler = Mangum(app)
 ```
 
-SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, a retained DynamoDB table, and CRUD permissions for the Lambda function.
+SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, retained DynamoDB tables for reminders, preferences, and push subscriptions, a scheduled Daily Digest push Lambda, and CRUD permissions for the Lambda functions.
 
 SAM local uses `backend/env.local.json`, which sets local auth and local persistence:
 
