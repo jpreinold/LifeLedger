@@ -926,18 +926,12 @@ function PushNotificationsSection({
   const shouldShowTestPushButton =
     supportState === 'supported' && Boolean(frontendPublicKey) && backendConfigured && permission === 'granted' && isEnabled
   const canSendTestPush = shouldShowTestPushButton && !isBusy
-  const diagnostics = [
-    { label: 'Browser support', value: supportState === 'supported' ? 'Supported' : 'Unsupported' },
+  const pushState = getPushUiState(supportState, permission, isConfigMissing, isEnabled, isCheckingConfig)
+  const advancedDetails = [
     { label: 'Browser permission', value: formatNotificationPermission(permission) },
-    { label: 'Frontend VAPID public key', value: frontendPublicKey ? 'Configured' : 'Missing' },
-    { label: 'Backend push config', value: isLoadingPush ? 'Checking' : backendConfigured ? 'Configured' : 'Missing' },
     { label: 'Active subscriptions', value: String(activeSubscriptionCount) },
-    { label: 'Last success', value: formatPushTimestamp(pushStatus?.last_success_at) },
-    { label: 'Last failure', value: formatPushTimestamp(pushStatus?.last_failure_at) },
-    { label: 'Failure count', value: String(pushStatus?.failure_count ?? 0) },
-    { label: 'Daily Digest enabled', value: (pushStatus?.digest_enabled ?? digestPreferences.digest_enabled) ? 'Enabled' : 'Disabled' },
-    { label: 'Daily Digest time', value: pushStatus?.digest_time ?? digestPreferences.digest_time },
-    { label: 'Timezone', value: pushStatus?.timezone ?? digestPreferences.timezone ?? getBrowserTimeZone() ?? 'Not set' },
+    { label: 'Last test or success', value: formatPushTimestamp(pushStatus?.last_success_at) },
+    ...(pushStatus?.last_failure_at ? [{ label: 'Last failure', value: formatPushTimestamp(pushStatus.last_failure_at) }] : []),
   ]
 
   useEffect(() => {
@@ -992,7 +986,7 @@ function PushNotificationsSection({
       const nextPermission = await Notification.requestPermission()
       setPermission(nextPermission)
       if (nextPermission !== 'granted') {
-        setPushMessage('Notifications are blocked. You can re-enable them in your browser settings.')
+        setPushMessage('Notifications are blocked in your browser settings.')
         return
       }
 
@@ -1073,29 +1067,34 @@ function PushNotificationsSection({
           <h3 id="settings-push-heading">Push Notifications</h3>
           <p>Daily Digest push notifications send one summary when reminders need attention.</p>
         </div>
-        <span className="settings-save-state">{isCheckingConfig ? 'Checking' : isEnabled ? 'Enabled' : 'Optional'}</span>
+        <span className={`settings-push-status-pill settings-push-status-pill-${pushState.tone}`}>
+          {pushState.label}
+        </span>
       </div>
 
-      <div className="settings-row settings-push-status-row">
-        <span>Status</span>
-        <strong>{getPushStatusText(supportState, permission, isConfigMissing, isEnabled, isCheckingConfig)}</strong>
+      <div className="settings-push-summary">
+        <strong>{pushState.summary}</strong>
+        <span>Uses your Daily Digest schedule.</span>
       </div>
 
-      <div className="settings-push-diagnostics" aria-label="Push notification diagnostics">
-        {diagnostics.map((item) => (
-          <div key={item.label} className="settings-push-diagnostic">
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-          </div>
-        ))}
-      </div>
+      <p className="settings-push-note">Some browsers require LifeLedger to be installed as a PWA before push notifications can be delivered.</p>
 
-      <p className="settings-push-note">
-        Some browsers require LifeLedger to be installed as a PWA before push notifications can be delivered.
-      </p>
-
-      {pushError ? <p className="settings-push-error" role="alert">{pushError}</p> : null}
-      {pushMessage ? <p className="settings-push-message" role="status">{pushMessage}</p> : null}
+      {pushError ? (
+        <div className="settings-push-error settings-push-inline-message" role="alert">
+          <span>{pushError}</span>
+          <button type="button" className="message-dismiss-button" onClick={() => setPushError(null)} aria-label="Dismiss push notification error">
+            <X size={15} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+      {pushMessage ? (
+        <div className="settings-push-message settings-push-inline-message" role="status">
+          <span>{pushMessage}</span>
+          <button type="button" className="message-dismiss-button" onClick={() => setPushMessage(null)} aria-label="Dismiss push notification message">
+            <X size={15} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
 
       <div className="settings-push-actions">
         {supportState === 'unsupported' || isConfigMissing ? null : isEnabled ? (
@@ -1113,6 +1112,18 @@ function PushNotificationsSection({
           </button>
         ) : null}
       </div>
+
+      <details className="settings-push-advanced">
+        <summary>Advanced details</summary>
+        <div className="settings-push-advanced-list">
+          {advancedDetails.map((item) => (
+            <div key={item.label} className="settings-push-advanced-row">
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </div>
+          ))}
+        </div>
+      </details>
     </section>
   )
 }
@@ -1137,7 +1148,7 @@ function getVapidPublicKey() {
   return (import.meta.env.VITE_VAPID_PUBLIC_KEY ?? '').trim()
 }
 
-function getPushStatusText(
+function getPushUiState(
   supportState: 'supported' | 'unsupported',
   permission: NotificationPermission,
   isConfigMissing: boolean,
@@ -1145,26 +1156,50 @@ function getPushStatusText(
   isCheckingConfig: boolean,
 ) {
   if (supportState === 'unsupported') {
-    return 'Push notifications are not supported in this browser.'
+    return {
+      label: 'Not supported on this browser',
+      summary: 'Push notifications are not supported in this browser.',
+      tone: 'disabled',
+    }
   }
 
   if (isCheckingConfig) {
-    return 'Checking push notification support.'
+    return {
+      label: 'Checking',
+      summary: 'Checking push notification setup.',
+      tone: 'disabled',
+    }
   }
 
   if (isConfigMissing) {
-    return 'Push notifications are not configured for this environment.'
+    return {
+      label: 'Not configured',
+      summary: 'Push notifications are not configured for this environment.',
+      tone: 'disabled',
+    }
   }
 
   if (permission === 'denied') {
-    return 'Notifications are blocked. You can re-enable them in your browser settings.'
+    return {
+      label: 'Blocked by browser',
+      summary: 'Notifications are blocked in your browser settings.',
+      tone: 'blocked',
+    }
   }
 
   if (isEnabled) {
-    return 'Daily Digest push notifications are enabled.'
+    return {
+      label: 'Enabled',
+      summary: 'Daily Digest push notifications are enabled.',
+      tone: 'enabled',
+    }
   }
 
-  return 'Push notifications are available.'
+  return {
+    label: 'Disabled',
+    summary: 'Turn on push notifications to receive your Daily Digest when reminders need attention.',
+    tone: 'disabled',
+  }
 }
 
 function toFallbackPushStatus(digestPreferences: DigestPreferences): PushStatus {

@@ -101,7 +101,7 @@ Cloudflare Pages gets only `VITE_VAPID_PUBLIC_KEY`. AWS/SAM gets `VapidPublicKey
 
 To enable push, deploy both sides with those values, open Settings, and use **Enable push notifications** in the Push Notifications section. After the browser grants permission and an active subscription appears, use **Send test push** to send a summary-only notification to the current signed-in user. The test payload contains no reminder details and opens `/?openDigest=1`.
 
-Troubleshooting in Settings:
+Troubleshooting notes:
 
 - Browser unsupported: use a browser/PWA install mode that supports service workers, Notification, and Push API.
 - Permission denied: re-enable notifications for the site in browser settings.
@@ -307,7 +307,7 @@ sam deploy --guided
 - Cloudflare frontend can load, create, complete, and delete reminders after sign-in.
 - AWS is redeployed with the push subscription table, scheduled sender, and VAPID backend parameters.
 - Cloudflare is redeployed with `VITE_VAPID_PUBLIC_KEY`.
-- Settings shows push diagnostics without exposing endpoint or key material.
+- Settings shows a short, user-facing push status; technical diagnostics are not part of the normal UI.
 - Enabling push creates an active subscription, and **Send test push** delivers a summary-only test notification.
 - The scheduled digest sender can be run or observed and does not duplicate pushes for the same local day.
 - `frontend/.env.local`, AWS credentials, tokens, and local deployment files are not committed.

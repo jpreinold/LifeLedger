@@ -3402,40 +3402,51 @@ textarea:focus-visible {
   background: #ffffff;
 }
 
-.settings-push-status-row {
-  border-radius: var(--radius-md);
+.settings-push-status-pill {
+  justify-self: end;
+  padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
-.settings-push-diagnostics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-border);
+.settings-push-status-pill-enabled {
+  color: #08764e;
+  background: var(--color-success-soft);
 }
 
-.settings-push-diagnostic {
-  min-width: 0;
+.settings-push-status-pill-blocked {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.settings-push-status-pill-disabled {
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
+}
+
+.settings-push-summary {
   display: grid;
   gap: 4px;
   padding: var(--space-3);
-  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
 }
 
-.settings-push-diagnostic span {
-  color: var(--color-text-soft);
-  font-size: 0.68rem;
-  font-weight: 760;
-}
-
-.settings-push-diagnostic strong {
+.settings-push-summary strong {
   color: var(--color-text);
-  font-size: 0.82rem;
-  font-weight: 720;
+  font-size: 0.86rem;
+  font-weight: 760;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+}
+
+.settings-push-summary span {
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 620;
+  line-height: 1.35;
 }
 
 .settings-push-note,
@@ -3460,6 +3471,27 @@ textarea:focus-visible {
   color: #08764e;
 }
 
+.settings-push-inline-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.settings-push-inline-message span {
+  min-width: 0;
+}
+
+.settings-push-error.settings-push-inline-message {
+  background: var(--color-danger-soft);
+}
+
+.settings-push-message.settings-push-inline-message {
+  background: var(--color-success-soft);
+}
+
 .settings-push-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3468,4 +3500,51 @@ textarea:focus-visible {
 
 .settings-push-button {
   flex: 1 1 190px;
+}
+
+.settings-push-advanced {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.settings-push-advanced summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.settings-push-advanced-list {
+  display: grid;
+  gap: 1px;
+  margin-top: var(--space-2);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-border);
+}
+
+.settings-push-advanced-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+}
+
+.settings-push-advanced-row span {
+  color: var(--color-text-soft);
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.settings-push-advanced-row strong {
+  color: var(--color-text);
+  font-size: 0.76rem;
+  font-weight: 720;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
