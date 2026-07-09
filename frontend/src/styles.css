@@ -50,22 +50,27 @@
 html {
   min-width: 320px;
   min-height: 100%;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at top left, rgba(202, 225, 255, 0.72), transparent 32rem),
     linear-gradient(180deg, #ffffff 0%, var(--color-bg) 48%, var(--color-bg-deep) 100%);
+  overscroll-behavior-y: none;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--color-text);
   font-family: var(--font-ui);
   -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
@@ -98,6 +103,7 @@ textarea:focus-visible {
 .app-shell {
   width: min(100%, 480px);
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0 auto;
   padding: var(--space-5) var(--space-4) 104px;
   background:
@@ -1075,7 +1081,7 @@ textarea:focus-visible {
   position: fixed;
   right: 50%;
   bottom: 0;
-  z-index: 10;
+  z-index: 40;
   width: min(100%, 480px);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

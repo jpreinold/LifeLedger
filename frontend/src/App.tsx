@@ -446,8 +446,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const pageTitle = getPageTitle(activePage)
 
   return (
-    <main className="app-shell" id="app-top">
-      <header className="app-header app-header-main">
+    <>
+      <main className="app-shell" id="app-top">
+        <header className="app-header app-header-main">
         <span className="menu-glyph" aria-hidden="true">
           <Menu size={20} aria-hidden="true" />
         </span>
@@ -552,16 +553,17 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       {activePage === 'records' ? <RecordsView /> : null}
 
-      {activePage === 'settings' ? (
-        <SettingsView
-          digestPreferences={digestPreferences}
-          isDigestPreferencesLoading={isDigestPreferencesLoading}
-          isSavingDigestPreferences={isSavingDigestPreferences}
-          userLabel={userLabel}
-          onSignOut={onSignOut}
-          onUpdateDigestPreferences={(input) => updateDigestPreferences(input, { showNotice: true })}
-        />
-      ) : null}
+        {activePage === 'settings' ? (
+          <SettingsView
+            digestPreferences={digestPreferences}
+            isDigestPreferencesLoading={isDigestPreferencesLoading}
+            isSavingDigestPreferences={isSavingDigestPreferences}
+            userLabel={userLabel}
+            onSignOut={onSignOut}
+            onUpdateDigestPreferences={(input) => updateDigestPreferences(input, { showNotice: true })}
+          />
+        ) : null}
+      </main>
 
       <nav className="bottom-nav" aria-label="Primary actions">
         <button type="button" className={getNavClass('home')} onClick={() => showPage('home')} aria-current={activePage === 'home' ? 'page' : undefined}>
@@ -660,7 +662,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => void confirmDelete()}
       />
-    </main>
+    </>
   )
 }
 
