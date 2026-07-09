@@ -75,6 +75,16 @@ export const remindersApi = {
       body: snoozedUntil ? JSON.stringify({ snoozed_until: snoozedUntil }) : undefined,
     }),
 
+  enableCalendarSync: (id: string) =>
+    request<Reminder>(`/reminders/${id}/calendar-sync/enable`, {
+      method: 'POST',
+    }),
+
+  disableCalendarSync: (id: string) =>
+    request<Reminder>(`/reminders/${id}/calendar-sync/disable`, {
+      method: 'POST',
+    }),
+
   remove: (id: string) =>
     request<void>(`/reminders/${id}`, {
       method: 'DELETE',

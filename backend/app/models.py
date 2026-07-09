@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 from app.schemas import (
     BirthdayDetails,
+    CalendarSyncStatus,
+    GoogleCalendarConnectionStatus,
     MaintenanceDetails,
     PriorityOption,
     ReminderCategory,
@@ -36,6 +38,13 @@ class Reminder(BaseModel):
     alert_last_seen_at: datetime | None = None
     alert_last_action_at: datetime | None = None
     alert_snoozed_until: datetime | None = None
+    calendar_sync_enabled: bool = False
+    calendar_provider: str | None = None
+    calendar_id: str | None = None
+    calendar_event_id: str | None = None
+    calendar_last_synced_at: datetime | None = None
+    calendar_sync_status: CalendarSyncStatus = CalendarSyncStatus.NOT_SYNCED
+    calendar_sync_error: str | None = None
     updated_at: datetime
     completed_at: datetime | None = None
 
@@ -80,3 +89,27 @@ class PushSubscription(BaseModel):
     last_success_at: datetime | None = None
     last_failure_at: datetime | None = None
     failure_count: int = 0
+
+
+class GoogleCalendarConnection(BaseModel):
+    user_id: str
+    provider: str = "google_calendar"
+    google_account_email: str | None = None
+    calendar_id: str = "primary"
+    access_token: str
+    refresh_token: str
+    token_expires_at: datetime
+    scopes: str
+    connected_at: datetime
+    updated_at: datetime
+    disconnected_at: datetime | None = None
+    status: GoogleCalendarConnectionStatus = GoogleCalendarConnectionStatus.CONNECTED
+    last_error: str | None = None
+
+
+class GoogleOAuthState(BaseModel):
+    state: str
+    user_id: str
+    created_at: datetime
+    expires_at: datetime
+    consumed_at: datetime | None = None

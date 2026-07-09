@@ -16,4 +16,5 @@ if (-not (Test-Path $venvActivate)) {
 }
 
 . $venvActivate
-python -m pytest --basetemp (Join-Path $tmpDir "pytest")
+$pytestTemp = Join-Path $tmpDir ("pytest-" + [guid]::NewGuid().ToString("N"))
+python -m pytest --basetemp $pytestTemp

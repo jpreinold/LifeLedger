@@ -27,6 +27,17 @@ def test_sam_template_defaults_to_local_persistence():
     assert "LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json" in template
     assert "LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json" in template
     assert "PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable" in template
+    assert "GoogleClientId:" in template
+    assert "GoogleClientSecret:" in template
+    assert "NoEcho: true" in template
+    assert "GoogleOAuthRedirectUri:" in template
+    assert "GoogleCalendarScopes:" in template
+    assert "GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable" in template
+    assert "GOOGLE_OAUTH_STATES_TABLE_NAME: !Ref GoogleOAuthStatesTable" in template
+    assert "GOOGLE_CLIENT_ID: !Ref GoogleClientId" in template
+    assert "GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret" in template
+    assert "GOOGLE_OAUTH_REDIRECT_URI: !Ref GoogleOAuthRedirectUri" in template
+    assert "GOOGLE_CALENDAR_SCOPES: !Ref GoogleCalendarScopes" in template
     assert "VAPID_PUBLIC_KEY: !Ref VapidPublicKey" in template
     assert "VAPID_PRIVATE_KEY: !Ref VapidPrivateKey" in template
     assert "VAPID_SUBJECT: !Ref VapidSubject" in template
@@ -39,6 +50,9 @@ def test_sam_template_defaults_to_local_persistence():
     assert "DeletionPolicy: Retain" in template
     assert "AttributeName: user_id" in template
     assert "AttributeName: subscription_id" in template
+    assert "GoogleCalendarConnectionsTable:" in template
+    assert "GoogleOAuthStatesTable:" in template
+    assert "AttributeName: state" in template
 
 
 def test_sam_local_env_file_uses_local_persistence():
@@ -52,6 +66,14 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["LOCAL_PREFERENCES_FILE"] == "/tmp/lifeledger-preferences.json"
     assert function_env["LOCAL_PUSH_SUBSCRIPTIONS_FILE"] == "/tmp/lifeledger-push-subscriptions.json"
     assert function_env["PUSH_SUBSCRIPTIONS_TABLE_NAME"] == "lifeledger-push-subscriptions-auth"
+    assert function_env["GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME"] == "lifeledger-google-calendar-connections-auth"
+    assert function_env["GOOGLE_OAUTH_STATES_TABLE_NAME"] == "lifeledger-google-oauth-states-auth"
+    assert function_env["LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE"] == "/tmp/lifeledger-google-calendar-connections.json"
+    assert function_env["LOCAL_GOOGLE_OAUTH_STATES_FILE"] == "/tmp/lifeledger-google-oauth-states.json"
+    assert function_env["GOOGLE_CLIENT_ID"] == ""
+    assert function_env["GOOGLE_CLIENT_SECRET"] == ""
+    assert function_env["GOOGLE_OAUTH_REDIRECT_URI"] == ""
+    assert function_env["GOOGLE_CALENDAR_SCOPES"] == "https://www.googleapis.com/auth/calendar.events"
     assert function_env["VAPID_PUBLIC_KEY"] == ""
     assert function_env["VAPID_PRIVATE_KEY"] == ""
     assert function_env["VAPID_SUBJECT"] == ""

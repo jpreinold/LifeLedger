@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Cake, CheckCircle2, Clock3, Pencil, RefreshCcw, Trash2, Wrench, X } from 'lucide-react'
+import { Cake, CalendarCheck, CalendarPlus, CalendarX, CheckCircle2, Clock3, Pencil, RefreshCcw, Trash2, Wrench, X } from 'lucide-react'
 
 import { getMaintenanceAreaLabel, getMaintenanceDueDate } from '../lib/maintenanceUx'
 import {
@@ -18,6 +18,7 @@ import {
   getRenewalKindLabel,
 } from '../lib/renewalUx'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
+import type { GoogleCalendarStatus } from '../api/calendarApi'
 import type { Reminder } from '../types/reminder'
 import { getCategoryVisual } from './categoryVisuals'
 import { SheetDrawer } from './SheetDrawer'
@@ -26,9 +27,13 @@ const drawerCloseMs = 220
 
 interface ReminderDetailDrawerProps {
   reminder: Reminder
+  calendarStatus: GoogleCalendarStatus | null
+  isCalendarStatusLoading: boolean
   isAlertEligible: boolean
   onClose: () => void
   onComplete: (id: string) => Promise<void>
+  onDisableCalendarSync: (id: string) => Promise<boolean>
+  onEnableCalendarSync: (id: string) => Promise<boolean>
   onDismiss: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
   onRequestDelete: (reminder: Reminder) => void
@@ -42,15 +47,20 @@ interface DetailRow {
 
 export function ReminderDetailDrawer({
   reminder,
+  calendarStatus,
+  isCalendarStatusLoading,
   isAlertEligible,
   onClose,
   onComplete,
+  onDisableCalendarSync,
+  onEnableCalendarSync,
   onDismiss,
   onEdit,
   onRequestDelete,
   onSnooze,
 }: ReminderDetailDrawerProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const [isCalendarSyncSaving, setIsCalendarSyncSaving] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
@@ -142,6 +152,19 @@ export function ReminderDetailDrawer({
     requestClose()
   }
 
+  async function handleCalendarSyncToggle() {
+    setIsCalendarSyncSaving(true)
+    try {
+      if (reminder.calendar_sync_enabled) {
+        await onDisableCalendarSync(reminder.id)
+      } else {
+        await onEnableCalendarSync(reminder.id)
+      }
+    } finally {
+      setIsCalendarSyncSaving(false)
+    }
+  }
+
   return (
     <SheetDrawer className="detail-dialog" isOpen={isDrawerOpen} labelledBy="reminder-detail-heading" onClose={requestClose}>
       <div className="sheet-header detail-header">
@@ -196,6 +219,14 @@ export function ReminderDetailDrawer({
           ]}
         />
 
+        <CalendarSyncSection
+          reminder={reminder}
+          calendarStatus={calendarStatus}
+          isCalendarStatusLoading={isCalendarStatusLoading}
+          isSaving={isCalendarSyncSaving}
+          onToggle={() => void handleCalendarSyncToggle()}
+        />
+
         {note ? (
           <section className="detail-section" aria-labelledby="detail-notes-heading">
             <h3 id="detail-notes-heading">{reminder.reminder_type === 'maintenance' ? 'Notes & Instructions' : 'Notes'}</h3>
@@ -236,6 +267,121 @@ export function ReminderDetailDrawer({
       </section>
     </SheetDrawer>
   )
+}
+
+
+function CalendarSyncSection({
+  reminder,
+  calendarStatus,
+  isCalendarStatusLoading,
+  isSaving,
+  onToggle,
+}: {
+  reminder: Reminder
+  calendarStatus: GoogleCalendarStatus | null
+  isCalendarStatusLoading: boolean
+  isSaving: boolean
+  onToggle: () => void
+}) {
+  const syncState = getCalendarSyncState(reminder, calendarStatus, isCalendarStatusLoading)
+  const canToggle = calendarStatus?.connected === true && !isCalendarStatusLoading && !isSaving
+  const SyncIcon = reminder.calendar_sync_enabled ? CalendarCheck : CalendarPlus
+
+  return (
+    <section className="detail-section detail-calendar-sync-section" aria-labelledby="detail-calendar-sync-heading">
+      <h3 id="detail-calendar-sync-heading">Calendar Sync</h3>
+      <div className="detail-calendar-sync-summary">
+        <CalendarCheck size={17} aria-hidden="true" />
+        <div>
+          <strong>{syncState.label}</strong>
+          <span>{syncState.description}</span>
+        </div>
+      </div>
+
+      {reminder.calendar_last_synced_at ? (
+        <dl className="detail-list detail-calendar-sync-list">
+          <div className="detail-row">
+            <dt>Last synced</dt>
+            <dd>{formatCalendarSyncTimestamp(reminder.calendar_last_synced_at)}</dd>
+          </div>
+        </dl>
+      ) : null}
+
+      {calendarStatus?.connected ? (
+        <button
+          type="button"
+          className={reminder.calendar_sync_enabled ? 'secondary-button detail-calendar-sync-button' : 'primary-button detail-calendar-sync-button'}
+          disabled={!canToggle}
+          onClick={onToggle}
+        >
+          {reminder.calendar_sync_enabled ? <CalendarX size={17} aria-hidden="true" /> : <SyncIcon size={17} aria-hidden="true" />}
+          {isSaving
+            ? 'Saving...'
+            : reminder.calendar_sync_enabled
+              ? 'Stop syncing'
+              : 'Sync to Google Calendar'}
+        </button>
+      ) : null}
+    </section>
+  )
+}
+
+function getCalendarSyncState(
+  reminder: Reminder,
+  calendarStatus: GoogleCalendarStatus | null,
+  isCalendarStatusLoading: boolean,
+) {
+  if (isCalendarStatusLoading) {
+    return {
+      label: 'Checking calendar connection',
+      description: 'Checking Google Calendar setup.',
+    }
+  }
+
+  if (!calendarStatus?.configured) {
+    return {
+      label: 'Calendar sync not configured',
+      description: 'Calendar sync is not configured for this environment.',
+    }
+  }
+
+  if (!calendarStatus.connected) {
+    return {
+      label: 'Google Calendar not connected',
+      description: 'Connect Google Calendar in Settings to sync this reminder.',
+    }
+  }
+
+  if (reminder.calendar_sync_status === 'needs_attention' || reminder.calendar_sync_status === 'error') {
+    return {
+      label: 'Calendar sync needs attention',
+      description: reminder.calendar_sync_error ?? 'Reconnect Google Calendar in Settings.',
+    }
+  }
+
+  if (reminder.calendar_sync_enabled && reminder.calendar_sync_status === 'synced') {
+    return {
+      label: 'Synced to Google Calendar',
+      description: 'This reminder is synced as an all-day event on your primary calendar.',
+    }
+  }
+
+  return {
+    label: 'Not synced',
+    description: 'Sync this reminder as an all-day event on your primary Google Calendar.',
+  }
+}
+
+function formatCalendarSyncTimestamp(value: string) {
+  const timestamp = new Date(value)
+  if (Number.isNaN(timestamp.getTime())) {
+    return 'Not recorded'
+  }
+
+  return timestamp.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
 }
 
 function DetailSection({ className = '', rows, title }: { className?: string; rows: DetailRow[]; title: string }) {

@@ -33,6 +33,25 @@ Parameters:
   PushSubscriptionsTableName:
     Type: String
     Default: lifeledger-push-subscriptions-auth
+  GoogleCalendarConnectionsTableName:
+    Type: String
+    Default: lifeledger-google-calendar-connections-auth
+  GoogleOAuthStatesTableName:
+    Type: String
+    Default: lifeledger-google-oauth-states-auth
+  GoogleClientId:
+    Type: String
+    Default: ""
+  GoogleClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+  GoogleOAuthRedirectUri:
+    Type: String
+    Default: ""
+  GoogleCalendarScopes:
+    Type: String
+    Default: https://www.googleapis.com/auth/calendar.events
   VapidPublicKey:
     Type: String
     Default: ""
@@ -135,9 +154,17 @@ Resources:
           REMINDERS_TABLE_NAME: !Ref RemindersTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
+          GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
+          GOOGLE_OAUTH_STATES_TABLE_NAME: !Ref GoogleOAuthStatesTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
+          LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
+          LOCAL_GOOGLE_OAUTH_STATES_FILE: /tmp/lifeledger-google-oauth-states.json
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+          GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
+          GOOGLE_OAUTH_REDIRECT_URI: !Ref GoogleOAuthRedirectUri
+          GOOGLE_CALENDAR_SCOPES: !Ref GoogleCalendarScopes
           VAPID_PUBLIC_KEY: !Ref VapidPublicKey
           VAPID_PRIVATE_KEY: !Ref VapidPrivateKey
           VAPID_SUBJECT: !Ref VapidSubject
@@ -149,6 +176,10 @@ Resources:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PushSubscriptionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref GoogleCalendarConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref GoogleOAuthStatesTable
       Events:
         Health:
           Type: HttpApi
@@ -258,6 +289,34 @@ Resources:
         - AttributeName: subscription_id
           KeyType: RANGE
 
+  GoogleCalendarConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref GoogleCalendarConnectionsTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+
+  GoogleOAuthStatesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref GoogleOAuthStatesTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: state
+          AttributeType: S
+      KeySchema:
+        - AttributeName: state
+          KeyType: HASH
+
 Outputs:
   ApiUrl:
     Description: HTTP API endpoint for the LifeLedger backend.
@@ -271,6 +330,12 @@ Outputs:
   PushSubscriptionsTable:
     Description: DynamoDB push subscriptions table name.
     Value: !Ref PushSubscriptionsTable
+  GoogleCalendarConnectionsTable:
+    Description: DynamoDB Google Calendar connections table name.
+    Value: !Ref GoogleCalendarConnectionsTable
+  GoogleOAuthStatesTable:
+    Description: DynamoDB Google OAuth states table name.
+    Value: !Ref GoogleOAuthStatesTable
   UserPoolId:
     Description: Cognito User Pool ID.
     Value: !Ref LifeLedgerUserPool

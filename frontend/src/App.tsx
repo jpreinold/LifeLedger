@@ -4,6 +4,8 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 import {
   AlertCircle,
   Bell,
+  CalendarPlus,
+  CalendarX,
   CheckCircle,
   CheckCircle2,
   FileText,
@@ -17,6 +19,7 @@ import {
   X,
 } from 'lucide-react'
 
+import { calendarApi, type GoogleCalendarStatus } from './api/calendarApi'
 import { remindersApi } from './api/remindersApi'
 import { preferencesApi } from './api/preferencesApi'
 import { pushApi, type PushStatus, type PushSubscriptionSummary } from './api/pushApi'
@@ -120,6 +123,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [alerts, setAlerts] = useState<ReminderAlert[]>([])
   const [digestPreferences, setDigestPreferences] = useState<DigestPreferences>(() => defaultDigestPreferences())
+  const [calendarStatus, setCalendarStatus] = useState<GoogleCalendarStatus | null>(null)
+  const [isCalendarStatusLoading, setIsCalendarStatusLoading] = useState(true)
+  const [calendarStatusError, setCalendarStatusError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isDigestPreferencesLoading, setIsDigestPreferencesLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -157,6 +163,66 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
+  async function loadCalendarStatus() {
+    setIsCalendarStatusLoading(true)
+    setCalendarStatusError(null)
+
+    try {
+      const status = await calendarApi.getStatus()
+      setCalendarStatus(status)
+    } catch (requestError) {
+      setCalendarStatus(null)
+      setCalendarStatusError(requestError instanceof Error ? requestError.message : 'Unable to load Google Calendar settings.')
+    } finally {
+      setIsCalendarStatusLoading(false)
+    }
+  }
+
+  async function initializeCalendarStatus() {
+    const handledCallback = await handleGoogleCalendarCallbackFromUrl()
+    if (!handledCallback) {
+      await loadCalendarStatus()
+    }
+  }
+
+  async function handleGoogleCalendarCallbackFromUrl() {
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('code')
+    const state = params.get('state')
+    const oauthError = params.get('error')
+
+    if (!code && !state && !oauthError) {
+      return false
+    }
+
+    setIsCalendarStatusLoading(true)
+    setCalendarStatusError(null)
+    setError(null)
+    setNotice(null)
+
+    try {
+      if (oauthError) {
+        throw new Error('Google Calendar connection was cancelled.')
+      }
+      if (!code || !state) {
+        throw new Error('Google Calendar connection expired. Try again.')
+      }
+
+      const status = await calendarApi.callback({ code, state })
+      setCalendarStatus(status)
+      setNotice('Google Calendar connected.')
+    } catch (requestError) {
+      setCalendarStatus(null)
+      setCalendarStatusError(requestError instanceof Error ? requestError.message : 'Unable to connect Google Calendar.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to connect Google Calendar.')
+    } finally {
+      clearGoogleOAuthUrlParams(params)
+      setIsCalendarStatusLoading(false)
+    }
+
+    return true
+  }
+
   async function loadDigestPreferences() {
     setIsDigestPreferencesLoading(true)
 
@@ -178,6 +244,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   useEffect(() => {
     void loadReminderData()
     void loadDigestPreferences()
+    void initializeCalendarStatus()
   }, [])
 
   async function updateDigestPreferences(
@@ -310,6 +377,46 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setNotice('Reminder snoozed until tomorrow morning.')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to snooze alert.')
+    }
+  }
+
+  function replaceReminder(updated: Reminder) {
+    setReminders((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+    setViewingReminder((current) => (current?.reminder.id === updated.id ? { ...current, reminder: updated } : current))
+    setEditingReminder((current) => (current?.id === updated.id ? updated : current))
+  }
+
+  async function handleEnableCalendarSync(id: string) {
+    setError(null)
+    setNotice(null)
+
+    try {
+      const updated = await remindersApi.enableCalendarSync(id)
+      replaceReminder(updated)
+      await loadReminderData()
+      setViewingReminder((current) => (current?.reminder.id === id ? { ...current, reminder: updated } : current))
+      setNotice('Reminder synced to Google Calendar.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to sync reminder to Google Calendar.')
+      return false
+    }
+  }
+
+  async function handleDisableCalendarSync(id: string) {
+    setError(null)
+    setNotice(null)
+
+    try {
+      const updated = await remindersApi.disableCalendarSync(id)
+      replaceReminder(updated)
+      await loadReminderData()
+      setViewingReminder((current) => (current?.reminder.id === id ? { ...current, reminder: updated } : current))
+      setNotice('Google Calendar sync disabled for this reminder.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to disable Google Calendar sync.')
+      return false
     }
   }
 
@@ -555,11 +662,16 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
         {activePage === 'settings' ? (
           <SettingsView
+            calendarStatus={calendarStatus}
+            calendarStatusError={calendarStatusError}
             digestPreferences={digestPreferences}
             isDigestPreferencesLoading={isDigestPreferencesLoading}
+            isCalendarStatusLoading={isCalendarStatusLoading}
             isSavingDigestPreferences={isSavingDigestPreferences}
             userLabel={userLabel}
             onSignOut={onSignOut}
+            onCalendarStatusRefresh={loadCalendarStatus}
+            onCalendarStatusUpdate={setCalendarStatus}
             onUpdateDigestPreferences={(input) => updateDigestPreferences(input, { showNotice: true })}
           />
         ) : null}
@@ -635,9 +747,13 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       {viewingReminder ? (
         <ReminderDetailDrawer
           reminder={viewingReminder.reminder}
+          calendarStatus={calendarStatus}
+          isCalendarStatusLoading={isCalendarStatusLoading}
           isAlertEligible={viewingReminder.fromAlert || alerts.some((alert) => alert.id === viewingReminder.reminder.id)}
           onClose={() => setViewingReminder(null)}
           onComplete={handleComplete}
+          onDisableCalendarSync={handleDisableCalendarSync}
+          onEnableCalendarSync={handleEnableCalendarSync}
           onDismiss={handleDismissAlert}
           onEdit={openDetailEdit}
           onRequestDelete={requestDelete}
@@ -680,18 +796,28 @@ function RecordsView() {
 }
 
 function SettingsView({
+  calendarStatus,
+  calendarStatusError,
   digestPreferences,
   isDigestPreferencesLoading,
+  isCalendarStatusLoading,
   isSavingDigestPreferences,
   userLabel,
   onSignOut,
+  onCalendarStatusRefresh,
+  onCalendarStatusUpdate,
   onUpdateDigestPreferences,
 }: {
+  calendarStatus: GoogleCalendarStatus | null
+  calendarStatusError: string | null
   digestPreferences: DigestPreferences
   isDigestPreferencesLoading: boolean
+  isCalendarStatusLoading: boolean
   isSavingDigestPreferences: boolean
   userLabel?: string | null
   onSignOut?: () => void
+  onCalendarStatusRefresh: () => Promise<void>
+  onCalendarStatusUpdate: (status: GoogleCalendarStatus) => void
   onUpdateDigestPreferences: (input: DigestPreferencesUpdate) => Promise<boolean>
 }) {
   const accountLabel = userLabel?.trim() || (isCognitoAuthEnabled ? 'Signed in' : 'Local development mode')
@@ -829,6 +955,14 @@ function SettingsView({
           </div>
         </section>
 
+        <GoogleCalendarSection
+          calendarStatus={calendarStatus}
+          calendarStatusError={calendarStatusError}
+          isCalendarStatusLoading={isCalendarStatusLoading}
+          onCalendarStatusRefresh={onCalendarStatusRefresh}
+          onCalendarStatusUpdate={onCalendarStatusUpdate}
+        />
+
         <PushNotificationsSection
           digestPreferences={digestPreferences}
           isDigestPreferencesLoading={isDigestPreferencesLoading}
@@ -897,6 +1031,184 @@ function buildDigestChanges(saved: DigestPreferences, draft: DigestDraft): Diges
   }
 
   return changes
+}
+
+
+function GoogleCalendarSection({
+  calendarStatus,
+  calendarStatusError,
+  isCalendarStatusLoading,
+  onCalendarStatusRefresh,
+  onCalendarStatusUpdate,
+}: {
+  calendarStatus: GoogleCalendarStatus | null
+  calendarStatusError: string | null
+  isCalendarStatusLoading: boolean
+  onCalendarStatusRefresh: () => Promise<void>
+  onCalendarStatusUpdate: (status: GoogleCalendarStatus) => void
+}) {
+  const [isWorking, setIsWorking] = useState(false)
+  const [calendarMessage, setCalendarMessage] = useState<string | null>(null)
+  const [calendarError, setCalendarError] = useState<string | null>(null)
+  const calendarState = getCalendarUiState(calendarStatus, isCalendarStatusLoading, calendarStatusError)
+  const canConnect = Boolean(calendarStatus?.configured) && !isCalendarStatusLoading && !isWorking
+  const canDisconnect = calendarStatus?.connected === true && !isCalendarStatusLoading && !isWorking
+  const shouldShowConnect = calendarStatus?.configured === true && calendarStatus.connected !== true
+  const shouldShowDisconnect = calendarStatus?.connected === true
+
+  async function connectGoogleCalendar() {
+    setIsWorking(true)
+    setCalendarError(null)
+    setCalendarMessage(null)
+
+    try {
+      const result = await calendarApi.connect()
+      window.location.assign(result.authorization_url)
+    } catch (requestError) {
+      setCalendarError(requestError instanceof Error ? requestError.message : 'Unable to start Google Calendar connection.')
+      setIsWorking(false)
+    }
+  }
+
+  async function disconnectGoogleCalendar() {
+    setIsWorking(true)
+    setCalendarError(null)
+    setCalendarMessage(null)
+
+    try {
+      await calendarApi.disconnect()
+      const status = await calendarApi.getStatus()
+      onCalendarStatusUpdate(status)
+      setCalendarMessage('Google Calendar disconnected.')
+    } catch (requestError) {
+      setCalendarError(requestError instanceof Error ? requestError.message : 'Unable to disconnect Google Calendar.')
+      await onCalendarStatusRefresh()
+    } finally {
+      setIsWorking(false)
+    }
+  }
+
+  return (
+    <section className="settings-digest-card settings-calendar-card" aria-labelledby="settings-calendar-heading">
+      <div className="settings-card-header settings-digest-header">
+        <div>
+          <h3 id="settings-calendar-heading">Google Calendar</h3>
+          <p>Sync selected LifeLedger reminders to your Google Calendar.</p>
+        </div>
+        <span className={`settings-push-status-pill settings-push-status-pill-${calendarState.tone}`}>
+          {calendarState.label}
+        </span>
+      </div>
+
+      <div className="settings-push-summary settings-calendar-summary">
+        <strong>{calendarState.summary}</strong>
+        <span>{calendarState.detail}</span>
+      </div>
+
+      {calendarStatus?.connected ? (
+        <div className="settings-push-advanced-list settings-calendar-details" aria-label="Google Calendar connection details">
+          <div className="settings-push-advanced-row">
+            <span>Account</span>
+            <strong>{calendarStatus.google_account_email ?? 'Google account connected'}</strong>
+          </div>
+          <div className="settings-push-advanced-row">
+            <span>Calendar</span>
+            <strong>{calendarStatus.calendar_label ?? 'Primary calendar'}</strong>
+          </div>
+        </div>
+      ) : null}
+
+      {calendarStatusError || calendarError ? (
+        <div className="settings-push-error settings-push-inline-message" role="alert">
+          <span>{calendarError ?? calendarStatusError}</span>
+          <button type="button" className="message-dismiss-button" onClick={() => setCalendarError(null)} aria-label="Dismiss Google Calendar error">
+            <X size={15} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+      {calendarMessage ? (
+        <div className="settings-push-message settings-push-inline-message" role="status">
+          <span>{calendarMessage}</span>
+          <button type="button" className="message-dismiss-button" onClick={() => setCalendarMessage(null)} aria-label="Dismiss Google Calendar message">
+            <X size={15} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+
+      <div className="settings-push-actions">
+        {shouldShowConnect ? (
+          <button type="button" className="primary-button settings-push-button" disabled={!canConnect} onClick={() => void connectGoogleCalendar()}>
+            <CalendarPlus size={17} aria-hidden="true" />
+            {isWorking ? 'Connecting...' : calendarStatus?.status === 'needs_reconnect' ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}
+          </button>
+        ) : null}
+        {shouldShowDisconnect ? (
+          <button type="button" className="secondary-button settings-push-button" disabled={!canDisconnect} onClick={() => void disconnectGoogleCalendar()}>
+            <CalendarX size={17} aria-hidden="true" />
+            {isWorking ? 'Disconnecting...' : 'Disconnect Google Calendar'}
+          </button>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function getCalendarUiState(
+  calendarStatus: GoogleCalendarStatus | null,
+  isLoading: boolean,
+  calendarStatusError: string | null,
+) {
+  if (isLoading) {
+    return {
+      label: 'Checking',
+      summary: 'Checking Google Calendar setup.',
+      detail: 'Primary calendar sync only.',
+      tone: 'disabled',
+    }
+  }
+
+  if (calendarStatusError && !calendarStatus) {
+    return {
+      label: 'Error',
+      summary: 'Google Calendar status is unavailable.',
+      detail: 'Try again from Settings.',
+      tone: 'blocked',
+    }
+  }
+
+  if (!calendarStatus?.configured) {
+    return {
+      label: 'Not configured',
+      summary: 'Calendar sync is not configured for this environment.',
+      detail: 'A Google OAuth client must be configured on the backend.',
+      tone: 'disabled',
+    }
+  }
+
+  if (calendarStatus.connected) {
+    return {
+      label: 'Connected',
+      summary: 'Connected',
+      detail: 'Primary calendar',
+      tone: 'enabled',
+    }
+  }
+
+  if (calendarStatus.status === 'needs_reconnect') {
+    return {
+      label: 'Needs reconnect',
+      summary: 'Calendar sync needs attention.',
+      detail: 'Reconnect Google Calendar to resume reminder sync.',
+      tone: 'blocked',
+    }
+  }
+
+  return {
+    label: 'Not connected',
+    summary: 'Connect Google Calendar',
+    detail: 'Sync selected LifeLedger reminders to your Google Calendar.',
+    tone: 'disabled',
+  }
 }
 
 
@@ -1296,6 +1608,16 @@ function getUserDisplayName(value?: string | null) {
   }
 
   return `${firstToken.charAt(0).toUpperCase()}${firstToken.slice(1)}`
+}
+
+function clearGoogleOAuthUrlParams(params: URLSearchParams) {
+  for (const key of ['code', 'state', 'scope', 'authuser', 'prompt', 'error', 'error_description']) {
+    params.delete(key)
+  }
+
+  const nextSearch = params.toString()
+  const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
+  window.history.replaceState(null, '', nextUrl || '/')
 }
 
 function getTomorrowMorningIso() {

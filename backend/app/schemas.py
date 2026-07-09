@@ -57,6 +57,18 @@ class ReminderType(str, Enum):
     MAINTENANCE = "maintenance"
 
 
+class CalendarSyncStatus(str, Enum):
+    NOT_SYNCED = "not_synced"
+    SYNCED = "synced"
+    NEEDS_ATTENTION = "needs_attention"
+    ERROR = "error"
+
+
+class GoogleCalendarConnectionStatus(str, Enum):
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+    NEEDS_RECONNECT = "needs_reconnect"
+
 class RenewalKind(str, Enum):
     RENEWAL = "renewal"
     EXPIRATION = "expiration"
@@ -253,10 +265,12 @@ class ReminderBase(BaseModel):
 
 
 class ReminderCreate(ReminderBase):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 class ReminderUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str | None = Field(default=None, min_length=1, max_length=120)
     category: ReminderCategory | None = None
     due_date: date | None = None
@@ -324,6 +338,12 @@ class ReminderResponse(ReminderBase):
     maintenance_status_label: str | None = None
 
 
+    calendar_sync_enabled: bool = False
+    calendar_provider: str | None = None
+    calendar_id: str | None = None
+    calendar_last_synced_at: datetime | None = None
+    calendar_sync_status: CalendarSyncStatus = CalendarSyncStatus.NOT_SYNCED
+    calendar_sync_error: str | None = None
 class ReminderAlertResponse(ReminderResponse):
     alert_reason: ReminderAlertReason
     alert_reminder_start_date: date | None = None
@@ -389,6 +409,26 @@ class DigestPreferencesUpdate(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+class GoogleCalendarStatusResponse(BaseModel):
+    configured: bool
+    connected: bool
+    status: GoogleCalendarConnectionStatus
+    google_account_email: str | None = None
+    calendar_id: str | None = None
+    calendar_label: str | None = None
+    last_error: str | None = None
+
+
+class GoogleCalendarConnectResponse(BaseModel):
+    authorization_url: str
+
+
+class GoogleCalendarCallbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(..., min_length=1)
+    state: str = Field(..., min_length=1)
 
 class PushSubscriptionKeys(BaseModel):
     model_config = ConfigDict(extra="forbid")
