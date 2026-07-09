@@ -6,6 +6,17 @@ export interface PushConfiguration {
   configured: boolean
 }
 
+export interface PushStatus {
+  configured: boolean
+  active_subscription_count: number
+  last_success_at: string | null
+  last_failure_at: string | null
+  failure_count: number
+  digest_enabled: boolean
+  digest_time: string
+  timezone: string | null
+}
+
 export interface PushSubscriptionSummary {
   subscription_id: string
   endpoint: string
@@ -25,6 +36,10 @@ export interface PushSubscriptionInput {
     auth: string
   }
   user_agent?: string
+}
+
+export interface PushTestResult {
+  sent: number
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -66,6 +81,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const pushApi = {
   getConfig: () => request<PushConfiguration>('/push/config'),
+
+  getStatus: () => request<PushStatus>('/push/status'),
+
+  sendTestPush: () =>
+    request<PushTestResult>('/push/test', {
+      method: 'POST',
+    }),
 
   listSubscriptions: () => request<PushSubscriptionSummary[]>('/push/subscriptions'),
 

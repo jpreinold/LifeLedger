@@ -16,4 +16,4 @@ if (-not (Test-Path $venvActivate)) {
 }
 
 . $venvActivate
-python -m pytest
+python -m pytest --basetemp (Join-Path $tmpDir "pytest")

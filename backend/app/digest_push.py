@@ -1,5 +1,6 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import Settings, get_settings
@@ -17,6 +18,7 @@ DIGEST_PUSH_URL = "/?openDigest=1"
 DIGEST_PUSH_TAG = "daily-digest"
 DIGEST_PUSH_TYPE = "daily_digest"
 DEFAULT_DIGEST_WINDOW_MINUTES = 15
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class DigestPushRunResult:
     checked_users: int = 0
     due_users: int = 0
     skipped_config_missing: bool = False
+    created_default_preferences: int = 0
     skipped_no_preferences: int = 0
     skipped_not_due: int = 0
     skipped_duplicate: int = 0
@@ -46,9 +49,13 @@ def run_daily_digest_push(
     sender: PushSender | None = None,
     schedule_window_minutes: int = DEFAULT_DIGEST_WINDOW_MINUTES,
 ) -> DigestPushRunResult:
+    logger.info("Daily Digest push run started")
     resolved_settings = settings or get_settings()
     if sender is None and not resolved_settings.push_notifications_configured:
-        return DigestPushRunResult(skipped_config_missing=True)
+        result = DigestPushRunResult(skipped_config_missing=True)
+        logger.warning("Daily Digest push config missing")
+        logger.info("Daily Digest push run completed: %s", result.to_dict())
+        return result
 
     now_utc = normalize_utc(now or datetime.now(timezone.utc))
     reminders_repo = reminder_repository or create_repository(resolved_settings)
@@ -65,6 +72,7 @@ def run_daily_digest_push(
     sent = 0
     failed = 0
     disabled_invalid = 0
+    created_default_preferences = 0
 
     for user_id in subscriptions_repo.list_user_ids_with_active_subscriptions():
         checked_users += 1
@@ -72,11 +80,14 @@ def run_daily_digest_push(
         if preferences is None:
             preferences = default_digest_preferences(user_id, now_utc)
             preferences_repo.save_preferences(preferences)
+            created_default_preferences += 1
 
         local_now = to_user_local_datetime(now_utc, preferences.timezone)
         if not is_digest_due(preferences, local_now, schedule_window_minutes):
             skipped_not_due += 1
             continue
+
+        due_users += 1
 
         if was_pushed_today(preferences, local_now):
             skipped_duplicate += 1
@@ -96,7 +107,6 @@ def run_daily_digest_push(
             skipped_empty_digest += 1
             continue
 
-        due_users += 1
         payload = PushPayload(
             title=DIGEST_PUSH_TITLE,
             body=digest.to_push_body(),
@@ -151,9 +161,10 @@ def run_daily_digest_push(
                 preferences.model_copy(update={"digest_last_pushed_at": now_utc, "updated_at": now_utc})
             )
 
-    return DigestPushRunResult(
+    result = DigestPushRunResult(
         checked_users=checked_users,
         due_users=due_users,
+        created_default_preferences=created_default_preferences,
         skipped_no_preferences=skipped_no_preferences,
         skipped_not_due=skipped_not_due,
         skipped_duplicate=skipped_duplicate,
@@ -162,6 +173,8 @@ def run_daily_digest_push(
         failed=failed,
         disabled_invalid=disabled_invalid,
     )
+    logger.info("Daily Digest push run completed: %s", result.to_dict())
+    return result
 
 
 def normalize_utc(value: datetime) -> datetime:

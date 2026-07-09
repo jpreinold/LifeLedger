@@ -19,7 +19,7 @@ import {
 
 import { remindersApi } from './api/remindersApi'
 import { preferencesApi } from './api/preferencesApi'
-import { pushApi, type PushConfiguration, type PushSubscriptionSummary } from './api/pushApi'
+import { pushApi, type PushStatus, type PushSubscriptionSummary } from './api/pushApi'
 import { isCognitoAuthEnabled } from './auth/config'
 import { AddTypeSelector } from './components/AddTypeSelector'
 import { AlertCenter } from './components/AlertCenter'
@@ -905,26 +905,40 @@ function PushNotificationsSection({
   digestPreferences: DigestPreferences
   isDigestPreferencesLoading: boolean
 }) {
-  const [pushConfig, setPushConfig] = useState<PushConfiguration | null>(null)
+  const [pushStatus, setPushStatus] = useState<PushStatus | null>(null)
   const [subscriptions, setSubscriptions] = useState<PushSubscriptionSummary[]>([])
   const [permission, setPermission] = useState<NotificationPermission>(() => getNotificationPermission())
   const [isLoadingPush, setIsLoadingPush] = useState(true)
   const [isSavingPush, setIsSavingPush] = useState(false)
+  const [isSendingTestPush, setIsSendingTestPush] = useState(false)
   const [pushMessage, setPushMessage] = useState<string | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
   const supportState = getPushSupportState()
   const frontendPublicKey = getVapidPublicKey()
-  const isCheckingConfig = supportState === 'supported' && isLoadingPush
-  const isConfigMissing = supportState === 'supported' && !isLoadingPush && (!frontendPublicKey || pushConfig?.configured === false)
-  const isEnabled = subscriptions.length > 0
-  const isBusy = isLoadingPush || isSavingPush || isDigestPreferencesLoading
+  const activeSubscriptionCount = pushStatus?.active_subscription_count ?? subscriptions.length
+  const backendConfigured = pushStatus?.configured === true
+  const isCheckingConfig = isLoadingPush
+  const isConfigMissing = supportState === 'supported' && !isLoadingPush && (!frontendPublicKey || pushStatus?.configured === false)
+  const isEnabled = activeSubscriptionCount > 0
+  const isBusy = isLoadingPush || isSavingPush || isSendingTestPush || isDigestPreferencesLoading
+  const shouldShowTestPushButton =
+    supportState === 'supported' && Boolean(frontendPublicKey) && backendConfigured && permission === 'granted' && isEnabled
+  const canSendTestPush = shouldShowTestPushButton && !isBusy
+  const diagnostics = [
+    { label: 'Browser support', value: supportState === 'supported' ? 'Supported' : 'Unsupported' },
+    { label: 'Browser permission', value: formatNotificationPermission(permission) },
+    { label: 'Frontend VAPID public key', value: frontendPublicKey ? 'Configured' : 'Missing' },
+    { label: 'Backend push config', value: isLoadingPush ? 'Checking' : backendConfigured ? 'Configured' : 'Missing' },
+    { label: 'Active subscriptions', value: String(activeSubscriptionCount) },
+    { label: 'Last success', value: formatPushTimestamp(pushStatus?.last_success_at) },
+    { label: 'Last failure', value: formatPushTimestamp(pushStatus?.last_failure_at) },
+    { label: 'Failure count', value: String(pushStatus?.failure_count ?? 0) },
+    { label: 'Daily Digest enabled', value: (pushStatus?.digest_enabled ?? digestPreferences.digest_enabled) ? 'Enabled' : 'Disabled' },
+    { label: 'Daily Digest time', value: pushStatus?.digest_time ?? digestPreferences.digest_time },
+    { label: 'Timezone', value: pushStatus?.timezone ?? digestPreferences.timezone ?? getBrowserTimeZone() ?? 'Not set' },
+  ]
 
   useEffect(() => {
-    if (supportState !== 'supported') {
-      setIsLoadingPush(false)
-      return
-    }
-
     let isCancelled = false
 
     async function loadPushState() {
@@ -932,18 +946,18 @@ function PushNotificationsSection({
       setPushError(null)
 
       try {
-        const [config, savedSubscriptions] = await Promise.all([
-          pushApi.getConfig(),
+        const [status, savedSubscriptions] = await Promise.all([
+          pushApi.getStatus(),
           pushApi.listSubscriptions(),
         ])
         if (!isCancelled) {
-          setPushConfig(config)
+          setPushStatus(status)
           setSubscriptions(savedSubscriptions)
           setPermission(getNotificationPermission())
         }
       } catch (requestError) {
         if (!isCancelled) {
-          setPushConfig({ configured: false })
+          setPushStatus(toFallbackPushStatus(digestPreferences))
           setPushError(requestError instanceof Error ? requestError.message : 'Unable to load push notification settings.')
         }
       } finally {
@@ -958,7 +972,7 @@ function PushNotificationsSection({
     return () => {
       isCancelled = true
     }
-  }, [supportState])
+  }, [digestPreferences, supportState])
 
   async function enablePushNotifications() {
     setIsSavingPush(true)
@@ -969,7 +983,7 @@ function PushNotificationsSection({
       if (supportState !== 'supported') {
         throw new Error('Push notifications are not supported in this browser.')
       }
-      if (!frontendPublicKey || pushConfig?.configured === false) {
+      if (!frontendPublicKey || !backendConfigured) {
         throw new Error('Push notifications are not configured for this environment.')
       }
 
@@ -990,7 +1004,11 @@ function PushNotificationsSection({
       }
 
       await pushApi.saveSubscription(toPushSubscriptionInput(browserSubscription))
-      const savedSubscriptions = await pushApi.listSubscriptions()
+      const [nextStatus, savedSubscriptions] = await Promise.all([
+        pushApi.getStatus(),
+        pushApi.listSubscriptions(),
+      ])
+      setPushStatus(nextStatus)
       setSubscriptions(savedSubscriptions)
       setPushMessage('Daily Digest push notifications are enabled.')
     } catch (requestError) {
@@ -1015,12 +1033,34 @@ function PushNotificationsSection({
       }
 
       await Promise.all(subscriptions.map((subscription) => pushApi.removeSubscription(subscription.subscription_id)))
-      setSubscriptions([])
+      const [nextStatus, savedSubscriptions] = await Promise.all([
+        pushApi.getStatus(),
+        pushApi.listSubscriptions(),
+      ])
+      setPushStatus(nextStatus)
+      setSubscriptions(savedSubscriptions)
       setPushMessage('Daily Digest push notifications are disabled.')
     } catch (requestError) {
       setPushError(requestError instanceof Error ? requestError.message : 'Unable to disable push notifications.')
     } finally {
       setIsSavingPush(false)
+    }
+  }
+
+  async function sendTestPush() {
+    setIsSendingTestPush(true)
+    setPushError(null)
+    setPushMessage(null)
+
+    try {
+      await pushApi.sendTestPush()
+      const nextStatus = await pushApi.getStatus()
+      setPushStatus(nextStatus)
+      setPushMessage('Test push sent.')
+    } catch (requestError) {
+      setPushError(requestError instanceof Error ? requestError.message : 'Unable to send test push.')
+    } finally {
+      setIsSendingTestPush(false)
     }
   }
 
@@ -1039,11 +1079,13 @@ function PushNotificationsSection({
         <strong>{getPushStatusText(supportState, permission, isConfigMissing, isEnabled, isCheckingConfig)}</strong>
       </div>
 
-      <div className="settings-row settings-push-status-row">
-        <span>Daily Digest</span>
-        <strong>
-          {digestPreferences.digest_enabled ? 'Enabled' : 'Disabled'} at {digestPreferences.digest_time}
-        </strong>
+      <div className="settings-push-diagnostics" aria-label="Push notification diagnostics">
+        {diagnostics.map((item) => (
+          <div key={item.label} className="settings-push-diagnostic">
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        ))}
       </div>
 
       <p className="settings-push-note">
@@ -1053,15 +1095,22 @@ function PushNotificationsSection({
       {pushError ? <p className="settings-push-error" role="alert">{pushError}</p> : null}
       {pushMessage ? <p className="settings-push-message" role="status">{pushMessage}</p> : null}
 
-      {supportState === 'unsupported' || isConfigMissing ? null : isEnabled ? (
-        <button type="button" className="secondary-button settings-push-button" disabled={isBusy} onClick={() => void disablePushNotifications()}>
-          {isSavingPush ? 'Disabling...' : 'Disable push notifications'}
-        </button>
-      ) : (
-        <button type="button" className="primary-button settings-push-button" disabled={isBusy || permission === 'denied'} onClick={() => void enablePushNotifications()}>
-          {isSavingPush ? 'Enabling...' : 'Enable push notifications'}
-        </button>
-      )}
+      <div className="settings-push-actions">
+        {supportState === 'unsupported' || isConfigMissing ? null : isEnabled ? (
+          <button type="button" className="secondary-button settings-push-button" disabled={isBusy} onClick={() => void disablePushNotifications()}>
+            {isSavingPush ? 'Disabling...' : 'Disable push notifications'}
+          </button>
+        ) : (
+          <button type="button" className="primary-button settings-push-button" disabled={isBusy || permission === 'denied'} onClick={() => void enablePushNotifications()}>
+            {isSavingPush ? 'Enabling...' : 'Enable push notifications'}
+          </button>
+        )}
+        {shouldShowTestPushButton ? (
+          <button type="button" className="secondary-button settings-push-button" disabled={!canSendTestPush} onClick={() => void sendTestPush()}>
+            {isSendingTestPush ? 'Sending...' : 'Send test push'}
+          </button>
+        ) : null}
+      </div>
     </section>
   )
 }
@@ -1114,6 +1163,46 @@ function getPushStatusText(
   }
 
   return 'Push notifications are available.'
+}
+
+function toFallbackPushStatus(digestPreferences: DigestPreferences): PushStatus {
+  return {
+    configured: false,
+    active_subscription_count: 0,
+    last_success_at: null,
+    last_failure_at: null,
+    failure_count: 0,
+    digest_enabled: digestPreferences.digest_enabled,
+    digest_time: digestPreferences.digest_time,
+    timezone: digestPreferences.timezone,
+  }
+}
+
+function formatNotificationPermission(permission: NotificationPermission) {
+  if (permission === 'granted') {
+    return 'Granted'
+  }
+  if (permission === 'denied') {
+    return 'Denied'
+  }
+
+  return 'Default'
+}
+
+function formatPushTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return 'Not recorded'
+  }
+
+  const timestamp = new Date(value)
+  if (Number.isNaN(timestamp.getTime())) {
+    return 'Not recorded'
+  }
+
+  return timestamp.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
 }
 
 function toPushSubscriptionInput(subscription: PushSubscription): {

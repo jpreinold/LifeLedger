@@ -3400,6 +3400,38 @@ textarea:focus-visible {
   border-radius: var(--radius-md);
 }
 
+.settings-push-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-border);
+}
+
+.settings-push-diagnostic {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: var(--space-3);
+  background: var(--color-surface);
+}
+
+.settings-push-diagnostic span {
+  color: var(--color-text-soft);
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.settings-push-diagnostic strong {
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 720;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .settings-push-note,
 .settings-push-error,
 .settings-push-message {
@@ -3422,7 +3454,12 @@ textarea:focus-visible {
   color: #08764e;
 }
 
+.settings-push-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .settings-push-button {
-  width: 100%;
-  margin-top: var(--space-1);
+  flex: 1 1 190px;
 }

@@ -33,7 +33,9 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `GET /reminders/{id}` requires authentication in Cognito mode.
 - `PUT /reminders/{id}` requires authentication in Cognito mode.
 - `DELETE /reminders/{id}` requires authentication in Cognito mode.
-- `POST /reminders/{id}/complete` requires authentication in Cognito mode.`r`n- `GET /preferences/digest` and `PUT /preferences/digest` require authentication in Cognito mode.`r`n- `GET /push/config`, `GET /push/subscriptions`, `POST /push/subscriptions`, and `DELETE /push/subscriptions/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
+- `POST /reminders/{id}/complete` requires authentication in Cognito mode.
+- `GET /preferences/digest` and `PUT /preferences/digest` require authentication in Cognito mode.
+- `GET /push/config`, `GET /push/status`, `GET /push/subscriptions`, `POST /push/subscriptions`, `POST /push/test`, and `DELETE /push/subscriptions/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
 
 ## Architecture
 
@@ -63,8 +65,17 @@ Local development does not require environment variables.
 | `PERSISTENCE_MODE` | `local` | `local` uses JSON; `dynamodb` uses DynamoDB. |
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name. |
 | `AWS_REGION` | `us-east-1` | DynamoDB region. Lambda also provides this automatically. |
-| `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |`r`n| `PREFERENCES_TABLE_NAME` | `lifeledger-preferences-auth` | DynamoDB preferences table name. |`r`n| `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name. |`r`n| `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences in local persistence. |`r`n| `LOCAL_PUSH_SUBSCRIPTIONS_FILE` | `backend/data/push-subscriptions.json` locally, `/tmp/lifeledger-push-subscriptions.json` in Lambda/SAM local | JSON file used for push subscriptions in local persistence. |`r`n| `VAPID_PUBLIC_KEY` | empty | Public VAPID key. |`r`n| `VAPID_PRIVATE_KEY` | empty | Private VAPID key used only by the backend sender. |`r`n| `VAPID_SUBJECT` | empty | VAPID contact subject such as `mailto:you@example.com`. |
+| `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
+| `PREFERENCES_TABLE_NAME` | `lifeledger-preferences-auth` | DynamoDB preferences table name. |
+| `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name. |
+| `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences in local persistence. |
+| `LOCAL_PUSH_SUBSCRIPTIONS_FILE` | `backend/data/push-subscriptions.json` locally, `/tmp/lifeledger-push-subscriptions.json` in Lambda/SAM local | JSON file used for push subscriptions in local persistence. |
+| `VAPID_PUBLIC_KEY` | empty | Public VAPID key. |
+| `VAPID_PRIVATE_KEY` | empty | Private VAPID key used only by the backend sender. Do not commit it. |
+| `VAPID_SUBJECT` | empty | VAPID contact subject such as `mailto:you@example.com`. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
+
+Generate VAPID keys with `npx web-push generate-vapid-keys`. The backend receives `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`; the frontend receives only `VITE_VAPID_PUBLIC_KEY`.
 
 ## Authentication Modes
 
@@ -135,6 +146,14 @@ http://127.0.0.1:3000/reminders
 
 When local persistence runs inside Lambda or SAM local, JSON data writes to `/tmp/lifeledger-reminders.json` because the function task directory may be read-only.
 
+Run the scheduled Daily Digest push logic manually in local/dev without exposing a route:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python run_digest_push.py
+```
+
 Deploy with Cognito and DynamoDB:
 
 ```powershell
@@ -150,6 +169,9 @@ AuthMode=cognito
 PersistenceMode=dynamodb
 RemindersTableName=lifeledger-reminders-auth
 CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
+VapidPublicKey=<public-vapid-key>
+VapidPrivateKey=<private-vapid-key>
+VapidSubject=mailto:you@example.com
 ```
 
 `sam deploy --guided` creates `samconfig.toml` for your local AWS account and deployment choices. That file is ignored by git. Use `samconfig.example.toml` as a safe reference that does not include credentials, account IDs, or local profile names.

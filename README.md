@@ -89,6 +89,38 @@ The Home dashboard includes a Daily Digest card. Opening it shows a near-full-he
 
 The reminder list now uses the top status cards as filters: All active, Overdue, Due today, and Due this month. The smart type chips remain as the only chip row: All types, Reminders, Birthdays, Renewals, and Maintenance. Status cards and type chips combine, and empty states describe the active filter where possible.
 
+## Push Notifications
+
+Generate VAPID keys when setting up browser push:
+
+```powershell
+npx web-push generate-vapid-keys
+```
+
+Cloudflare Pages gets only `VITE_VAPID_PUBLIC_KEY`. AWS/SAM gets `VapidPublicKey`, `VapidPrivateKey`, and `VapidSubject`. The private key is backend-only secret material and must not be committed.
+
+To enable push, deploy both sides with those values, open Settings, and use **Enable push notifications** in the Push Notifications section. After the browser grants permission and an active subscription appears, use **Send test push** to send a summary-only notification to the current signed-in user. The test payload contains no reminder details and opens `/?openDigest=1`.
+
+Troubleshooting in Settings:
+
+- Browser unsupported: use a browser/PWA install mode that supports service workers, Notification, and Push API.
+- Permission denied: re-enable notifications for the site in browser settings.
+- Frontend key missing: set `VITE_VAPID_PUBLIC_KEY` in Cloudflare or `frontend/.env.local`, then rebuild/restart Vite.
+- Backend config missing: deploy AWS/SAM with `VapidPublicKey`, `VapidPrivateKey`, and `VapidSubject`.
+- No active subscription: click **Enable push notifications** first.
+- Digest disabled: turn Daily Digest back on in Settings.
+- Digest not due yet: scheduled sends only run near the saved local digest time.
+- Empty digest: scheduled sends skip users with no meaningful digest content.
+- Duplicate already sent today: scheduled sends skip a user after a successful Daily Digest push for that user's local day.
+
+For local/dev scheduler verification without waiting for EventBridge:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python run_digest_push.py
+```
+
 ## Creating The First Cognito User
 
 After deploying the backend with `AuthMode=cognito`, create users from the AWS Console:
@@ -171,8 +203,10 @@ Deployed frontend flow:
 - `GET /preferences/digest` requires authentication in Cognito mode.
 - `PUT /preferences/digest` requires authentication in Cognito mode.
 - `GET /push/config` requires authentication in Cognito mode.
+- `GET /push/status` requires authentication in Cognito mode and returns safe diagnostics for the current user only.
 - `GET /push/subscriptions` requires authentication in Cognito mode and returns only the current user's active subscriptions.
 - `POST /push/subscriptions` requires authentication in Cognito mode and stores/updates only the current user's subscription. The frontend must not send `user_id`.
+- `POST /push/test` requires authentication in Cognito mode and sends a summary-only test push to the current user's active subscriptions only.
 - `DELETE /push/subscriptions/{subscription_id}` requires authentication in Cognito mode and disables only a subscription owned by the current user.
 
 ## Backend Architecture
@@ -215,6 +249,8 @@ Backend local development works without setting any variables.
 | `VAPID_SUBJECT` | empty | VAPID contact subject, such as `mailto:you@example.com`. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
+SAM parameters use `VapidPublicKey`, `VapidPrivateKey`, and `VapidSubject`; Cloudflare Pages uses only `VITE_VAPID_PUBLIC_KEY`.
+
 ## Serverless Notes
 
 The backend can still run locally with Uvicorn. Lambda support is additive: `backend/lambda_handler.py` imports the same FastAPI app and wraps it with Mangum.
@@ -248,6 +284,9 @@ AuthMode=cognito
 PersistenceMode=dynamodb
 RemindersTableName=lifeledger-reminders-auth
 CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
+VapidPublicKey=<public-vapid-key>
+VapidPrivateKey=<private-vapid-key>
+VapidSubject=mailto:you@example.com
 ```
 
 SAM guided deploy creates `backend/samconfig.toml` for your machine/account. That file is ignored by git because it can contain local deployment choices. Use `backend/samconfig.example.toml` as a safe reference, then run:
@@ -268,6 +307,9 @@ sam deploy --guided
 - Cloudflare frontend can load, create, complete, and delete reminders after sign-in.
 - AWS is redeployed with the push subscription table, scheduled sender, and VAPID backend parameters.
 - Cloudflare is redeployed with `VITE_VAPID_PUBLIC_KEY`.
+- Settings shows push diagnostics without exposing endpoint or key material.
+- Enabling push creates an active subscription, and **Send test push** delivers a summary-only test notification.
+- The scheduled digest sender can be run or observed and does not duplicate pushes for the same local day.
 - `frontend/.env.local`, AWS credentials, tokens, and local deployment files are not committed.
 
 ## Not In This Phase

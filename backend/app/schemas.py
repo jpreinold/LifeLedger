@@ -421,3 +421,18 @@ class PushSubscriptionResponse(BaseModel):
 
 class PushConfigurationResponse(BaseModel):
     configured: bool
+
+
+class PushStatusResponse(BaseModel):
+    configured: bool
+    active_subscription_count: int
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    failure_count: int = 0
+    digest_enabled: bool
+    digest_time: str
+    timezone: str | None = None
+
+
+class PushTestResponse(BaseModel):
+    sent: int

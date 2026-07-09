@@ -4,9 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import UserContext, get_current_user
-from app.config import load_settings
+from app.config import get_settings, load_settings
 from app.digest_push import is_digest_due, run_daily_digest_push, was_pushed_today
-from app.main import app, get_preferences_repository, get_push_subscription_repository, get_repository
+from app.main import app, get_app_settings, get_preferences_repository, get_push_sender, get_push_subscription_repository, get_repository
 from app.models import PushSubscription, Reminder
 from app.preferences import default_digest_preferences
 from app.preferences_repository import LocalPreferencesRepository
@@ -47,6 +47,13 @@ class RecordingPushSender:
         self.sent.append((subscription.endpoint, payload))
 
 
+@pytest.fixture(autouse=True)
+def clear_settings_cache():
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture()
 def client(tmp_path):
     repo = LocalReminderRepository(tmp_path / "reminders.json")
@@ -58,6 +65,21 @@ def client(tmp_path):
 
     with TestClient(app) as test_client:
         yield test_client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def api_context(tmp_path):
+    repo = LocalReminderRepository(tmp_path / "reminders.json")
+    preferences_repo = LocalPreferencesRepository(tmp_path / "preferences.json")
+    push_repo = LocalPushSubscriptionRepository(tmp_path / "push-subscriptions.json")
+    app.dependency_overrides[get_repository] = lambda: repo
+    app.dependency_overrides[get_preferences_repository] = lambda: preferences_repo
+    app.dependency_overrides[get_push_subscription_repository] = lambda: push_repo
+
+    with TestClient(app) as test_client:
+        yield test_client, repo, preferences_repo, push_repo
 
     app.dependency_overrides.clear()
 
@@ -130,6 +152,10 @@ def push_settings():
     )
 
 
+def missing_push_settings():
+    return load_settings({})
+
+
 def test_push_config_reports_missing_when_vapid_not_configured(client):
     response = client.get("/push/config")
 
@@ -187,6 +213,107 @@ def test_push_subscription_rejects_frontend_user_id(client):
     response = client.post("/push/subscriptions", json=push_payload() | {"user_id": "attacker"})
 
     assert response.status_code == 422
+
+
+def test_push_test_requires_auth(client, monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "cognito")
+
+    response = client.post("/push/test")
+
+    assert response.status_code == 401
+
+
+def test_push_status_is_user_scoped(api_context):
+    client, _reminder_repo, preferences_repo, push_repo = api_context
+    now = datetime(2026, 7, 8, 13, tzinfo=timezone.utc)
+    preferences_repo.save_preferences(
+        default_digest_preferences("user-a", now).model_copy(
+            update={"digest_enabled": False, "digest_time": "18:30", "timezone": "America/New_York"}
+        )
+    )
+    push_repo.save_subscription(
+        create_subscription("user-a", "https://push.example/a", now).model_copy(update={"last_success_at": now})
+    )
+    push_repo.save_subscription(
+        create_subscription("user-b", "https://push.example/b", now).model_copy(
+            update={"last_failure_at": now, "failure_count": 2}
+        )
+    )
+    app.dependency_overrides[get_app_settings] = push_settings
+
+    set_auth_user("user-a")
+    user_a_status = client.get("/push/status").json()
+
+    set_auth_user("user-b")
+    user_b_status = client.get("/push/status").json()
+
+    assert user_a_status["configured"] is True
+    assert user_a_status["active_subscription_count"] == 1
+    assert user_a_status["last_success_at"] in {now.isoformat(), now.isoformat().replace("+00:00", "Z")}
+    assert user_a_status["last_failure_at"] is None
+    assert user_a_status["failure_count"] == 0
+    assert user_a_status["digest_enabled"] is False
+    assert user_a_status["digest_time"] == "18:30"
+    assert user_a_status["timezone"] == "America/New_York"
+    assert user_b_status["active_subscription_count"] == 1
+    assert user_b_status["last_success_at"] is None
+    assert user_b_status["failure_count"] == 2
+    assert user_b_status["digest_enabled"] is True
+    assert user_b_status["digest_time"] == "09:00"
+
+
+def test_push_test_sends_only_current_users_subscriptions(api_context):
+    client, _reminder_repo, _preferences_repo, push_repo = api_context
+    now = datetime(2026, 7, 8, 13, tzinfo=timezone.utc)
+    push_repo.save_subscription(create_subscription("user-a", "https://push.example/a", now))
+    push_repo.save_subscription(create_subscription("user-b", "https://push.example/b", now))
+    sender = RecordingPushSender()
+    app.dependency_overrides[get_app_settings] = push_settings
+    app.dependency_overrides[get_push_sender] = lambda: sender
+
+    set_auth_user("user-a")
+    response = client.post("/push/test")
+
+    assert response.status_code == 200
+    assert response.json() == {"sent": 1}
+    assert [endpoint for endpoint, _payload in sender.sent] == ["https://push.example/a"]
+    sent_payload = sender.sent[0][1]
+    assert sent_payload.title == "LifeLedger Test"
+    assert sent_payload.body == "Push notifications are working."
+    assert sent_payload.url == "/?openDigest=1"
+    assert sent_payload.type == "test_push"
+    assert "private note" not in sent_payload.to_json()
+    assert push_repo.get_subscription("user-a", push_repo.list_subscriptions("user-a")[0].subscription_id).last_success_at is not None
+    assert push_repo.get_subscription("user-b", push_repo.list_subscriptions("user-b")[0].subscription_id).last_success_at is None
+
+
+def test_push_test_handles_no_active_subscriptions_clearly(api_context):
+    client, _reminder_repo, _preferences_repo, _push_repo = api_context
+    sender = RecordingPushSender()
+    app.dependency_overrides[get_app_settings] = push_settings
+    app.dependency_overrides[get_push_sender] = lambda: sender
+    set_auth_user("user-a")
+
+    response = client.post("/push/test")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "No active push subscription found. Enable push notifications first."
+    assert sender.sent == []
+
+
+def test_push_test_handles_push_config_missing_clearly(api_context):
+    client, _reminder_repo, _preferences_repo, push_repo = api_context
+    push_repo.save_subscription(create_subscription("user-a", "https://push.example/a"))
+    sender = RecordingPushSender()
+    app.dependency_overrides[get_app_settings] = missing_push_settings
+    app.dependency_overrides[get_push_sender] = lambda: sender
+    set_auth_user("user-a")
+
+    response = client.post("/push/test")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Push notifications are not configured for this environment."
+    assert sender.sent == []
 
 
 def test_old_user_without_push_subscriptions_still_gets_empty_list(client):
@@ -299,8 +426,37 @@ def test_scheduled_digest_push_defaults_and_saves_missing_preferences(local_repo
     assert preferences_repo.get_preferences("user-b") is None
     assert result.checked_users == 1
     assert result.sent == 1
+    assert result.created_default_preferences == 1
     assert result.skipped_no_preferences == 0
     assert sender.sent[0][0] == "https://push.example/a"
+
+
+def test_scheduled_digest_push_logs_safe_summary_counts(local_repositories, caplog):
+    reminder_repo, preferences_repo, push_repo = local_repositories
+    now = datetime(2026, 7, 8, 9, 5, tzinfo=timezone.utc)
+    reminder_repo.create_reminder(create_reminder("user-a", date(2026, 7, 8), "A due today"))
+    push_repo.save_subscription(create_subscription("user-a", "https://push.example/a", now))
+    sender = RecordingPushSender()
+    caplog.set_level("INFO", logger="app.digest_push")
+
+    result = run_daily_digest_push(
+        now=now,
+        settings=push_settings(),
+        reminder_repository=reminder_repo,
+        preferences_repository=preferences_repo,
+        push_repository=push_repo,
+        sender=sender,
+    )
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert result.sent == 1
+    assert result.checked_users == 1
+    assert result.created_default_preferences == 1
+    assert "Daily Digest push run started" in messages
+    assert "Daily Digest push run completed" in messages
+    assert "checked_users" in messages
+    assert "https://push.example/a" not in messages
+    assert "auth-secret" not in messages
 
 
 def test_scheduled_digest_push_skips_empty_digest(local_repositories):

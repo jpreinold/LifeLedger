@@ -19,7 +19,7 @@ from app.birthdays import (
     get_birthday_computed_label,
     get_next_birthday_due_date,
 )
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.maintenance import (
     advance_maintenance_details,
     get_maintenance_computed_label,
@@ -47,8 +47,10 @@ from app.schemas import (
     DigestPreferencesUpdate,
     MaintenanceDetails,
     PushConfigurationResponse,
+    PushStatusResponse,
     PushSubscriptionCreate,
     PushSubscriptionResponse,
+    PushTestResponse,
     ReminderCreate,
     ReminderAlertResponse,
     ReminderLeadUnit,
@@ -58,9 +60,27 @@ from app.schemas import (
     RenewalDetails,
     RepeatOption,
 )
+from app.push_sender import (
+    InvalidPushSubscriptionError,
+    PushConfigurationError,
+    PushPayload,
+    PushSendError,
+    PushSender,
+    PyWebPushSender,
+)
 
 settings = get_settings()
 app = FastAPI(title="LifeLedger API", version="0.1.0")
+
+PUSH_CONFIG_MISSING_DETAIL = "Push notifications are not configured for this environment."
+NO_ACTIVE_PUSH_SUBSCRIPTION_DETAIL = "No active push subscription found. Enable push notifications first."
+TEST_PUSH_PAYLOAD = PushPayload(
+    title="LifeLedger Test",
+    body="Push notifications are working.",
+    url="/?openDigest=1",
+    tag="test-push",
+    type="test_push",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,6 +95,10 @@ preferences_repository = create_preferences_repository()
 push_subscription_repository = create_push_subscription_repository()
 
 
+def get_app_settings() -> Settings:
+    return get_settings()
+
+
 def get_repository() -> ReminderRepository:
     return repository
 
@@ -82,8 +106,13 @@ def get_repository() -> ReminderRepository:
 def get_preferences_repository() -> PreferencesRepository:
     return preferences_repository
 
+
 def get_push_subscription_repository() -> PushSubscriptionRepository:
     return push_subscription_repository
+
+
+def get_push_sender(app_settings: Settings = Depends(get_app_settings)) -> PushSender:
+    return PyWebPushSender(app_settings)
 
 
 @app.get("/health")
@@ -146,8 +175,82 @@ def update_digest_preferences(
 @app.get("/push/config", response_model=PushConfigurationResponse)
 def get_push_configuration(
     _current_user: UserContext = Depends(get_current_user),
+    app_settings: Settings = Depends(get_app_settings),
 ) -> PushConfigurationResponse:
-    return PushConfigurationResponse(configured=get_settings().push_notifications_configured)
+    return PushConfigurationResponse(configured=app_settings.push_notifications_configured)
+
+
+@app.get("/push/status", response_model=PushStatusResponse)
+def get_push_status(
+    current_user: UserContext = Depends(get_current_user),
+    preferences_repo: PreferencesRepository = Depends(get_preferences_repository),
+    push_repo: PushSubscriptionRepository = Depends(get_push_subscription_repository),
+    app_settings: Settings = Depends(get_app_settings),
+) -> PushStatusResponse:
+    subscriptions = push_repo.list_subscriptions(current_user.user_id)
+    preferences = preferences_repo.get_preferences(current_user.user_id) or default_digest_preferences(current_user.user_id, utc_now())
+    return to_push_status_response(app_settings, subscriptions, preferences)
+
+
+@app.post("/push/test", response_model=PushTestResponse)
+def send_test_push(
+    current_user: UserContext = Depends(get_current_user),
+    repo: PushSubscriptionRepository = Depends(get_push_subscription_repository),
+    app_settings: Settings = Depends(get_app_settings),
+    sender: PushSender = Depends(get_push_sender),
+) -> PushTestResponse:
+    if not app_settings.push_notifications_configured:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=PUSH_CONFIG_MISSING_DETAIL)
+
+    subscriptions = repo.list_subscriptions(current_user.user_id)
+    if not subscriptions:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_ACTIVE_PUSH_SUBSCRIPTION_DETAIL)
+
+    now = utc_now()
+    sent = 0
+
+    for subscription in subscriptions:
+        try:
+            sender.send(subscription, TEST_PUSH_PAYLOAD)
+        except PushConfigurationError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=PUSH_CONFIG_MISSING_DETAIL) from exc
+        except InvalidPushSubscriptionError:
+            repo.save_subscription(
+                subscription.model_copy(
+                    update={
+                        "disabled_at": now,
+                        "last_failure_at": now,
+                        "failure_count": subscription.failure_count + 1,
+                        "updated_at": now,
+                    }
+                )
+            )
+        except (PushSendError, Exception):
+            repo.save_subscription(
+                subscription.model_copy(
+                    update={
+                        "last_failure_at": now,
+                        "failure_count": subscription.failure_count + 1,
+                        "updated_at": now,
+                    }
+                )
+            )
+        else:
+            sent += 1
+            repo.save_subscription(
+                subscription.model_copy(
+                    update={
+                        "last_success_at": now,
+                        "failure_count": 0,
+                        "updated_at": now,
+                    }
+                )
+            )
+
+    if sent == 0:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to send test push.")
+
+    return PushTestResponse(sent=sent)
 
 
 @app.get("/push/subscriptions", response_model=list[PushSubscriptionResponse])
@@ -396,6 +499,28 @@ def to_digest_preferences_response(preferences) -> DigestPreferences:
 
 def to_push_subscription_response(subscription: PushSubscription) -> PushSubscriptionResponse:
     return PushSubscriptionResponse.model_validate(subscription)
+
+
+def to_push_status_response(settings: Settings, subscriptions: list[PushSubscription], preferences) -> PushStatusResponse:
+    last_success_at = max(
+        (subscription.last_success_at for subscription in subscriptions if subscription.last_success_at is not None),
+        default=None,
+    )
+    last_failure_at = max(
+        (subscription.last_failure_at for subscription in subscriptions if subscription.last_failure_at is not None),
+        default=None,
+    )
+
+    return PushStatusResponse(
+        configured=settings.push_notifications_configured,
+        active_subscription_count=len(subscriptions),
+        last_success_at=last_success_at,
+        last_failure_at=last_failure_at,
+        failure_count=sum(subscription.failure_count for subscription in subscriptions),
+        digest_enabled=preferences.digest_enabled,
+        digest_time=preferences.digest_time,
+        timezone=preferences.timezone,
+    )
 
 
 def utc_now() -> datetime:
