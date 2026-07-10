@@ -209,9 +209,15 @@ class DynamoGoogleOAuthStateRepository:
             response = self.table.update_item(
                 Key={"state": state},
                 UpdateExpression="SET consumed_at = :consumed_at",
-                ConditionExpression="attribute_exists(#state) AND attribute_not_exists(consumed_at)",
+                ConditionExpression=(
+                    "attribute_exists(#state) "
+                    "AND (attribute_not_exists(consumed_at) OR attribute_type(consumed_at, :null_type))"
+                ),
                 ExpressionAttributeNames={"#state": "state"},
-                ExpressionAttributeValues={":consumed_at": consumed_at.isoformat()},
+                ExpressionAttributeValues={
+                    ":consumed_at": consumed_at.isoformat(),
+                    ":null_type": "NULL",
+                },
                 ReturnValues="ALL_NEW",
             )
         except Exception as exc:
@@ -230,7 +236,7 @@ class DynamoGoogleOAuthStateRepository:
         return boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def _to_item(self, state: GoogleOAuthState) -> dict[str, Any]:
-        return state.model_dump(mode="json")
+        return state.model_dump(mode="json", exclude_none=True)
 
     def _from_item(self, item: dict[str, Any]) -> GoogleOAuthState:
         return GoogleOAuthState.model_validate(item)

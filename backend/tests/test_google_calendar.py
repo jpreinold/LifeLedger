@@ -513,7 +513,28 @@ def test_dynamo_google_repositories_store_user_scoped_connection_and_state():
 
     assert connection_repo.get_connection("user-a").google_account_email == "user-a@example.com"
     assert connection_repo.get_connection("user-b") is None
+    assert "consumed_at" not in state_table.items["state-a"]
     consumed = state_repo.consume_state("state-a", now + timedelta(minutes=1))
     assert consumed.user_id == "user-a"
     assert consumed.consumed_at is not None
     assert state_repo.consume_state("state-a", now + timedelta(minutes=2)) is None
+
+
+def test_dynamo_google_oauth_state_consumes_legacy_null_consumed_at():
+    state_table = FakeDynamoTable("state")
+    state_repo = DynamoGoogleOAuthStateRepository("states", "us-east-1", table=state_table)
+    now = datetime.now(timezone.utc)
+    state_table.put_item(
+        {
+            "state": "state-a",
+            "user_id": "user-a",
+            "created_at": (now - timedelta(minutes=1)).isoformat(),
+            "expires_at": (now + timedelta(minutes=10)).isoformat(),
+            "consumed_at": None,
+        }
+    )
+
+    consumed = state_repo.consume_state("state-a", now)
+
+    assert consumed is not None
+    assert consumed.consumed_at == now
