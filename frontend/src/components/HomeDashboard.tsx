@@ -28,6 +28,7 @@ interface HomeDashboardProps {
   userName?: string | null
   onAddReminder: () => void
   onBrowseTemplates: () => void
+  onViewCalendar: (date?: string | null) => void
   onViewReminders: () => void
   onViewAlerts: () => void
   onOpenDigest: () => void
@@ -57,6 +58,7 @@ export function HomeDashboard({
   userName,
   onAddReminder,
   onBrowseTemplates,
+  onViewCalendar,
   onViewReminders,
   onViewAlerts,
   onOpenDigest,
@@ -191,8 +193,8 @@ export function HomeDashboard({
                 <UpcomingRow reminder={reminder} key={reminder.id} onClick={() => onViewReminder(reminder)} />
               ))}
             </div>
-            <button type="button" className="home-card-link" onClick={onViewReminders}>
-              View reminders
+            <button type="button" className="home-card-link" onClick={() => onViewCalendar(upcomingItems[0]?.due_date)}>
+              View calendar
             </button>
           </>
         ) : null}

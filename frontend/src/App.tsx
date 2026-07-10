@@ -4,6 +4,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 import {
   AlertCircle,
   Bell,
+  CalendarDays,
   CalendarPlus,
   CalendarX,
   CheckCircle,
@@ -11,7 +12,6 @@ import {
   FileText,
   Home,
   LogOut,
-  Menu,
   Plus,
   RefreshCcw,
   ShieldCheck,
@@ -26,6 +26,7 @@ import { pushApi, type PushStatus, type PushSubscriptionSummary } from './api/pu
 import { isCognitoAuthEnabled } from './auth/config'
 import { AddTypeSelector } from './components/AddTypeSelector'
 import { AlertCenter } from './components/AlertCenter'
+import { CalendarView } from './components/CalendarView'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { DailyDigestDrawer } from './components/DailyDigestDrawer'
 import { Dashboard } from './components/Dashboard'
@@ -38,7 +39,15 @@ import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
 import { buildDailyDigest } from './lib/digest'
 import { formatCompletionNotice, type ReminderStatusFilter, type ReminderTypeFilter } from './lib/reminderDisplay'
-import { createBirthdayReminderInput, createMaintenanceReminderInput, createRenewalReminderInput } from './lib/reminderInput'
+import {
+  createBirthdayReminderInput,
+  createGenericReminderInput,
+  createMaintenanceReminderInput,
+  createRenewalReminderInput,
+  emptyBirthdayDetails,
+  emptyMaintenanceDetails,
+  emptyRenewalDetails,
+} from './lib/reminderInput'
 import {
   defaultDigestPreferences,
   digestLookaheadOptions,
@@ -117,7 +126,7 @@ interface ReminderAppProps {
   userLabel?: string | null
 }
 
-type AppPage = 'home' | 'reminders' | 'records' | 'settings'
+type AppPage = 'home' | 'reminders' | 'records' | 'settings' | 'calendar'
 
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -138,11 +147,14 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
   const [activePage, setActivePage] = useState<AppPage>('home')
+  const [calendarVisibleMonth, setCalendarVisibleMonth] = useState(() => getMonthStartDateKey(new Date()))
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(() => getDateKey(new Date()))
   const [reminderStatusFilter, setReminderStatusFilter] = useState<ReminderStatusFilter>('active')
   const [reminderTypeFilter, setReminderTypeFilter] = useState<ReminderTypeFilter>('all')
   const [isReminderFormOpen, setIsReminderFormOpen] = useState(false)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
   const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
+  const [addDateContext, setAddDateContext] = useState<string | null>(null)
   const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false)
   const [isDigestOpen, setIsDigestOpen] = useState(false)
   const didHandleDigestUrl = useRef(false)
@@ -460,41 +472,64 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setEditingReminder(null)
     setViewingReminder({ reminder, fromAlert: false })
   }
+
   function openAddReminder() {
+    setAddDateContext(null)
     setIsTemplateModalOpen(false)
     setIsReminderFormOpen(false)
     setIsAddTypeSelectorOpen(true)
   }
 
+  function openAddReminderForDate(date: string) {
+    setAddDateContext(date)
+    setCalendarSelectedDate(date)
+    setCalendarVisibleMonth(getMonthStartDateKey(date))
+    setIsTemplateModalOpen(false)
+    setIsReminderFormOpen(false)
+    setIsAddTypeSelectorOpen(true)
+  }
+
+  function closeAddTypeSelector() {
+    setAddDateContext(null)
+    setIsAddTypeSelectorOpen(false)
+  }
+
   function closeAddReminder() {
+    setAddDateContext(null)
     setIsReminderFormOpen(false)
     setTemplateDraft(null)
   }
 
-  function openGenericReminderForm() {
-    setTemplateDraft(null)
+  function openGenericReminderForm(input = createGenericReminderInput(getDateOverride(addDateContext))) {
+    setTemplateDraft({ id: `${input.title || input.reminder_type}-${input.due_date}-${Date.now()}`, input })
+    setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
 
-  function openBirthdayReminderForm(input = createBirthdayReminderInput()) {
+  function openBirthdayReminderForm(input = createBirthdayReminderInput(getBirthdayDateOverride(addDateContext))) {
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
+    setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
 
-  function openRenewalReminderForm(input = createRenewalReminderInput()) {
+  function openRenewalReminderForm(input = createRenewalReminderInput(getRenewalDateOverride(addDateContext))) {
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
+    setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
 
-  function openMaintenanceReminderForm(input = createMaintenanceReminderInput()) {
+  function openMaintenanceReminderForm(input = createMaintenanceReminderInput(getMaintenanceDateOverride(addDateContext))) {
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
+    setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
+
   function openTemplates() {
+    setAddDateContext(null)
     setIsReminderFormOpen(false)
     setIsTemplateModalOpen(true)
   }
@@ -530,6 +565,15 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     document.getElementById('app-top')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  function showCalendar(targetDate?: string | null) {
+    if (targetDate) {
+      setCalendarSelectedDate(targetDate)
+      setCalendarVisibleMonth(getMonthStartDateKey(targetDate))
+    }
+
+    showPage('calendar')
+  }
+
   function getNavClass(page: AppPage) {
     return activePage === page ? 'active' : undefined
   }
@@ -557,22 +601,29 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const dailyDigest = buildDailyDigest(reminders, alerts, { lookaheadDays: digestPreferences.digest_lookahead_days })
   const displayName = getUserDisplayName(userLabel)
   const pageTitle = getPageTitle(activePage)
+  const useBrandHeader = activePage === 'home' || activePage === 'calendar'
 
   return (
     <>
       <main className="app-shell" id="app-top">
         <header className="app-header app-header-main">
-        <span className="menu-glyph" aria-hidden="true">
-          <Menu size={20} aria-hidden="true" />
-        </span>
+        <button
+          type="button"
+          className={`icon-button header-calendar-button ${activePage === 'calendar' ? 'active' : ''}`.trim()}
+          onClick={() => showCalendar()}
+          aria-current={activePage === 'calendar' ? 'page' : undefined}
+          aria-label={activePage === 'calendar' ? 'Calendar open' : 'Open calendar'}
+        >
+          <CalendarDays size={20} aria-hidden="true" />
+        </button>
 
-        <h1 className={activePage === 'home' ? 'app-title app-title-brand' : 'app-title'}>
-          {activePage === 'home' ? (
+        <h1 className={useBrandHeader ? 'app-title app-title-brand' : 'app-title'}>
+          {useBrandHeader ? (
             <span className="app-title-logo" aria-hidden="true">
               <CheckCircle size={14} />
             </span>
           ) : null}
-          <span>{pageTitle}</span>
+          <span>{useBrandHeader ? 'LifeLedger' : pageTitle}</span>
         </h1>
 
         <button
@@ -621,10 +672,24 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onAddReminder={openAddReminder}
           onBrowseTemplates={openTemplates}
           onViewReminders={() => showPage('reminders')}
+          onViewCalendar={showCalendar}
           onViewAlerts={() => setIsAlertCenterOpen(true)}
           onOpenDigest={openDailyDigest}
           onViewRecords={() => showPage('records')}
           onViewReminder={openReminderDetail}
+        />
+      ) : null}
+
+      {activePage === 'calendar' ? (
+        <CalendarView
+          reminders={reminders}
+          isLoading={isLoading}
+          selectedDate={calendarSelectedDate}
+          visibleMonth={calendarVisibleMonth}
+          onAddForDate={openAddReminderForDate}
+          onSelectedDateChange={setCalendarSelectedDate}
+          onViewReminder={openReminderDetail}
+          onVisibleMonthChange={setCalendarVisibleMonth}
         />
       ) : null}
 
@@ -716,7 +781,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       <AddTypeSelector
         isOpen={isAddTypeSelectorOpen}
-        onClose={() => setIsAddTypeSelectorOpen(false)}
+        onClose={closeAddTypeSelector}
         onChooseReminder={openGenericReminderForm}
         onChooseBirthday={() => openBirthdayReminderForm()}
         onChooseRenewal={() => openRenewalReminderForm()}
@@ -1783,12 +1848,90 @@ function getDeleteConfirmationBody(reminder: Reminder | null) {
   return 'Are you sure you want to delete this reminder? This cannot be undone.'
 }
 
+function getDateOverride(date: string | null): Partial<ReminderInput> {
+  return date ? { due_date: date } : {}
+}
+
+function getBirthdayDateOverride(date: string | null): Partial<ReminderInput> {
+  const parsedDate = parseDateKey(date)
+
+  if (!date || !parsedDate) {
+    return {}
+  }
+
+  return {
+    due_date: date,
+    birthday_details: {
+      ...emptyBirthdayDetails(),
+      birth_month: parsedDate.getMonth() + 1,
+      birth_day: parsedDate.getDate(),
+    },
+  }
+}
+
+function getRenewalDateOverride(date: string | null): Partial<ReminderInput> {
+  if (!date) {
+    return {}
+  }
+
+  return {
+    due_date: date,
+    renewal_details: {
+      ...emptyRenewalDetails(),
+      renewal_date: date,
+    },
+  }
+}
+
+function getMaintenanceDateOverride(date: string | null): Partial<ReminderInput> {
+  if (!date) {
+    return {}
+  }
+
+  return {
+    due_date: date,
+    maintenance_details: {
+      ...emptyMaintenanceDetails(),
+      next_due_date: date,
+    },
+  }
+}
+
+function getDateKey(value: Date) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getMonthStartDateKey(value: Date | string) {
+  const date = typeof value === 'string' ? parseDateKey(value) : value
+  const fallbackDate = date ?? new Date()
+  return getDateKey(new Date(fallbackDate.getFullYear(), fallbackDate.getMonth(), 1))
+}
+
+function parseDateKey(value: string | null | undefined) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return null
+  }
+
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null
+  }
+
+  return date
+}
+
 function getPageTitle(page: AppPage) {
   const titles: Record<AppPage, string> = {
     home: 'LifeLedger',
     reminders: 'Reminders',
     records: 'Records',
     settings: 'Settings',
+    calendar: 'Calendar',
   }
 
   return titles[page]

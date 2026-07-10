@@ -57,6 +57,22 @@ export function emptyMaintenanceDetails(): MaintenanceDetailsInput {
   }
 }
 
+export function createGenericReminderInput(overrides: Partial<ReminderInput> = {}): ReminderInput {
+  return buildReminderInputWithDefaultTiming({
+    title: '',
+    category: 'Other',
+    due_date: today,
+    repeat: 'None',
+    priority: 'Medium',
+    notes: null,
+    reminder_type: 'generic',
+    birthday_details: null,
+    renewal_details: null,
+    maintenance_details: null,
+    ...overrides,
+  })
+}
+
 export function createBirthdayReminderInput(overrides: Partial<ReminderInput> = {}): ReminderInput {
   const birthdayDetails = {
     ...emptyBirthdayDetails(),
