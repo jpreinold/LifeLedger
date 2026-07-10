@@ -271,6 +271,38 @@ def test_callback_logs_safe_invalid_state_reason(calendar_context, caplog, state
     assert calendar_context.calendar_service.exchanged_codes == []
 
 
+def test_callback_with_consumed_state_returns_current_status_without_reusing_code(calendar_context, caplog):
+    caplog.set_level("WARNING", logger="app.main")
+    now = datetime.now(timezone.utc)
+    state = "sensitive-oauth-state-duplicate"
+    save_connection(calendar_context.connection_repo, "user-a")
+    calendar_context.state_repo.save_state(
+        GoogleOAuthState(
+            state=state,
+            user_id="user-a",
+            created_at=now - timedelta(minutes=5),
+            expires_at=now + timedelta(minutes=5),
+            consumed_at=now - timedelta(minutes=1),
+        )
+    )
+
+    set_auth_user("user-a")
+    response = calendar_context.client.post(
+        "/integrations/google-calendar/callback",
+        json={"code": "auth-code", "state": state},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["connected"] is True
+    assert body["google_account_email"] == "user-a@example.com"
+    assert "access_token" not in body
+    assert "refresh_token" not in body
+    assert "already_consumed" in caplog.text
+    assert state not in caplog.text
+    assert calendar_context.calendar_service.exchanged_codes == []
+
+
 def test_disconnect_only_disconnects_current_user(calendar_context):
     save_connection(calendar_context.connection_repo, "user-a")
     save_connection(calendar_context.connection_repo, "user-b")

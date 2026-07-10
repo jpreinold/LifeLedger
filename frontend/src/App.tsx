@@ -217,7 +217,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       markGoogleOAuthCallbackStateProcessed(state)
       const status = await calendarApi.callback({ code, state })
       setCalendarStatus(status)
-      setNotice('Google Calendar connected.')
+      setNotice(status.connected ? 'Google Calendar connected.' : 'Google Calendar connection status refreshed.')
     } catch (requestError) {
       setCalendarStatus(null)
       setCalendarStatusError(requestError instanceof Error ? requestError.message : 'Unable to connect Google Calendar.')

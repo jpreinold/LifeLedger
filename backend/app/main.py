@@ -272,6 +272,10 @@ def complete_google_calendar_connection(
     invalid_state_reason = get_google_oauth_invalid_state_reason(saved_state, current_user.user_id, now)
     if invalid_state_reason is not None:
         log_invalid_google_oauth_state(invalid_state_reason, payload.state)
+        if invalid_state_reason == "already_consumed":
+            connection = connection_repo.get_connection(current_user.user_id)
+            if connection is not None:
+                return to_google_calendar_status_response(app_settings, connection)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google Calendar connection expired. Try again.")
 
     consumed_state = state_repo.consume_state(payload.state, now)
