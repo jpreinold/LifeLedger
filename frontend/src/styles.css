@@ -3561,6 +3561,58 @@ textarea:focus-visible {
   margin-top: 0;
 }
 
+.settings-calendar-picker {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid rgba(7, 94, 234, 0.16);
+  border-radius: var(--radius-md);
+  background: #fbfdff;
+}
+
+.settings-calendar-picker label {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.settings-calendar-picker label > span {
+  color: var(--color-text-soft);
+  font-size: 0.7rem;
+  font-weight: 760;
+}
+
+.settings-calendar-picker small {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.settings-calendar-select-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.settings-calendar-select {
+  min-width: min(100%, 220px);
+  min-height: 42px;
+  flex: 1 1 240px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-3);
+  color: var(--color-text);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.settings-calendar-save-button {
+  flex: 0 0 auto;
+  min-height: 42px;
+}
+
 .detail-calendar-sync-section {
   border-color: rgba(7, 94, 234, 0.18);
   background: linear-gradient(180deg, rgba(247, 251, 255, 0.96), rgba(255, 255, 255, 0.9));

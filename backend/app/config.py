@@ -30,7 +30,10 @@ DEFAULT_PREFERENCES_TABLE_NAME = "lifeledger-preferences-auth"
 DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME = "lifeledger-push-subscriptions-auth"
 DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME = "lifeledger-google-calendar-connections-auth"
 DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME = "lifeledger-google-oauth-states-auth"
-DEFAULT_GOOGLE_CALENDAR_SCOPES = "https://www.googleapis.com/auth/calendar.events"
+DEFAULT_GOOGLE_CALENDAR_SCOPES = (
+    "https://www.googleapis.com/auth/calendar.events "
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+)
 
 
 @dataclass(frozen=True)

@@ -28,8 +28,10 @@ from app.google_calendar_service import (
     GoogleCalendarAuthError,
     GoogleCalendarConfigurationError,
     GoogleCalendarError,
+    GoogleCalendarOption,
     GoogleCalendarNotFoundError,
     GoogleCalendarService,
+    WRITABLE_CALENDAR_ACCESS_ROLES,
     build_google_calendar_event,
 )
 from app.maintenance import (
@@ -67,6 +69,8 @@ from app.schemas import (
     GoogleCalendarCallbackRequest,
     GoogleCalendarConnectResponse,
     GoogleCalendarConnectionStatus,
+    GoogleCalendarOptionResponse,
+    GoogleCalendarSelectRequest,
     GoogleCalendarStatusResponse,
     MaintenanceDetails,
     PushConfigurationResponse,
@@ -296,7 +300,8 @@ def complete_google_calendar_connection(
     connection = GoogleCalendarConnection(
         user_id=current_user.user_id,
         google_account_email=(token_set.google_account_email or existing.google_account_email) if existing else token_set.google_account_email,
-        calendar_id="primary",
+        calendar_id=existing.calendar_id if existing else "primary",
+        calendar_label=selected_calendar_label(existing) if existing else "Primary calendar",
         access_token=token_set.access_token,
         refresh_token=token_set.refresh_token or "",
         token_expires_at=token_set.token_expires_at,
@@ -309,6 +314,54 @@ def complete_google_calendar_connection(
     )
     saved_connection = connection_repo.save_connection(connection)
 
+    return to_google_calendar_status_response(app_settings, saved_connection)
+
+
+@app.get("/integrations/google-calendar/calendars", response_model=list[GoogleCalendarOptionResponse])
+def list_google_calendar_options(
+    current_user: UserContext = Depends(get_current_user),
+    connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
+    app_settings: Settings = Depends(get_app_settings),
+    calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+) -> list[GoogleCalendarOptionResponse]:
+    now = utc_now()
+    connection = require_ready_google_connection(connection_repo, current_user.user_id, app_settings, calendar_service, now)
+    options = list_google_calendar_options_or_raise(connection_repo, calendar_service, connection, now)
+    return [to_google_calendar_option_response(option, connection.calendar_id) for option in options]
+
+
+@app.put("/integrations/google-calendar/calendar", response_model=GoogleCalendarStatusResponse)
+def update_google_calendar_selection(
+    payload: GoogleCalendarSelectRequest,
+    current_user: UserContext = Depends(get_current_user),
+    connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
+    app_settings: Settings = Depends(get_app_settings),
+    calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+) -> GoogleCalendarStatusResponse:
+    now = utc_now()
+    connection = require_ready_google_connection(connection_repo, current_user.user_id, app_settings, calendar_service, now)
+    options = list_google_calendar_options_or_raise(connection_repo, calendar_service, connection, now)
+    selected = next(
+        (
+            option
+            for option in options
+            if option.id == payload.calendar_id and option.access_role in WRITABLE_CALENDAR_ACCESS_ROLES
+        ),
+        None,
+    )
+    if selected is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Select a writable Google Calendar.")
+
+    updated = connection.model_copy(
+        update={
+            "calendar_id": selected.id,
+            "calendar_label": selected.label,
+            "updated_at": now,
+            "status": GoogleCalendarConnectionStatus.CONNECTED,
+            "last_error": None,
+        }
+    )
+    saved_connection = connection_repo.save_connection(updated)
     return to_google_calendar_status_response(app_settings, saved_connection)
 
 
@@ -539,8 +592,9 @@ def disable_reminder_calendar_sync(
 
     if reminder.calendar_event_id:
         connection = require_ready_google_connection(connection_repo, current_user.user_id, app_settings, calendar_service, now)
+        target_connection = with_google_calendar_id(connection, reminder.calendar_id)
         try:
-            calendar_service.delete_event(connection, reminder.calendar_event_id)
+            calendar_service.delete_event(target_connection, reminder.calendar_event_id)
         except GoogleCalendarNotFoundError:
             pass
         except GoogleCalendarAuthError as exc:
@@ -754,9 +808,61 @@ def to_google_calendar_status_response(
         status=connection.status,
         google_account_email=connection.google_account_email,
         calendar_id=calendar_id,
-        calendar_label="Primary calendar" if calendar_id == "primary" else calendar_id,
+        calendar_label=selected_calendar_label(connection) if connected else None,
         last_error=connection.last_error,
     )
+
+
+def selected_calendar_label(connection: GoogleCalendarConnection | None) -> str | None:
+    if connection is None:
+        return None
+    if connection.calendar_label:
+        return connection.calendar_label
+    return "Primary calendar" if connection.calendar_id == "primary" else connection.calendar_id
+
+
+def to_google_calendar_option_response(
+    option: GoogleCalendarOption,
+    selected_calendar_id: str,
+) -> GoogleCalendarOptionResponse:
+    return GoogleCalendarOptionResponse(
+        id=option.id,
+        label=option.label,
+        primary=option.primary,
+        access_role=option.access_role,
+        selected=option.id == selected_calendar_id,
+    )
+
+
+def list_google_calendar_options_or_raise(
+    repo: GoogleCalendarConnectionRepository,
+    calendar_service: GoogleCalendarService,
+    connection: GoogleCalendarConnection,
+    now: datetime,
+) -> list[GoogleCalendarOption]:
+    try:
+        return calendar_service.list_calendar_options(connection)
+    except GoogleCalendarAuthError as exc:
+        mark_google_connection_needs_reconnect(
+            repo,
+            connection,
+            now,
+            "Reconnect Google Calendar to choose calendars.",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reconnect Google Calendar to choose calendars.",
+        ) from exc
+    except GoogleCalendarConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.safe_message) from exc
+    except GoogleCalendarError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.safe_message) from exc
+
+
+def with_google_calendar_id(connection: GoogleCalendarConnection, calendar_id: str | None) -> GoogleCalendarConnection:
+    if not calendar_id or calendar_id == connection.calendar_id:
+        return connection
+    return connection.model_copy(update={"calendar_id": calendar_id})
 
 
 def get_google_oauth_invalid_state_reason(
@@ -904,8 +1010,9 @@ def sync_existing_calendar_event_after_change(
 
     try:
         ready_connection = ensure_google_connection_access_token(connection_repo, connection, calendar_service, now)
+        target_connection = with_google_calendar_id(ready_connection, reminder.calendar_id)
         calendar_service.update_event(
-            ready_connection,
+            target_connection,
             reminder.calendar_event_id,
             build_google_calendar_event(reminder, get_computed_label(reminder)),
         )
@@ -947,7 +1054,7 @@ def sync_existing_calendar_event_after_change(
         update={
             "calendar_sync_enabled": True,
             "calendar_provider": "google_calendar",
-            "calendar_id": ready_connection.calendar_id,
+            "calendar_id": target_connection.calendar_id,
             "calendar_last_synced_at": now,
             "calendar_sync_status": CalendarSyncStatus.SYNCED,
             "calendar_sync_error": None,
@@ -970,7 +1077,8 @@ def cleanup_calendar_event_before_delete(
 
     try:
         connection = require_ready_google_connection(connection_repo, reminder.user_id, settings, calendar_service, now)
-        calendar_service.delete_event(connection, reminder.calendar_event_id)
+        target_connection = with_google_calendar_id(connection, reminder.calendar_id)
+        calendar_service.delete_event(target_connection, reminder.calendar_event_id)
     except GoogleCalendarNotFoundError:
         return
     except HTTPException as exc:

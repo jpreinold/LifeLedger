@@ -32,6 +32,7 @@ def test_sam_template_defaults_to_local_persistence():
     assert "NoEcho: true" in template
     assert "GoogleOAuthRedirectUri:" in template
     assert "GoogleCalendarScopes:" in template
+    assert "https://www.googleapis.com/auth/calendar.calendarlist.readonly" in template
     assert "GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable" in template
     assert "GOOGLE_OAUTH_STATES_TABLE_NAME: !Ref GoogleOAuthStatesTable" in template
     assert "GOOGLE_CLIENT_ID: !Ref GoogleClientId" in template
@@ -73,7 +74,10 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["GOOGLE_CLIENT_ID"] == ""
     assert function_env["GOOGLE_CLIENT_SECRET"] == ""
     assert function_env["GOOGLE_OAUTH_REDIRECT_URI"] == ""
-    assert function_env["GOOGLE_CALENDAR_SCOPES"] == "https://www.googleapis.com/auth/calendar.events"
+    assert (
+        function_env["GOOGLE_CALENDAR_SCOPES"]
+        == "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+    )
     assert function_env["VAPID_PUBLIC_KEY"] == ""
     assert function_env["VAPID_PRIVATE_KEY"] == ""
     assert function_env["VAPID_SUBJECT"] == ""

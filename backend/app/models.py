@@ -96,6 +96,7 @@ class GoogleCalendarConnection(BaseModel):
     provider: str = "google_calendar"
     google_account_email: str | None = None
     calendar_id: str = "primary"
+    calendar_label: str | None = None
     access_token: str
     refresh_token: str
     token_expires_at: datetime

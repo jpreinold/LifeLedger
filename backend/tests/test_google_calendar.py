@@ -12,7 +12,13 @@ from app.google_calendar_repository import (
     LocalGoogleCalendarConnectionRepository,
     LocalGoogleOAuthStateRepository,
 )
-from app.google_calendar_service import GoogleCalendarApiError, GoogleCalendarNotFoundError, GoogleTokenSet
+from app.google_calendar_service import (
+    GoogleCalendarApiError,
+    GoogleCalendarAuthError,
+    GoogleCalendarNotFoundError,
+    GoogleCalendarOption,
+    GoogleTokenSet,
+)
 from app.main import (
     app,
     get_app_settings,
@@ -38,12 +44,19 @@ class CalendarTestContext:
 class FakeGoogleCalendarService:
     def __init__(self):
         self.created_events: list[dict] = []
-        self.updated_events: list[tuple[str, dict]] = []
+        self.updated_events: list[tuple[str, dict, GoogleCalendarConnection]] = []
+        self.deleted_events: list[dict] = []
         self.deleted_event_ids: list[str] = []
         self.not_found_deletes: set[str] = set()
         self.delete_error_ids: set[str] = set()
         self.refresh_count = 0
         self.exchanged_codes: list[str] = []
+        self.list_auth_error = False
+        self.calendar_options = [
+            GoogleCalendarOption(id="primary", label="Primary calendar", primary=True, access_role="owner"),
+            GoogleCalendarOption(id="family-calendar", label="Family calendar", primary=False, access_role="writer"),
+            GoogleCalendarOption(id="work-calendar", label="Work calendar", primary=False, access_role="writerWithoutPrivateAccess"),
+        ]
 
     def build_authorization_url(self, state: str) -> str:
         return f"https://accounts.google.com/o/oauth2/v2/auth?state={state}"
@@ -54,7 +67,7 @@ class FakeGoogleCalendarService:
             access_token=f"access-{code}",
             refresh_token=f"refresh-{code}",
             token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-            scopes="https://www.googleapis.com/auth/calendar.events",
+            scopes="https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly",
             google_account_email="person@example.com",
         )
 
@@ -67,19 +80,25 @@ class FakeGoogleCalendarService:
             scopes=connection.scopes,
         )
 
+    def list_calendar_options(self, connection: GoogleCalendarConnection) -> list[GoogleCalendarOption]:
+        if self.list_auth_error:
+            raise GoogleCalendarAuthError()
+        return self.calendar_options
+
     def create_event(self, connection: GoogleCalendarConnection, event: dict) -> str:
         event_id = f"gcal-{len(self.created_events) + 1}"
         self.created_events.append({"connection": connection, "event": event, "event_id": event_id})
         return event_id
 
     def update_event(self, connection: GoogleCalendarConnection, event_id: str, event: dict) -> None:
-        self.updated_events.append((event_id, event))
+        self.updated_events.append((event_id, event, connection))
 
     def delete_event(self, connection: GoogleCalendarConnection, event_id: str) -> None:
         if event_id in self.not_found_deletes:
             raise GoogleCalendarNotFoundError()
         if event_id in self.delete_error_ids:
             raise GoogleCalendarApiError()
+        self.deleted_events.append({"connection": connection, "event_id": event_id})
         self.deleted_event_ids.append(event_id)
 
 
@@ -94,7 +113,7 @@ def calendar_context(tmp_path):
             "GOOGLE_CLIENT_ID": "client-id",
             "GOOGLE_CLIENT_SECRET": "client-secret",
             "GOOGLE_OAUTH_REDIRECT_URI": "https://lifeledger.example.com/oauth/google-calendar",
-            "GOOGLE_CALENDAR_SCOPES": "https://www.googleapis.com/auth/calendar.events",
+            "GOOGLE_CALENDAR_SCOPES": "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly",
         }
     )
 
@@ -133,17 +152,18 @@ def create_reminder(client: TestClient, **overrides):
     return response.json()
 
 
-def save_connection(repo, user_id="local-dev-user", *, expires_at=None):
+def save_connection(repo, user_id="local-dev-user", *, expires_at=None, calendar_id="primary", calendar_label=None):
     now = datetime.now(timezone.utc)
     return repo.save_connection(
         GoogleCalendarConnection(
             user_id=user_id,
             google_account_email=f"{user_id}@example.com",
-            calendar_id="primary",
+            calendar_id=calendar_id,
+            calendar_label=calendar_label,
             access_token="access-token",
             refresh_token="refresh-token",
             token_expires_at=expires_at or now + timedelta(hours=1),
-            scopes="https://www.googleapis.com/auth/calendar.events",
+            scopes="https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly",
             connected_at=now,
             updated_at=now,
             status=GoogleCalendarConnectionStatus.CONNECTED,
@@ -320,6 +340,84 @@ def test_disconnect_only_disconnects_current_user(calendar_context):
     assert user_b.refresh_token == "refresh-token"
 
 
+def test_calendar_list_returns_safe_user_scoped_writable_calendars(calendar_context):
+    save_connection(calendar_context.connection_repo, "user-a", calendar_id="family-calendar", calendar_label="Family calendar")
+    save_connection(calendar_context.connection_repo, "user-b")
+    set_auth_user("user-a")
+
+    response = calendar_context.client.get("/integrations/google-calendar/calendars")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == [
+        {"id": "primary", "label": "Primary calendar", "primary": True, "access_role": "owner", "selected": False},
+        {"id": "family-calendar", "label": "Family calendar", "primary": False, "access_role": "writer", "selected": True},
+        {"id": "work-calendar", "label": "Work calendar", "primary": False, "access_role": "writerWithoutPrivateAccess", "selected": False},
+    ]
+    assert "access_token" not in str(body)
+    assert "refresh_token" not in str(body)
+
+
+def test_calendar_list_refreshes_expired_token(calendar_context):
+    save_connection(calendar_context.connection_repo, expires_at=datetime.now(timezone.utc) - timedelta(minutes=1))
+
+    response = calendar_context.client.get("/integrations/google-calendar/calendars")
+
+    assert response.status_code == 200
+    assert calendar_context.calendar_service.refresh_count == 1
+    saved_connection = calendar_context.connection_repo.get_connection("local-dev-user")
+    assert saved_connection.access_token == "refreshed-token"
+
+
+def test_calendar_list_marks_reconnect_when_scope_missing(calendar_context):
+    save_connection(calendar_context.connection_repo)
+    calendar_context.calendar_service.list_auth_error = True
+
+    response = calendar_context.client.get("/integrations/google-calendar/calendars")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Reconnect Google Calendar to choose calendars."
+    connection = calendar_context.connection_repo.get_connection("local-dev-user")
+    assert connection.status == GoogleCalendarConnectionStatus.NEEDS_RECONNECT
+
+
+def test_calendar_selection_validates_and_updates_current_user(calendar_context):
+    save_connection(calendar_context.connection_repo, "user-a")
+    save_connection(calendar_context.connection_repo, "user-b")
+    set_auth_user("user-a")
+
+    response = calendar_context.client.put(
+        "/integrations/google-calendar/calendar",
+        json={"calendar_id": "family-calendar"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["calendar_id"] == "family-calendar"
+    assert body["calendar_label"] == "Family calendar"
+    user_a = calendar_context.connection_repo.get_connection("user-a")
+    user_b = calendar_context.connection_repo.get_connection("user-b")
+    assert user_a.calendar_id == "family-calendar"
+    assert user_a.calendar_label == "Family calendar"
+    assert user_b.calendar_id == "primary"
+
+
+def test_calendar_selection_rejects_unknown_or_unwritable_calendar(calendar_context):
+    save_connection(calendar_context.connection_repo)
+    calendar_context.calendar_service.calendar_options.append(
+        GoogleCalendarOption(id="readonly-calendar", label="Read-only calendar", primary=False, access_role="reader")
+    )
+
+    response = calendar_context.client.put(
+        "/integrations/google-calendar/calendar",
+        json={"calendar_id": "readonly-calendar"},
+    )
+
+    assert response.status_code == 422
+    connection = calendar_context.connection_repo.get_connection("local-dev-user")
+    assert connection.calendar_id == "primary"
+
+
 def test_enable_sync_requires_google_connection(calendar_context):
     created = create_reminder(calendar_context.client)
 
@@ -347,6 +445,18 @@ def test_enable_sync_creates_event_and_stores_metadata(calendar_context):
     assert event["summary"] == "Renew car tag"
     assert event["start"] == {"date": created["due_date"]}
     assert "Private notes" not in event["description"]
+
+
+def test_enable_sync_uses_selected_default_calendar(calendar_context):
+    save_connection(calendar_context.connection_repo, calendar_id="family-calendar", calendar_label="Family calendar")
+    created = create_reminder(calendar_context.client)
+
+    response = calendar_context.client.post(f"/reminders/{created['id']}/calendar-sync/enable")
+
+    assert response.status_code == 200
+    saved = calendar_context.reminder_repo.get_reminder("local-dev-user", created["id"])
+    assert saved.calendar_id == "family-calendar"
+    assert calendar_context.calendar_service.created_events[0]["connection"].calendar_id == "family-calendar"
 
 
 def test_enable_sync_cannot_sync_another_users_reminder(calendar_context):
@@ -378,6 +488,27 @@ def test_update_synced_reminder_updates_existing_event_without_duplicate(calenda
     assert len(calendar_context.calendar_service.updated_events) == 1
     assert calendar_context.calendar_service.updated_events[0][0] == event_id
     assert calendar_context.calendar_service.updated_events[0][1]["summary"] == "Renew vehicle registration"
+
+
+def test_update_synced_reminder_uses_stored_calendar_after_default_changes(calendar_context):
+    save_connection(calendar_context.connection_repo, calendar_id="primary", calendar_label="Primary calendar")
+    created = create_reminder(calendar_context.client)
+    calendar_context.client.post(f"/reminders/{created['id']}/calendar-sync/enable")
+    connection = calendar_context.connection_repo.get_connection("local-dev-user")
+    calendar_context.connection_repo.save_connection(
+        connection.model_copy(update={"calendar_id": "family-calendar", "calendar_label": "Family calendar"})
+    )
+
+    response = calendar_context.client.put(
+        f"/reminders/{created['id']}",
+        json={"title": "Renew vehicle registration"},
+    )
+
+    assert response.status_code == 200
+    assert len(calendar_context.calendar_service.updated_events) == 1
+    assert calendar_context.calendar_service.updated_events[0][2].calendar_id == "primary"
+    saved = calendar_context.reminder_repo.get_reminder("local-dev-user", created["id"])
+    assert saved.calendar_id == "primary"
 
 
 def test_complete_recurring_synced_reminder_updates_calendar_event_date(calendar_context):
@@ -413,6 +544,21 @@ def test_disable_sync_deletes_event_and_clears_metadata(calendar_context):
     assert saved.calendar_event_id is None
 
 
+def test_disable_sync_uses_stored_calendar_after_default_changes(calendar_context):
+    save_connection(calendar_context.connection_repo, calendar_id="primary", calendar_label="Primary calendar")
+    created = create_reminder(calendar_context.client)
+    calendar_context.client.post(f"/reminders/{created['id']}/calendar-sync/enable")
+    connection = calendar_context.connection_repo.get_connection("local-dev-user")
+    calendar_context.connection_repo.save_connection(
+        connection.model_copy(update={"calendar_id": "family-calendar", "calendar_label": "Family calendar"})
+    )
+
+    response = calendar_context.client.post(f"/reminders/{created['id']}/calendar-sync/disable")
+
+    assert response.status_code == 200
+    assert calendar_context.calendar_service.deleted_events[0]["connection"].calendar_id == "primary"
+
+
 def test_delete_synced_reminder_cleans_up_calendar_event(calendar_context):
     save_connection(calendar_context.connection_repo)
     created = create_reminder(calendar_context.client)
@@ -424,6 +570,21 @@ def test_delete_synced_reminder_cleans_up_calendar_event(calendar_context):
     assert response.status_code == 204
     assert calendar_context.calendar_service.deleted_event_ids == [event_id]
     assert calendar_context.reminder_repo.get_reminder("local-dev-user", created["id"]) is None
+
+
+def test_delete_synced_reminder_uses_stored_calendar_after_default_changes(calendar_context):
+    save_connection(calendar_context.connection_repo, calendar_id="primary", calendar_label="Primary calendar")
+    created = create_reminder(calendar_context.client)
+    calendar_context.client.post(f"/reminders/{created['id']}/calendar-sync/enable")
+    connection = calendar_context.connection_repo.get_connection("local-dev-user")
+    calendar_context.connection_repo.save_connection(
+        connection.model_copy(update={"calendar_id": "family-calendar", "calendar_label": "Family calendar"})
+    )
+
+    response = calendar_context.client.delete(f"/reminders/{created['id']}")
+
+    assert response.status_code == 204
+    assert calendar_context.calendar_service.deleted_events[0]["connection"].calendar_id == "primary"
 
 
 def test_missing_google_event_is_treated_as_cleanup_success(calendar_context):
@@ -457,13 +618,16 @@ def test_local_json_persistence_for_google_connection_and_state(tmp_path):
     now = datetime.now(timezone.utc)
     first_connection_repo = LocalGoogleCalendarConnectionRepository(connection_file)
     first_state_repo = LocalGoogleOAuthStateRepository(state_file)
-    save_connection(first_connection_repo, "user-a")
+    save_connection(first_connection_repo, "user-a", calendar_id="family-calendar", calendar_label="Family calendar")
     first_state_repo.save_state(GoogleOAuthState(state="state-a", user_id="user-a", created_at=now, expires_at=now + timedelta(minutes=10)))
 
     second_connection_repo = LocalGoogleCalendarConnectionRepository(connection_file)
     second_state_repo = LocalGoogleOAuthStateRepository(state_file)
 
-    assert second_connection_repo.get_connection("user-a").google_account_email == "user-a@example.com"
+    saved_connection = second_connection_repo.get_connection("user-a")
+    assert saved_connection.google_account_email == "user-a@example.com"
+    assert saved_connection.calendar_id == "family-calendar"
+    assert saved_connection.calendar_label == "Family calendar"
     assert second_state_repo.get_state("state-a").user_id == "user-a"
 
 
@@ -508,10 +672,13 @@ def test_dynamo_google_repositories_store_user_scoped_connection_and_state():
     state_repo = DynamoGoogleOAuthStateRepository("states", "us-east-1", table=state_table)
     now = datetime.now(timezone.utc)
 
-    save_connection(connection_repo, "user-a")
+    save_connection(connection_repo, "user-a", calendar_id="family-calendar", calendar_label="Family calendar")
     state_repo.save_state(GoogleOAuthState(state="state-a", user_id="user-a", created_at=now, expires_at=now + timedelta(minutes=10)))
 
-    assert connection_repo.get_connection("user-a").google_account_email == "user-a@example.com"
+    saved_connection = connection_repo.get_connection("user-a")
+    assert saved_connection.google_account_email == "user-a@example.com"
+    assert saved_connection.calendar_id == "family-calendar"
+    assert saved_connection.calendar_label == "Family calendar"
     assert connection_repo.get_connection("user-b") is None
     assert "consumed_at" not in state_table.items["state-a"]
     consumed = state_repo.consume_state("state-a", now + timedelta(minutes=1))

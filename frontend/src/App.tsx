@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react'
 
-import { calendarApi, type GoogleCalendarStatus } from './api/calendarApi'
+import { calendarApi, type GoogleCalendarOption, type GoogleCalendarStatus } from './api/calendarApi'
 import { remindersApi } from './api/remindersApi'
 import { preferencesApi } from './api/preferencesApi'
 import { pushApi, type PushStatus, type PushSubscriptionSummary } from './api/pushApi'
@@ -1054,13 +1054,26 @@ function GoogleCalendarSection({
   onCalendarStatusUpdate: (status: GoogleCalendarStatus) => void
 }) {
   const [isWorking, setIsWorking] = useState(false)
+  const [calendarOptions, setCalendarOptions] = useState<GoogleCalendarOption[]>([])
+  const [selectedCalendarId, setSelectedCalendarId] = useState('')
+  const [isLoadingCalendars, setIsLoadingCalendars] = useState(false)
+  const [isSavingCalendar, setIsSavingCalendar] = useState(false)
   const [calendarMessage, setCalendarMessage] = useState<string | null>(null)
   const [calendarError, setCalendarError] = useState<string | null>(null)
+  const onCalendarStatusRefreshRef = useRef(onCalendarStatusRefresh)
   const calendarState = getCalendarUiState(calendarStatus, isCalendarStatusLoading, calendarStatusError)
-  const canConnect = Boolean(calendarStatus?.configured) && !isCalendarStatusLoading && !isWorking
-  const canDisconnect = calendarStatus?.connected === true && !isCalendarStatusLoading && !isWorking
+  const isCalendarPickerBusy = isLoadingCalendars || isSavingCalendar
+  const canConnect = Boolean(calendarStatus?.configured) && !isCalendarStatusLoading && !isWorking && !isCalendarPickerBusy
+  const canDisconnect = calendarStatus?.connected === true && !isCalendarStatusLoading && !isWorking && !isCalendarPickerBusy
   const shouldShowConnect = calendarStatus?.configured === true && calendarStatus.connected !== true
   const shouldShowDisconnect = calendarStatus?.connected === true
+  const hasCalendarSelectionChanged = Boolean(selectedCalendarId && selectedCalendarId !== calendarStatus?.calendar_id)
+  const canSaveCalendarSelection =
+    calendarStatus?.connected === true && hasCalendarSelectionChanged && !isCalendarStatusLoading && !isWorking && !isCalendarPickerBusy
+
+  useEffect(() => {
+    onCalendarStatusRefreshRef.current = onCalendarStatusRefresh
+  }, [onCalendarStatusRefresh])
 
   async function connectGoogleCalendar() {
     setIsWorking(true)
@@ -1073,6 +1086,74 @@ function GoogleCalendarSection({
     } catch (requestError) {
       setCalendarError(requestError instanceof Error ? requestError.message : 'Unable to start Google Calendar connection.')
       setIsWorking(false)
+    }
+  }
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadGoogleCalendars() {
+      if (calendarStatus?.connected !== true) {
+        setCalendarOptions([])
+        setSelectedCalendarId('')
+        setIsLoadingCalendars(false)
+        return
+      }
+
+      setIsLoadingCalendars(true)
+      setCalendarError(null)
+
+      try {
+        const options = await calendarApi.listCalendars()
+        if (!isCancelled) {
+          setCalendarOptions(options)
+          setSelectedCalendarId(options.find((option) => option.selected)?.id ?? calendarStatus.calendar_id ?? options[0]?.id ?? '')
+        }
+      } catch (requestError) {
+        if (!isCancelled) {
+          setCalendarOptions([])
+          setSelectedCalendarId(calendarStatus.calendar_id ?? '')
+          setCalendarError(requestError instanceof Error ? requestError.message : 'Unable to load Google Calendar options.')
+          await onCalendarStatusRefreshRef.current()
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingCalendars(false)
+        }
+      }
+    }
+
+    void loadGoogleCalendars()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [calendarStatus?.connected, calendarStatus?.calendar_id])
+
+  async function saveSelectedCalendar() {
+    if (!canSaveCalendarSelection) {
+      return
+    }
+
+    setIsSavingCalendar(true)
+    setCalendarError(null)
+    setCalendarMessage(null)
+
+    try {
+      const status = await calendarApi.selectCalendar({ calendar_id: selectedCalendarId })
+      onCalendarStatusUpdate(status)
+      setCalendarOptions((current) =>
+        current.map((option) => ({
+          ...option,
+          selected: option.id === selectedCalendarId,
+        })),
+      )
+      setCalendarMessage('Default Google Calendar updated.')
+    } catch (requestError) {
+      setCalendarError(requestError instanceof Error ? requestError.message : 'Unable to update the default Google Calendar.')
+      await onCalendarStatusRefresh()
+    } finally {
+      setIsSavingCalendar(false)
     }
   }
 
@@ -1124,6 +1205,44 @@ function GoogleCalendarSection({
         </div>
       ) : null}
 
+      {calendarStatus?.connected ? (
+        <div className="settings-calendar-picker">
+          <label htmlFor="settings-google-calendar-select">
+            <span>Default calendar</span>
+            <div className="settings-calendar-select-row">
+              <select
+                id="settings-google-calendar-select"
+                className="settings-calendar-select"
+                disabled={isCalendarStatusLoading || isWorking || isCalendarPickerBusy || calendarOptions.length === 0}
+                value={selectedCalendarId}
+                onChange={(event) => setSelectedCalendarId(event.currentTarget.value)}
+              >
+                {calendarOptions.length === 0 ? (
+                  <option value="">
+                    {isLoadingCalendars ? 'Loading calendars...' : 'Reconnect Google Calendar to choose calendars'}
+                  </option>
+                ) : (
+                  calendarOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.primary && option.label !== 'Primary calendar' ? `${option.label} (Primary)` : option.label}
+                    </option>
+                  ))
+                )}
+              </select>
+              <button
+                type="button"
+                className="secondary-button settings-calendar-save-button"
+                disabled={!canSaveCalendarSelection}
+                onClick={() => void saveSelectedCalendar()}
+              >
+                {isSavingCalendar ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </label>
+          <small>New reminder syncs use this calendar. Existing synced reminders stay where they are.</small>
+        </div>
+      ) : null}
+
       {calendarStatusError || calendarError ? (
         <div className="settings-push-error settings-push-inline-message" role="alert">
           <span>{calendarError ?? calendarStatusError}</span>
@@ -1168,7 +1287,7 @@ function getCalendarUiState(
     return {
       label: 'Checking',
       summary: 'Checking Google Calendar setup.',
-      detail: 'Primary calendar sync only.',
+      detail: 'Checking Calendar sync.',
       tone: 'disabled',
     }
   }
@@ -1195,7 +1314,7 @@ function getCalendarUiState(
     return {
       label: 'Connected',
       summary: 'Connected',
-      detail: 'Primary calendar',
+      detail: calendarStatus.calendar_label ?? 'Selected calendar',
       tone: 'enabled',
     }
   }

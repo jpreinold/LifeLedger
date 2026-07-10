@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Google Calendar sync is now available as a one-way, per-reminder integration from LifeLedger to the user's primary Google Calendar. Email, SMS, public sign-up, records, and document uploads are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Google Calendar sync is now available as a one-way, per-reminder integration from LifeLedger to the user's selected Google Calendar. Email, SMS, public sign-up, records, and document uploads are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -91,14 +91,16 @@ The reminder list now uses the top status cards as filters: All active, Overdue,
 
 ## Google Calendar Sync
 
-Google Calendar sync is one-way: LifeLedger creates, updates, and deletes Google Calendar events for selected LifeLedger reminders only. LifeLedger does not read Google Calendar events, import events, process Google Calendar edits, invite attendees, or support shared calendars in this MVP. Synced reminders are all-day events on the user's primary Google Calendar.
+Google Calendar sync is one-way: LifeLedger creates, updates, and deletes Google Calendar events for selected LifeLedger reminders only. LifeLedger does not read Google Calendar events, import events, process Google Calendar edits, or invite attendees in this MVP. Synced reminders are all-day events on the user's selected writable Google Calendar. The primary calendar is the default until the user chooses a different calendar in Settings.
 
 Setup requires a Google Cloud project:
 
 1. Configure the OAuth consent screen and add private-beta test users as needed.
 2. Create an OAuth client of type **Web application**.
 3. Add the authorized redirect URI. It must exactly match `GOOGLE_OAUTH_REDIRECT_URI`. For the frontend callback flow, this should be the LifeLedger frontend URL that receives `code` and `state`.
-4. Deploy the backend with `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, and `GOOGLE_CALENDAR_SCOPES`. The default scope is `https://www.googleapis.com/auth/calendar.events`.
+4. Deploy the backend with `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, and `GOOGLE_CALENDAR_SCOPES`. The default scopes are `https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly`.
+
+Existing Google Calendar connections created before the calendar picker may need to reconnect once so Google grants the CalendarList read-only scope needed to show writable calendars.
 
 The Google client secret is backend-only secret material. Do not put it in Cloudflare, Vite, browser storage, or git. Cloudflare Pages does not need Google OAuth client configuration for this flow; the frontend starts OAuth by calling the authenticated backend.
 
@@ -273,7 +275,7 @@ Backend local development works without setting any variables.
 | `GOOGLE_CLIENT_ID` | empty | Google OAuth web client ID for Calendar sync. Backend/SAM only. |
 | `GOOGLE_CLIENT_SECRET` | empty | Google OAuth web client secret. Backend-only secret; do not commit or expose to Cloudflare/Vite. |
 | `GOOGLE_OAUTH_REDIRECT_URI` | empty | OAuth redirect URI registered in Google Cloud and used during code exchange. |
-| `GOOGLE_CALENDAR_SCOPES` | `https://www.googleapis.com/auth/calendar.events` | Minimum Calendar events scope used for one-way event create/update/delete. |
+| `GOOGLE_CALENDAR_SCOPES` | `https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly` | Calendar event write scope plus CalendarList read-only scope for the Settings picker. |
 | `VAPID_PUBLIC_KEY` | empty | Public VAPID key. Also set `VITE_VAPID_PUBLIC_KEY` in the frontend. |
 | `VAPID_PRIVATE_KEY` | empty | Private VAPID key used only by the backend sender. Do not commit a real value. |
 | `VAPID_SUBJECT` | empty | VAPID contact subject, such as `mailto:you@example.com`. |
@@ -322,7 +324,7 @@ VapidSubject=mailto:you@example.com
 GoogleClientId=<google-oauth-web-client-id>
 GoogleClientSecret=<google-oauth-web-client-secret>
 GoogleOAuthRedirectUri=<authorized-google-oauth-redirect-uri>
-GoogleCalendarScopes=https://www.googleapis.com/auth/calendar.events
+GoogleCalendarScopes=https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly
 ```
 
 SAM guided deploy creates `backend/samconfig.toml` for your machine/account. That file is ignored by git because it can contain local deployment choices. Use `backend/samconfig.example.toml` as a safe reference, then run:

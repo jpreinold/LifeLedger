@@ -420,6 +420,20 @@ class GoogleCalendarStatusResponse(BaseModel):
     last_error: str | None = None
 
 
+class GoogleCalendarOptionResponse(BaseModel):
+    id: str
+    label: str
+    primary: bool = False
+    access_role: str
+    selected: bool = False
+
+
+class GoogleCalendarSelectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    calendar_id: str = Field(..., min_length=1, max_length=512)
+
+
 class GoogleCalendarConnectResponse(BaseModel):
     authorization_url: str
 

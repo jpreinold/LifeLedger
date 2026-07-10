@@ -14,6 +14,7 @@ GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_CALENDAR_API_BASE_URL = "https://www.googleapis.com/calendar/v3"
 DEFAULT_TIMEOUT_SECONDS = 10
+WRITABLE_CALENDAR_ACCESS_ROLES = {"owner", "writer", "writerWithoutPrivateAccess"}
 
 
 class GoogleCalendarError(Exception):
@@ -48,6 +49,14 @@ class GoogleTokenSet:
     token_expires_at: datetime
     scopes: str
     google_account_email: str | None = None
+
+
+@dataclass(frozen=True)
+class GoogleCalendarOption:
+    id: str
+    label: str
+    primary: bool
+    access_role: str
 
 
 class GoogleCalendarService:
@@ -102,6 +111,36 @@ class GoogleCalendarService:
             },
         )
         return self._token_set_from_response(response)
+
+    def list_calendar_options(self, connection: GoogleCalendarConnection) -> list[GoogleCalendarOption]:
+        self._require_configured()
+        options: list[GoogleCalendarOption] = []
+        page_token: str | None = None
+
+        while True:
+            query_params = {"maxResults": "250", "showHidden": "true"}
+            if page_token:
+                query_params["pageToken"] = page_token
+
+            response = self._request_json(
+                "GET",
+                f"{GOOGLE_CALENDAR_API_BASE_URL}/users/me/calendarList",
+                connection.access_token,
+                query_params=query_params,
+            )
+            raw_items = response.get("items")
+            items = raw_items if isinstance(raw_items, list) else []
+            for item in items:
+                option = google_calendar_option_from_item(item)
+                if option is not None:
+                    options.append(option)
+
+            next_page_token = response.get("nextPageToken")
+            if not isinstance(next_page_token, str) or not next_page_token:
+                break
+            page_token = next_page_token
+
+        return sorted(options, key=lambda item: (not item.primary, item.label.casefold()))
 
     def create_event(self, connection: GoogleCalendarConnection, event: dict[str, Any]) -> str:
         calendar_id = quote(connection.calendar_id, safe="")
@@ -158,6 +197,7 @@ class GoogleCalendarService:
         access_token: str,
         *,
         json_body: dict[str, Any] | None = None,
+        query_params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         try:
             with httpx.Client(timeout=DEFAULT_TIMEOUT_SECONDS) as client:
@@ -168,6 +208,7 @@ class GoogleCalendarService:
                         "Authorization": f"Bearer {access_token}",
                         "Content-Type": "application/json",
                     },
+                    params=query_params,
                     json=json_body,
                 )
         except httpx.HTTPError as exc:
@@ -199,6 +240,35 @@ class GoogleCalendarService:
             scopes=scope if isinstance(scope, str) and scope else self.settings.google_calendar_scopes,
             google_account_email=get_email_from_id_token(response.get("id_token")),
         )
+
+
+def google_calendar_option_from_item(item: Any) -> GoogleCalendarOption | None:
+    if not isinstance(item, dict):
+        return None
+
+    access_role = item.get("accessRole")
+    calendar_id = item.get("id")
+    if access_role not in WRITABLE_CALENDAR_ACCESS_ROLES or not isinstance(calendar_id, str) or not calendar_id:
+        return None
+
+    primary = item.get("primary") is True
+    summary_override = item.get("summaryOverride")
+    summary = item.get("summary")
+    label = "Primary calendar" if primary else first_non_empty_string(summary_override, summary, calendar_id)
+
+    return GoogleCalendarOption(
+        id="primary" if primary else calendar_id,
+        label=label,
+        primary=primary,
+        access_role=access_role,
+    )
+
+
+def first_non_empty_string(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "Google Calendar"
 
 
 def raise_google_error(response: httpx.Response) -> None:

@@ -51,7 +51,7 @@ Parameters:
     Default: ""
   GoogleCalendarScopes:
     Type: String
-    Default: https://www.googleapis.com/auth/calendar.events
+    Default: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly"
   VapidPublicKey:
     Type: String
     Default: ""

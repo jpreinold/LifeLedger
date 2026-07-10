@@ -81,13 +81,13 @@ Local development does not require environment variables.
 | `GOOGLE_CLIENT_ID` | empty | Google OAuth web client ID for Calendar sync. |
 | `GOOGLE_CLIENT_SECRET` | empty | Google OAuth web client secret. Backend-only; do not commit or expose to frontend env vars. |
 | `GOOGLE_OAUTH_REDIRECT_URI` | empty | Authorized Google OAuth redirect URI used for code exchange. |
-| `GOOGLE_CALENDAR_SCOPES` | `https://www.googleapis.com/auth/calendar.events` | Calendar events scope for one-way LifeLedger to Google Calendar sync. |
+| `GOOGLE_CALENDAR_SCOPES` | `https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly` | Calendar event write scope plus CalendarList read-only scope for the Settings picker. |
 | `VAPID_PUBLIC_KEY` | empty | Public VAPID key. |
 | `VAPID_PRIVATE_KEY` | empty | Private VAPID key used only by the backend sender. Do not commit it. |
 | `VAPID_SUBJECT` | empty | VAPID contact subject such as `mailto:you@example.com`. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
-Generate VAPID keys with `npx web-push generate-vapid-keys`. The backend receives `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`; the frontend receives only `VITE_VAPID_PUBLIC_KEY`. Google Calendar sync requires a Google Cloud OAuth web client, an OAuth consent screen/test users for private beta, and an authorized redirect URI that exactly matches `GOOGLE_OAUTH_REDIRECT_URI`. The Google client secret stays backend-only.
+Generate VAPID keys with `npx web-push generate-vapid-keys`. The backend receives `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`; the frontend receives only `VITE_VAPID_PUBLIC_KEY`. Google Calendar sync requires a Google Cloud OAuth web client, an OAuth consent screen/test users for private beta, and an authorized redirect URI that exactly matches `GOOGLE_OAUTH_REDIRECT_URI`. The Google client secret stays backend-only. Existing Google Calendar connections may need to reconnect once to grant the CalendarList read-only scope used by the calendar picker.
 
 ## Authentication Modes
 
@@ -187,7 +187,7 @@ VapidSubject=mailto:you@example.com
 GoogleClientId=<google-oauth-web-client-id>
 GoogleClientSecret=<google-oauth-web-client-secret>
 GoogleOAuthRedirectUri=<authorized-google-oauth-redirect-uri>
-GoogleCalendarScopes=https://www.googleapis.com/auth/calendar.events
+GoogleCalendarScopes=https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly
 ```
 
 `sam deploy --guided` creates `samconfig.toml` for your local AWS account and deployment choices. That file is ignored by git. Use `samconfig.example.toml` as a safe reference that does not include credentials, account IDs, or local profile names.

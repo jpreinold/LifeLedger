@@ -362,13 +362,13 @@ function getCalendarSyncState(
   if (reminder.calendar_sync_enabled && reminder.calendar_sync_status === 'synced') {
     return {
       label: 'Synced to Google Calendar',
-      description: 'This reminder is synced as an all-day event on your primary calendar.',
+      description: 'This reminder is synced as an all-day event on Google Calendar.',
     }
   }
 
   return {
     label: 'Not synced',
-    description: 'Sync this reminder as an all-day event on your primary Google Calendar.',
+    description: 'Sync this reminder as an all-day event on your selected Google Calendar.',
   }
 }
 

@@ -14,6 +14,14 @@ export interface GoogleCalendarStatus {
   last_error: string | null
 }
 
+export interface GoogleCalendarOption {
+  id: string
+  label: string
+  primary: boolean
+  access_role: string
+  selected: boolean
+}
+
 export interface GoogleCalendarConnectResult {
   authorization_url: string
 }
@@ -57,6 +65,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const calendarApi = {
   getStatus: () => request<GoogleCalendarStatus>('/integrations/google-calendar/status'),
+
+  listCalendars: () => request<GoogleCalendarOption[]>('/integrations/google-calendar/calendars'),
+
+  selectCalendar: (input: { calendar_id: string }) =>
+    request<GoogleCalendarStatus>('/integrations/google-calendar/calendar', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
 
   connect: () =>
     request<GoogleCalendarConnectResult>('/integrations/google-calendar/connect', {
