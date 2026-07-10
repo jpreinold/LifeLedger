@@ -1,3 +1,5 @@
+import hashlib
+import logging
 from datetime import date, datetime, timedelta, timezone
 from secrets import token_urlsafe
 from uuid import uuid4
@@ -92,6 +94,7 @@ from app.push_sender import (
 
 settings = get_settings()
 app = FastAPI(title="LifeLedger API", version="0.1.0")
+logger = logging.getLogger(__name__)
 
 PUSH_CONFIG_MISSING_DETAIL = "Push notifications are not configured for this environment."
 NO_ACTIVE_PUSH_SUBSCRIPTION_DETAIL = "No active push subscription found. Enable push notifications first."
@@ -266,16 +269,14 @@ def complete_google_calendar_connection(
 
     now = utc_now()
     saved_state = state_repo.get_state(payload.state)
-    if (
-        saved_state is None
-        or saved_state.user_id != current_user.user_id
-        or saved_state.consumed_at is not None
-        or saved_state.expires_at <= now
-    ):
+    invalid_state_reason = get_google_oauth_invalid_state_reason(saved_state, current_user.user_id, now)
+    if invalid_state_reason is not None:
+        log_invalid_google_oauth_state(invalid_state_reason, payload.state)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google Calendar connection expired. Try again.")
 
     consumed_state = state_repo.consume_state(payload.state, now)
     if consumed_state is None:
+        log_invalid_google_oauth_state("already_consumed", payload.state)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google Calendar connection expired. Try again.")
 
     try:
@@ -752,6 +753,34 @@ def to_google_calendar_status_response(
         calendar_label="Primary calendar" if calendar_id == "primary" else calendar_id,
         last_error=connection.last_error,
     )
+
+
+def get_google_oauth_invalid_state_reason(
+    saved_state: GoogleOAuthState | None,
+    current_user_id: str,
+    now: datetime,
+) -> str | None:
+    if saved_state is None:
+        return "missing_state"
+    if saved_state.user_id != current_user_id:
+        return "wrong_user"
+    if saved_state.consumed_at is not None:
+        return "already_consumed"
+    if saved_state.expires_at <= now:
+        return "expired"
+    return None
+
+
+def log_invalid_google_oauth_state(reason: str, state: str) -> None:
+    logger.warning(
+        "Google Calendar OAuth state rejected: %s state_hash=%s",
+        reason,
+        google_oauth_state_log_id(state),
+    )
+
+
+def google_oauth_state_log_id(state: str) -> str:
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()[:12]
 
 
 def require_ready_google_connection(

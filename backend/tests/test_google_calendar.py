@@ -234,6 +234,43 @@ def test_callback_cannot_attach_tokens_to_wrong_user(calendar_context):
     assert calendar_context.calendar_service.exchanged_codes == []
 
 
+@pytest.mark.parametrize(
+    ("state_status", "expected_reason"),
+    [
+        ("missing", "missing_state"),
+        ("wrong_user", "wrong_user"),
+        ("consumed", "already_consumed"),
+        ("expired", "expired"),
+    ],
+)
+def test_callback_logs_safe_invalid_state_reason(calendar_context, caplog, state_status, expected_reason):
+    caplog.set_level("WARNING", logger="app.main")
+    now = datetime.now(timezone.utc)
+    state = f"sensitive-oauth-state-{state_status}"
+
+    if state_status != "missing":
+        calendar_context.state_repo.save_state(
+            GoogleOAuthState(
+                state=state,
+                user_id="user-b" if state_status == "wrong_user" else "user-a",
+                created_at=now - timedelta(minutes=15),
+                expires_at=now - timedelta(minutes=1) if state_status == "expired" else now + timedelta(minutes=10),
+                consumed_at=now - timedelta(minutes=1) if state_status == "consumed" else None,
+            )
+        )
+
+    set_auth_user("user-a")
+    response = calendar_context.client.post(
+        "/integrations/google-calendar/callback",
+        json={"code": "auth-code", "state": state},
+    )
+
+    assert response.status_code == 400
+    assert expected_reason in caplog.text
+    assert state not in caplog.text
+    assert calendar_context.calendar_service.exchanged_codes == []
+
+
 def test_disconnect_only_disconnects_current_user(calendar_context):
     save_connection(calendar_context.connection_repo, "user-a")
     save_connection(calendar_context.connection_repo, "user-b")

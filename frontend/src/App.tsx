@@ -195,6 +195,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       return false
     }
 
+    clearGoogleOAuthUrlParams(params)
     setIsCalendarStatusLoading(true)
     setCalendarStatusError(null)
     setError(null)
@@ -207,7 +208,13 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       if (!code || !state) {
         throw new Error('Google Calendar connection expired. Try again.')
       }
+      if (hasProcessedGoogleOAuthCallbackState(state)) {
+        await loadCalendarStatus()
+        setNotice('Google Calendar connection status refreshed.')
+        return true
+      }
 
+      markGoogleOAuthCallbackStateProcessed(state)
       const status = await calendarApi.callback({ code, state })
       setCalendarStatus(status)
       setNotice('Google Calendar connected.')
@@ -216,7 +223,6 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setCalendarStatusError(requestError instanceof Error ? requestError.message : 'Unable to connect Google Calendar.')
       setError(requestError instanceof Error ? requestError.message : 'Unable to connect Google Calendar.')
     } finally {
-      clearGoogleOAuthUrlParams(params)
       setIsCalendarStatusLoading(false)
     }
 
@@ -1610,6 +1616,8 @@ function getUserDisplayName(value?: string | null) {
   return `${firstToken.charAt(0).toUpperCase()}${firstToken.slice(1)}`
 }
 
+const GOOGLE_CALENDAR_OAUTH_CALLBACK_KEY_PREFIX = 'google-calendar-oauth-callback:'
+
 function clearGoogleOAuthUrlParams(params: URLSearchParams) {
   for (const key of ['code', 'state', 'scope', 'authuser', 'prompt', 'error', 'error_description']) {
     params.delete(key)
@@ -1618,6 +1626,26 @@ function clearGoogleOAuthUrlParams(params: URLSearchParams) {
   const nextSearch = params.toString()
   const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
   window.history.replaceState(null, '', nextUrl || '/')
+}
+
+function hasProcessedGoogleOAuthCallbackState(state: string) {
+  try {
+    return window.sessionStorage.getItem(getGoogleOAuthCallbackStorageKey(state)) !== null
+  } catch {
+    return false
+  }
+}
+
+function markGoogleOAuthCallbackStateProcessed(state: string) {
+  try {
+    window.sessionStorage.setItem(getGoogleOAuthCallbackStorageKey(state), String(Date.now()))
+  } catch {
+    // URL clearing still prevents ordinary remount duplication when sessionStorage is unavailable.
+  }
+}
+
+function getGoogleOAuthCallbackStorageKey(state: string) {
+  return `${GOOGLE_CALENDAR_OAUTH_CALLBACK_KEY_PREFIX}${state}`
 }
 
 function getTomorrowMorningIso() {
