@@ -11,6 +11,9 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
+      injectManifest: {
+        globIgnores: ['**/index.html'],
+      },
       manifest: {
         name: 'LifeLedger',
         short_name: 'LifeLedger',
