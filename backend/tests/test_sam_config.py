@@ -5,8 +5,16 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
+def template_text() -> str:
+    return (BACKEND_ROOT / "template.yaml").read_text(encoding="utf-8")
+
+
+def template_section(template: str, start: str, end: str) -> str:
+    return template.split(start, maxsplit=1)[1].split(end, maxsplit=1)[0]
+
+
 def test_sam_template_defaults_to_local_persistence():
-    template = (BACKEND_ROOT / "template.yaml").read_text(encoding="utf-8")
+    template = template_text()
 
     assert "PersistenceMode:" in template
     assert "Default: local" in template
@@ -56,6 +64,9 @@ def test_sam_template_defaults_to_local_persistence():
     assert "kms:GenerateDataKey" in template
     assert "kms:Decrypt" in template
     assert "kms:EncryptionContext:app: lifeledger" in template
+    assert "kms:ViaService: dynamodb.*.amazonaws.com" in template
+    assert "kms:CallerAccount: !Ref AWS::AccountId" in template
+    assert "kms:GrantIsForAWSResource: true" in template
     assert "secretsmanager:GetSecretValue" in template
     assert "LifeLedgerDigestPushFunction:" in template
     assert "Handler: digest_push_handler.handler" in template
@@ -75,9 +86,36 @@ def test_sam_template_defaults_to_local_persistence():
     assert "DataEncryptionKeyArn:" in template
     assert "DataEncryptionKeyAlias:" in template
 
-    digest_section = template.split("LifeLedgerDigestPushFunction:", maxsplit=1)[1].split("RemindersTable:", maxsplit=1)[0]
+    digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "RemindersTable:")
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
-    assert "kms:Decrypt" not in digest_section
+    assert "kms:EncryptionContext:app" not in digest_section
+
+
+def test_sam_kms_permissions_split_app_and_dynamodb_access():
+    template = template_text()
+    api_section = template_section(template, "LifeLedgerApiFunction:", "LifeLedgerDigestPushFunction:")
+    digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "RemindersTable:")
+
+    assert "kms:GenerateDataKey" in api_section
+    assert "kms:Decrypt" in api_section
+    assert "kms:EncryptionContext:app: lifeledger" in api_section
+    assert "DATA_ENCRYPTION_KMS_KEY_ARN: !GetAtt LifeLedgerDataEncryptionKey.Arn" in api_section
+
+    for section in (api_section, digest_section):
+        assert "kms:Encrypt" in section
+        assert "kms:Decrypt" in section
+        assert "kms:ReEncrypt*" in section
+        assert "kms:GenerateDataKey*" in section
+        assert "kms:DescribeKey" in section
+        assert "kms:CreateGrant" in section
+        assert "kms:CallerAccount: !Ref AWS::AccountId" in section
+        assert "kms:ViaService: dynamodb.*.amazonaws.com" in section
+        assert "kms:GrantIsForAWSResource: true" in section
+        assert "Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn" in section
+        assert "Resource: \"*\"" not in section
+
+    assert "kms:EncryptionContext:app" not in digest_section
+    assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
 
 
 def test_sam_local_env_file_uses_local_persistence():

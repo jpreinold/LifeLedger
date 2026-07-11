@@ -232,6 +232,31 @@ Resources:
               Condition:
                 StringEquals:
                   kms:EncryptionContext:app: lifeledger
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: dynamodb.*.amazonaws.com
+            - Effect: Allow
+              Action:
+                - kms:CreateGrant
+              Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: dynamodb.*.amazonaws.com
+                Bool:
+                  kms:GrantIsForAWSResource: true
         - !If
           - HasGoogleOAuthSecretArn
           - Statement:
@@ -303,6 +328,31 @@ Resources:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PushSubscriptionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: dynamodb.*.amazonaws.com
+            - Effect: Allow
+              Action:
+                - kms:CreateGrant
+              Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: dynamodb.*.amazonaws.com
+                Bool:
+                  kms:GrantIsForAWSResource: true
         - !If
           - HasPushSecretArn
           - Statement:
