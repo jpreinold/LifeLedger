@@ -42,6 +42,34 @@ Parameters:
   GoogleOAuthStatesTableName:
     Type: String
     Default: lifeledger-google-oauth-states-auth
+  RecordAttachmentsTableName:
+    Type: String
+    Default: lifeledger-record-attachments-auth
+  DocumentStorageMode:
+    Type: String
+    Default: s3
+    AllowedValues:
+      - disabled
+      - local
+      - s3
+  DocumentsUploadBucketName:
+    Type: String
+    Default: ""
+  DocumentsCleanBucketName:
+    Type: String
+    Default: ""
+  MalwareProtectionEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+  AttachmentMaxSizeBytes:
+    Type: Number
+    Default: 10485760
+  AttachmentMaxPerRecord:
+    Type: Number
+    Default: 5
   GoogleClientId:
     Type: String
     Default: ""
@@ -77,6 +105,9 @@ Parameters:
 Conditions:
   HasGoogleOAuthSecretArn: !Not [!Equals [!Ref GoogleOAuthSecretArn, ""]]
   HasPushSecretArn: !Not [!Equals [!Ref PushSecretArn, ""]]
+  HasDocumentsUploadBucketName: !Not [!Equals [!Ref DocumentsUploadBucketName, ""]]
+  HasDocumentsCleanBucketName: !Not [!Equals [!Ref DocumentsCleanBucketName, ""]]
+  EnableMalwareProtection: !Equals [!Ref MalwareProtectionEnabled, "true"]
 
 Globals:
   Function:
@@ -108,6 +139,160 @@ Resources:
     Properties:
       AliasName: !Sub "alias/${AWS::StackName}-data"
       TargetKeyId: !Ref LifeLedgerDataEncryptionKey
+
+  LifeLedgerDocumentsKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: LifeLedger secure document storage encryption
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  LifeLedgerDocumentsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-documents"
+      TargetKeyId: !Ref LifeLedgerDocumentsKey
+
+  DocumentsQuarantineBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If [HasDocumentsUploadBucketName, !Ref DocumentsUploadBucketName, !Ref AWS::NoValue]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt LifeLedgerDocumentsKey.Arn
+            BucketKeyEnabled: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: !Split [",", !Ref CorsAllowedOrigins]
+            AllowedMethods:
+              - POST
+            AllowedHeaders:
+              - Content-Type
+              - x-amz-server-side-encryption
+              - x-amz-server-side-encryption-aws-kms-key-id
+            ExposedHeaders:
+              - ETag
+            MaxAge: 300
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireAbandonedQuarantineUploads
+            Status: Enabled
+            Prefix: quarantine/
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  DocumentsCleanBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If [HasDocumentsCleanBucketName, !Ref DocumentsCleanBucketName, !Ref AWS::NoValue]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt LifeLedgerDocumentsKey.Arn
+            BucketKeyEnabled: true
+
+  DocumentsQuarantineBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DocumentsQuarantineBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DocumentsQuarantineBucket.Arn
+              - !Sub "${DocumentsQuarantineBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: DenyUnapprovedObjectEncryption
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${DocumentsQuarantineBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyUnapprovedKmsKey
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${DocumentsQuarantineBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt LifeLedgerDocumentsKey.Arn
+
+  DocumentsCleanBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DocumentsCleanBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DocumentsCleanBucket.Arn
+              - !Sub "${DocumentsCleanBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: DenyUnapprovedObjectEncryption
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${DocumentsCleanBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyUnapprovedKmsKey
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${DocumentsCleanBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt LifeLedgerDocumentsKey.Arn
 
   LifeLedgerUserPool:
     Type: AWS::Cognito::UserPool
@@ -189,12 +374,14 @@ Resources:
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
           RECORDS_TABLE_NAME: !Ref RecordsTable
+          RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
           GOOGLE_OAUTH_STATES_TABLE_NAME: !Ref GoogleOAuthStatesTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
           LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json
+          LOCAL_RECORD_ATTACHMENTS_FILE: /tmp/lifeledger-record-attachments.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
@@ -208,6 +395,12 @@ Resources:
           VAPID_SUBJECT: !Ref VapidSubject
           DATA_ENCRYPTION_KMS_KEY_ARN: !GetAtt LifeLedgerDataEncryptionKey.Arn
           RECORD_ENCRYPTION_MODE: !Ref RecordEncryptionMode
+          DOCUMENT_STORAGE_MODE: !Ref DocumentStorageMode
+          DOCUMENTS_QUARANTINE_BUCKET: !Ref DocumentsQuarantineBucket
+          DOCUMENTS_CLEAN_BUCKET: !Ref DocumentsCleanBucket
+          DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn
+          ATTACHMENT_MAX_SIZE_BYTES: !Ref AttachmentMaxSizeBytes
+          ATTACHMENT_MAX_PER_RECORD: !Ref AttachmentMaxPerRecord
           ALLOW_PLAINTEXT_PRODUCTION_SECRETS: "false"
           CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins
       Policies:
@@ -215,6 +408,8 @@ Resources:
             TableName: !Ref RemindersTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RecordsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RecordAttachmentsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
@@ -232,6 +427,33 @@ Resources:
               Condition:
                 StringEquals:
                   kms:EncryptionContext:app: lifeledger
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+                - s3:GetObjectTagging
+              Resource: !Sub "${DocumentsQuarantineBucket.Arn}/quarantine/*"
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: !Sub "${DocumentsCleanBucket.Arn}/clean/*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt LifeLedgerDocumentsKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"
         - Statement:
             - Effect: Allow
               Action:
@@ -416,6 +638,41 @@ Resources:
         - AttributeName: id
           KeyType: RANGE
 
+  RecordAttachmentsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref RecordAttachmentsTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: record_attachment_key
+          AttributeType: S
+        - AttributeName: owner_hash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: record_attachment_key
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerHashRecordAttachmentIndex
+          KeySchema:
+            - AttributeName: owner_hash
+              KeyType: HASH
+            - AttributeName: record_attachment_key
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   PreferencesTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -500,6 +757,198 @@ Resources:
         - AttributeName: state
           KeyType: HASH
 
+  GuardDutyDocumentsMalwareProtectionRole:
+    Type: AWS::IAM::Role
+    Condition: EnableMalwareProtection
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: malware-protection-plan.guardduty.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: GuardDutyDocumentsMalwareProtectionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AllowManagedRuleToSendS3EventsToGuardDuty
+                Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:DeleteRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"
+                Condition:
+                  StringLike:
+                    events:ManagedBy: malware-protection-plan.guardduty.amazonaws.com
+              - Sid: AllowGuardDutyToMonitorEventBridgeManagedRule
+                Effect: Allow
+                Action:
+                  - events:DescribeRule
+                  - events:ListTargetsByRule
+                Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"
+              - Sid: AllowPostScanTag
+                Effect: Allow
+                Action:
+                  - s3:PutObjectTagging
+                  - s3:GetObjectTagging
+                  - s3:PutObjectVersionTagging
+                  - s3:GetObjectVersionTagging
+                Resource: !Sub "${DocumentsQuarantineBucket.Arn}/quarantine/*"
+              - Sid: AllowEnableS3EventBridgeEvents
+                Effect: Allow
+                Action:
+                  - s3:PutBucketNotification
+                  - s3:GetBucketNotification
+                Resource: !GetAtt DocumentsQuarantineBucket.Arn
+              - Sid: AllowPutValidationObject
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub "${DocumentsQuarantineBucket.Arn}/malware-protection-resource-validation-object"
+              - Sid: AllowCheckBucketOwnership
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt DocumentsQuarantineBucket.Arn
+              - Sid: AllowMalwareScan
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "${DocumentsQuarantineBucket.Arn}/quarantine/*"
+              - Sid: AllowDecryptForMalwareScan
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                Resource: !GetAtt LifeLedgerDocumentsKey.Arn
+                Condition:
+                  StringLike:
+                    kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"
+
+  DocumentsMalwareProtectionPlan:
+    Type: AWS::GuardDuty::MalwareProtectionPlan
+    Condition: EnableMalwareProtection
+    Properties:
+      Role: !GetAtt GuardDutyDocumentsMalwareProtectionRole.Arn
+      ProtectedResource:
+        S3Bucket:
+          BucketName: !Ref DocumentsQuarantineBucket
+          ObjectPrefixes:
+            - quarantine/
+      Actions:
+        Tagging:
+          Status: ENABLED
+      Tags:
+        - Key: Application
+          Value: LifeLedger
+
+  LifeLedgerAttachmentScanFinalizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-attachment-scan-finalizer"
+      CodeUri: .
+      Handler: attachment_scan_finalizer.handler
+      Environment:
+        Variables:
+          APP_ENV: !Ref AppEnv
+          AUTH_MODE: !Ref AuthMode
+          LOCAL_DEV_USER_ID: !Ref LocalDevUserId
+          PERSISTENCE_MODE: !Ref PersistenceMode
+          RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable
+          LOCAL_RECORD_ATTACHMENTS_FILE: /tmp/lifeledger-record-attachments.json
+          DOCUMENT_STORAGE_MODE: !Ref DocumentStorageMode
+          DOCUMENTS_QUARANTINE_BUCKET: !Ref DocumentsQuarantineBucket
+          DOCUMENTS_CLEAN_BUCKET: !Ref DocumentsCleanBucket
+          DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn
+          ATTACHMENT_MAX_SIZE_BYTES: !Ref AttachmentMaxSizeBytes
+          ATTACHMENT_MAX_PER_RECORD: !Ref AttachmentMaxPerRecord
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RecordAttachmentsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:DeleteObject
+                - s3:GetObjectTagging
+              Resource: !Sub "${DocumentsQuarantineBucket.Arn}/quarantine/*"
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: !Sub "${DocumentsCleanBucket.Arn}/clean/*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt LifeLedgerDocumentsKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: dynamodb.*.amazonaws.com
+            - Effect: Allow
+              Action:
+                - kms:CreateGrant
+              Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Ref AWS::AccountId
+                StringLike:
+                  kms:ViaService: dynamodb.*.amazonaws.com
+                Bool:
+                  kms:GrantIsForAWSResource: true
+
+  AttachmentScanResultRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.guardduty
+        detail-type:
+          - GuardDuty Malware Protection Object Scan Result
+        detail:
+          resourceType:
+            - S3_OBJECT
+          s3ObjectDetails:
+            bucketName:
+              - !Ref DocumentsQuarantineBucket
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt LifeLedgerAttachmentScanFinalizerFunction.Arn
+          Id: LifeLedgerAttachmentScanFinalizer
+
+  AttachmentScanResultInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LifeLedgerAttachmentScanFinalizerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AttachmentScanResultRule.Arn
+
 Outputs:
   DataEncryptionKeyArn:
     Description: KMS key ARN for LifeLedger application-level and DynamoDB encryption.
@@ -507,6 +956,24 @@ Outputs:
   DataEncryptionKeyAlias:
     Description: KMS alias for LifeLedger application data encryption.
     Value: !Ref LifeLedgerDataEncryptionAlias
+  DocumentsKeyArn:
+    Description: KMS key ARN for LifeLedger secure document storage.
+    Value: !GetAtt LifeLedgerDocumentsKey.Arn
+  DocumentsKeyAlias:
+    Description: KMS alias for LifeLedger secure document storage.
+    Value: !Ref LifeLedgerDocumentsKeyAlias
+  DocumentsQuarantineBucketName:
+    Description: Private S3 bucket for untrusted quarantined document uploads.
+    Value: !Ref DocumentsQuarantineBucket
+  DocumentsCleanBucketName:
+    Description: Private S3 bucket for scanned and validated record attachments.
+    Value: !Ref DocumentsCleanBucket
+  RecordAttachmentsTableName:
+    Description: DynamoDB record attachments metadata table name.
+    Value: !Ref RecordAttachmentsTable
+  MalwareProtectionPlanId:
+    Description: GuardDuty Malware Protection plan ID when enabled.
+    Value: !If [EnableMalwareProtection, !GetAtt DocumentsMalwareProtectionPlan.MalwareProtectionPlanId, "disabled"]
   ApiUrl:
     Description: HTTP API endpoint for the LifeLedger backend.
     Value: !Sub "https://${LifeLedgerHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"

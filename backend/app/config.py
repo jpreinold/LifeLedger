@@ -19,8 +19,17 @@ SUPPORTED_RECORD_ENCRYPTION_MODES = {
     RECORD_ENCRYPTION_LOCAL,
     RECORD_ENCRYPTION_KMS,
 }
+DOCUMENT_STORAGE_DISABLED = "disabled"
+DOCUMENT_STORAGE_LOCAL = "local"
+DOCUMENT_STORAGE_S3 = "s3"
+SUPPORTED_DOCUMENT_STORAGE_MODES = {
+    DOCUMENT_STORAGE_DISABLED,
+    DOCUMENT_STORAGE_LOCAL,
+    DOCUMENT_STORAGE_S3,
+}
 LAMBDA_LOCAL_DATA_FILE = "/tmp/lifeledger-reminders.json"
 LAMBDA_LOCAL_RECORDS_FILE = "/tmp/lifeledger-records.json"
+LAMBDA_LOCAL_RECORD_ATTACHMENTS_FILE = "/tmp/lifeledger-record-attachments.json"
 LAMBDA_LOCAL_PREFERENCES_FILE = "/tmp/lifeledger-preferences.json"
 LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE = "/tmp/lifeledger-push-subscriptions.json"
 LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE = "/tmp/lifeledger-google-calendar-connections.json"
@@ -40,10 +49,13 @@ DEFAULT_PREFERENCES_TABLE_NAME = "lifeledger-preferences-auth"
 DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME = "lifeledger-push-subscriptions-auth"
 DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME = "lifeledger-google-calendar-connections-auth"
 DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME = "lifeledger-google-oauth-states-auth"
+DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME = "lifeledger-record-attachments-auth"
 DEFAULT_GOOGLE_CALENDAR_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
 )
+DEFAULT_ATTACHMENT_MAX_SIZE_BYTES = 10 * 1024 * 1024
+DEFAULT_ATTACHMENT_MAX_PER_RECORD = 5
 
 
 @dataclass(frozen=True)
@@ -58,9 +70,11 @@ class Settings:
     push_subscriptions_table_name: str = DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME
     google_calendar_connections_table_name: str = DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME
     google_oauth_states_table_name: str = DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME
+    record_attachments_table_name: str = DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME
     aws_region: str = "us-east-1"
     local_data_file: str = ""
     local_records_file: str = ""
+    local_record_attachments_file: str = ""
     local_preferences_file: str = ""
     local_push_subscriptions_file: str = ""
     local_google_calendar_connections_file: str = ""
@@ -79,6 +93,12 @@ class Settings:
     google_oauth_secret_arn: str = ""
     push_secret_arn: str = ""
     allow_plaintext_production_secrets: bool = False
+    document_storage_mode: str = DOCUMENT_STORAGE_DISABLED
+    documents_quarantine_bucket: str = ""
+    documents_clean_bucket: str = ""
+    documents_kms_key_arn: str = ""
+    attachment_max_size_bytes: int = DEFAULT_ATTACHMENT_MAX_SIZE_BYTES
+    attachment_max_per_record: int = DEFAULT_ATTACHMENT_MAX_PER_RECORD
 
     @property
     def plaintext_secret_fallback_allowed(self) -> bool:
@@ -103,6 +123,15 @@ class Settings:
             and self.google_calendar_scopes
         )
 
+    @property
+    def document_storage_configured(self) -> bool:
+        return bool(
+            self.document_storage_mode == DOCUMENT_STORAGE_S3
+            and self.documents_quarantine_bucket
+            and self.documents_clean_bucket
+            and self.documents_kms_key_arn
+        )
+
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     source = os.environ if env is None else env
@@ -122,8 +151,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         supported = ", ".join(sorted(SUPPORTED_RECORD_ENCRYPTION_MODES))
         raise ValueError(f"Unsupported RECORD_ENCRYPTION_MODE '{record_encryption_mode}'. Expected one of: {supported}.")
 
+    app_env = source.get("APP_ENV", "local").strip() or "local"
+    default_document_storage_mode = DOCUMENT_STORAGE_S3 if app_env == "production" else DOCUMENT_STORAGE_DISABLED
+    document_storage_mode = source.get("DOCUMENT_STORAGE_MODE", default_document_storage_mode).strip().lower()
+    if document_storage_mode not in SUPPORTED_DOCUMENT_STORAGE_MODES:
+        supported = ", ".join(sorted(SUPPORTED_DOCUMENT_STORAGE_MODES))
+        raise ValueError(f"Unsupported DOCUMENT_STORAGE_MODE '{document_storage_mode}'. Expected one of: {supported}.")
+
     return Settings(
-        app_env=source.get("APP_ENV", "local").strip() or "local",
+        app_env=app_env,
         auth_mode=auth_mode,
         local_dev_user_id=source.get("LOCAL_DEV_USER_ID", DEFAULT_LOCAL_DEV_USER_ID).strip()
         or DEFAULT_LOCAL_DEV_USER_ID,
@@ -149,9 +185,16 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME,
         ).strip()
         or DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME,
+        record_attachments_table_name=source.get(
+            "RECORD_ATTACHMENTS_TABLE_NAME",
+            DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME,
+        ).strip()
+        or DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME,
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
         local_records_file=source.get("LOCAL_RECORDS_FILE", "").strip() or default_local_records_file(source),
+        local_record_attachments_file=source.get("LOCAL_RECORD_ATTACHMENTS_FILE", "").strip()
+        or default_local_record_attachments_file(source),
         local_preferences_file=source.get("LOCAL_PREFERENCES_FILE", "").strip()
         or default_local_preferences_file(source),
         local_push_subscriptions_file=source.get("LOCAL_PUSH_SUBSCRIPTIONS_FILE", "").strip()
@@ -178,6 +221,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         allow_plaintext_production_secrets=parse_bool(
             source.get("ALLOW_PLAINTEXT_PRODUCTION_SECRETS", "false")
         ),
+        document_storage_mode=document_storage_mode,
+        documents_quarantine_bucket=source.get("DOCUMENTS_QUARANTINE_BUCKET", "").strip(),
+        documents_clean_bucket=source.get("DOCUMENTS_CLEAN_BUCKET", "").strip(),
+        documents_kms_key_arn=source.get("DOCUMENTS_KMS_KEY_ARN", "").strip(),
+        attachment_max_size_bytes=parse_int(
+            source.get("ATTACHMENT_MAX_SIZE_BYTES", str(DEFAULT_ATTACHMENT_MAX_SIZE_BYTES)),
+            DEFAULT_ATTACHMENT_MAX_SIZE_BYTES,
+        ),
+        attachment_max_per_record=parse_int(
+            source.get("ATTACHMENT_MAX_PER_RECORD", str(DEFAULT_ATTACHMENT_MAX_PER_RECORD)),
+            DEFAULT_ATTACHMENT_MAX_PER_RECORD,
+        ),
     )
 
 
@@ -199,6 +254,16 @@ def default_local_records_file(env: Mapping[str, str] | None = None) -> str:
 
     backend_root = Path(__file__).resolve().parents[1]
     return str(backend_root / "data" / "records.json")
+
+
+def default_local_record_attachments_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_RECORD_ATTACHMENTS_FILE
+
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "record-attachments.json")
 
 
 def default_local_preferences_file(env: Mapping[str, str] | None = None) -> str:
@@ -247,6 +312,13 @@ def parse_csv_list(value: str) -> list[str]:
 
 def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def parse_int(value: str, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @lru_cache(maxsize=1)

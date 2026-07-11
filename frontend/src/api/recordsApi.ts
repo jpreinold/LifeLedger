@@ -1,9 +1,14 @@
 import { getAuthorizationHeaders } from '../auth/session'
 import type {
   LifeRecord,
+  PresignedPostUpload,
   ProtectedRecordInput,
   ProtectedRecordPayload,
   ProtectedRecordStatus,
+  RecordAttachment,
+  RecordAttachmentDownloadUrl,
+  RecordAttachmentUploadIntent,
+  RecordAttachmentUploadIntentInput,
   RecordInput,
 } from '../types/record'
 
@@ -75,6 +80,60 @@ export const recordsApi = {
       method: 'DELETE',
       cache: 'no-store',
     }),
+
+  listAttachments: (id: string) =>
+    request<RecordAttachment[]>(`/records/${id}/attachments`, {
+      cache: 'no-store',
+    }),
+
+  createAttachmentUploadIntent: (id: string, input: RecordAttachmentUploadIntentInput) =>
+    request<RecordAttachmentUploadIntent>(`/records/${id}/attachments/upload-intent`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    }),
+
+  completeAttachmentUpload: (id: string, attachmentId: string) =>
+    request<RecordAttachment>(`/records/${id}/attachments/${attachmentId}/complete`, {
+      method: 'POST',
+      cache: 'no-store',
+    }),
+
+  refreshAttachmentStatus: (id: string, attachmentId: string) =>
+    request<RecordAttachment>(`/records/${id}/attachments/${attachmentId}/refresh-status`, {
+      method: 'POST',
+      cache: 'no-store',
+    }),
+
+  createAttachmentDownloadUrl: (id: string, attachmentId: string) =>
+    request<RecordAttachmentDownloadUrl>(`/records/${id}/attachments/${attachmentId}/download-url`, {
+      method: 'POST',
+      cache: 'no-store',
+    }),
+
+  deleteAttachment: (id: string, attachmentId: string) =>
+    request<void>(`/records/${id}/attachments/${attachmentId}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+    }),
+
+  uploadAttachmentFile: async (upload: PresignedPostUpload, file: File) => {
+    const formData = new FormData()
+    Object.entries(upload.fields).forEach(([key, value]) => {
+      formData.append(key, value)
+    })
+    formData.append('file', file)
+
+    const response = await fetch(upload.url, {
+      method: 'POST',
+      body: formData,
+      cache: 'no-store',
+    })
+
+    if (!response.ok) {
+      throw new Error('Unable to upload the file. Try again with a supported PDF, JPEG, or PNG.')
+    }
+  },
 
   create: (input: RecordInput) =>
     request<LifeRecord>('/records', {

@@ -4072,6 +4072,164 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.attachments-section {
+  border-color: rgba(14, 166, 107, 0.2);
+  background:
+    linear-gradient(90deg, rgba(14, 166, 107, 0.08), transparent 48%),
+    rgba(255, 255, 255, 0.92);
+}
+
+.attachments-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.attachments-heading p,
+.attachments-empty,
+.attachments-toolbar span,
+.attachment-message {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.attachments-heading svg {
+  color: var(--color-success);
+  flex: 0 0 auto;
+}
+
+.attachments-toolbar {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.attachment-add-button {
+  width: 100%;
+  min-height: 40px;
+}
+
+.attachment-file-input {
+  display: none;
+}
+
+.attachment-message {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.attachment-message-success {
+  color: #08764e;
+}
+
+.attachments-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.attachment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid rgba(223, 231, 242, 0.9);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.attachment-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.attachment-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.attachment-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.attachment-copy strong,
+.attachment-copy span,
+.attachment-copy small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.attachment-copy strong {
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 780;
+}
+
+.attachment-copy span {
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 620;
+}
+
+.attachment-status {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.attachment-status-available {
+  color: #08764e;
+  background: var(--color-success-soft);
+}
+
+.attachment-status-scanning {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.attachment-status-failed {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.attachment-action-button {
+  width: 34px;
+  min-height: 34px;
+  flex: 0 0 34px;
+  color: var(--color-primary);
+  background: var(--color-surface-muted);
+  box-shadow: none;
+}
+
+.attachment-delete-action {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
 .detail-schedule-section::before {
   content: "";
   position: absolute;

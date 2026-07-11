@@ -9,10 +9,14 @@ from app.config import (
     DEFAULT_LOCAL_DEV_USER_ID,
     DEFAULT_PREFERENCES_TABLE_NAME,
     DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME,
+    DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME,
     DEFAULT_RECORDS_TABLE_NAME,
     DEFAULT_REMINDERS_TABLE_NAME,
+    DOCUMENT_STORAGE_DISABLED,
+    DOCUMENT_STORAGE_S3,
     DYNAMODB_PERSISTENCE,
     LAMBDA_LOCAL_DATA_FILE,
+    LAMBDA_LOCAL_RECORD_ATTACHMENTS_FILE,
     LAMBDA_LOCAL_RECORDS_FILE,
     LAMBDA_LOCAL_PREFERENCES_FILE,
     LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE,
@@ -40,6 +44,7 @@ def test_config_defaults_are_local_safe():
     assert settings.push_subscriptions_table_name == DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME
     assert settings.google_calendar_connections_table_name == DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME
     assert settings.google_oauth_states_table_name == DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME
+    assert settings.record_attachments_table_name == DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME
     assert settings.aws_region == "us-east-1"
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
@@ -47,6 +52,9 @@ def test_config_defaults_are_local_safe():
     assert settings.local_records_file.endswith("backend\\data\\records.json") or settings.local_records_file.endswith(
         "backend/data/records.json"
     )
+    assert settings.local_record_attachments_file.endswith(
+        "backend\\data\\record-attachments.json"
+    ) or settings.local_record_attachments_file.endswith("backend/data/record-attachments.json")
     assert settings.local_preferences_file.endswith(
         "backend\\data\\preferences.json"
     ) or settings.local_preferences_file.endswith("backend/data/preferences.json")
@@ -67,6 +75,13 @@ def test_config_defaults_are_local_safe():
     assert settings.google_oauth_secret_arn == ""
     assert settings.push_secret_arn == ""
     assert settings.allow_plaintext_production_secrets is False
+    assert settings.document_storage_mode == DOCUMENT_STORAGE_DISABLED
+    assert settings.document_storage_configured is False
+    assert settings.documents_quarantine_bucket == ""
+    assert settings.documents_clean_bucket == ""
+    assert settings.documents_kms_key_arn == ""
+    assert settings.attachment_max_size_bytes == 10 * 1024 * 1024
+    assert settings.attachment_max_per_record == 5
     assert settings.cors_allowed_origins == DEFAULT_CORS_ALLOWED_ORIGINS
     assert "https://lifeledger.jpreinold.com" in settings.cors_allowed_origins
     assert "https://www.lifeledger.jpreinold.com" in settings.cors_allowed_origins
@@ -85,6 +100,7 @@ def test_config_reads_environment_values():
             "PUSH_SUBSCRIPTIONS_TABLE_NAME": "custom-push",
             "GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME": "custom-google-connections",
             "GOOGLE_OAUTH_STATES_TABLE_NAME": "custom-google-states",
+            "RECORD_ATTACHMENTS_TABLE_NAME": "custom-attachments",
             "VAPID_PUBLIC_KEY": "public",
             "VAPID_PRIVATE_KEY": "private",
             "VAPID_SUBJECT": "mailto:test@example.com",
@@ -95,6 +111,12 @@ def test_config_reads_environment_values():
             "PUSH_SECRET_ARN": "arn:aws:secretsmanager:us-west-2:123456789012:secret:push",
             "ALLOW_PLAINTEXT_PRODUCTION_SECRETS": "true",
             "AWS_REGION": "us-west-2",
+            "DOCUMENT_STORAGE_MODE": "s3",
+            "DOCUMENTS_QUARANTINE_BUCKET": "quarantine-bucket",
+            "DOCUMENTS_CLEAN_BUCKET": "clean-bucket",
+            "DOCUMENTS_KMS_KEY_ARN": "arn:aws:kms:us-west-2:123456789012:key/documents",
+            "ATTACHMENT_MAX_SIZE_BYTES": "4096",
+            "ATTACHMENT_MAX_PER_RECORD": "3",
             "GOOGLE_CLIENT_ID": "google-client-id",
             "GOOGLE_CLIENT_SECRET": "google-client-secret",
             "GOOGLE_OAUTH_REDIRECT_URI": "https://example.com/oauth/google-calendar",
@@ -113,6 +135,7 @@ def test_config_reads_environment_values():
     assert settings.push_subscriptions_table_name == "custom-push"
     assert settings.google_calendar_connections_table_name == "custom-google-connections"
     assert settings.google_oauth_states_table_name == "custom-google-states"
+    assert settings.record_attachments_table_name == "custom-attachments"
     assert settings.push_notifications_configured is True
     assert settings.google_calendar_configured is True
     assert settings.record_encryption_mode == RECORD_ENCRYPTION_KMS
@@ -122,6 +145,13 @@ def test_config_reads_environment_values():
     assert settings.push_secret_arn == "arn:aws:secretsmanager:us-west-2:123456789012:secret:push"
     assert settings.allow_plaintext_production_secrets is True
     assert settings.aws_region == "us-west-2"
+    assert settings.document_storage_mode == DOCUMENT_STORAGE_S3
+    assert settings.document_storage_configured is True
+    assert settings.documents_quarantine_bucket == "quarantine-bucket"
+    assert settings.documents_clean_bucket == "clean-bucket"
+    assert settings.documents_kms_key_arn == "arn:aws:kms:us-west-2:123456789012:key/documents"
+    assert settings.attachment_max_size_bytes == 4096
+    assert settings.attachment_max_per_record == 3
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
     )
@@ -138,6 +168,12 @@ def test_config_allows_explicit_local_records_file():
     settings = load_settings({"LOCAL_RECORDS_FILE": "/tmp/custom-records.json"})
 
     assert settings.local_records_file == "/tmp/custom-records.json"
+
+
+def test_config_allows_explicit_local_record_attachments_file():
+    settings = load_settings({"LOCAL_RECORD_ATTACHMENTS_FILE": "/tmp/custom-attachments.json"})
+
+    assert settings.local_record_attachments_file == "/tmp/custom-attachments.json"
 
 
 def test_config_allows_explicit_local_preferences_file():
@@ -170,6 +206,7 @@ def test_sam_local_defaults_to_writable_tmp_data_file():
     assert settings.persistence_mode == LOCAL_PERSISTENCE
     assert settings.local_data_file == LAMBDA_LOCAL_DATA_FILE
     assert settings.local_records_file == LAMBDA_LOCAL_RECORDS_FILE
+    assert settings.local_record_attachments_file == LAMBDA_LOCAL_RECORD_ATTACHMENTS_FILE
     assert settings.local_preferences_file == LAMBDA_LOCAL_PREFERENCES_FILE
     assert settings.local_push_subscriptions_file == LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE
     assert settings.local_google_calendar_connections_file == LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE
@@ -189,6 +226,18 @@ def test_config_rejects_unknown_auth_mode():
 def test_config_rejects_unknown_record_encryption_mode():
     with pytest.raises(ValueError):
         load_settings({"RECORD_ENCRYPTION_MODE": "plaintext"})
+
+
+def test_config_rejects_unknown_document_storage_mode():
+    with pytest.raises(ValueError):
+        load_settings({"DOCUMENT_STORAGE_MODE": "public-bucket"})
+
+
+def test_production_defaults_document_storage_to_s3():
+    settings = load_settings({"APP_ENV": "production"})
+
+    assert settings.document_storage_mode == DOCUMENT_STORAGE_S3
+    assert settings.document_storage_configured is False
 
 
 def test_production_disallows_plaintext_secret_fallback_by_default():

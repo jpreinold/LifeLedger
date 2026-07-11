@@ -85,3 +85,59 @@ export interface ProtectedRecordPayload {
   account_reference: string | null
   sensitive_notes: string | null
 }
+
+export type RecordAttachmentStatus =
+  | 'pending_upload'
+  | 'uploaded'
+  | 'scanning'
+  | 'available'
+  | 'rejected'
+  | 'scan_failed'
+  | 'deleting'
+  | 'deleted'
+
+export type RecordAttachmentScanResult =
+  | 'pending'
+  | 'no_threats_found'
+  | 'threats_found'
+  | 'unsupported'
+  | 'access_denied'
+  | 'failed'
+
+export interface RecordAttachment {
+  attachment_id: string
+  record_id: string
+  display_name: string
+  content_type: 'application/pdf' | 'image/jpeg' | 'image/png'
+  size_bytes: number
+  status: RecordAttachmentStatus
+  scan_result: RecordAttachmentScanResult | null
+  created_at: string
+  uploaded_at: string | null
+  scan_completed_at: string | null
+  available_at: string | null
+  deleted_at: string | null
+}
+
+export interface RecordAttachmentUploadIntentInput {
+  filename: string
+  content_type: string
+  size_bytes: number
+}
+
+export interface PresignedPostUpload {
+  url: string
+  fields: Record<string, string>
+}
+
+export interface RecordAttachmentUploadIntent {
+  attachment_id: string
+  upload: PresignedPostUpload
+  expires_at: string
+  max_size_bytes: number
+}
+
+export interface RecordAttachmentDownloadUrl {
+  url: string
+  expires_at: string
+}

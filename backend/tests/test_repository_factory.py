@@ -1,4 +1,5 @@
 from app.config import load_settings
+from app.attachments_repository import DynamoRecordAttachmentRepository, LocalRecordAttachmentRepository
 from app.dynamo_repository import DynamoRecordRepository, DynamoReminderRepository
 from app.google_calendar_repository import (
     DynamoGoogleCalendarConnectionRepository,
@@ -13,6 +14,7 @@ from app.repository_factory import (
     create_google_calendar_connection_repository,
     create_google_oauth_state_repository,
     create_push_subscription_repository,
+    create_record_attachment_repository,
     create_record_repository,
     create_repository,
 )
@@ -67,6 +69,30 @@ def test_record_repository_factory_selects_dynamodb_without_real_aws_call():
     repo = create_record_repository(settings, dynamo_table=fake_table)
 
     assert isinstance(repo, DynamoRecordRepository)
+    assert repo.table is fake_table
+
+
+def test_record_attachment_repository_factory_defaults_to_local(tmp_path):
+    repo = create_record_attachment_repository(load_settings({}), local_file_path=tmp_path / "attachments.json")
+
+    assert isinstance(repo, LocalRecordAttachmentRepository)
+
+
+def test_record_attachment_repository_factory_uses_configured_local_file(tmp_path):
+    data_file = tmp_path / "configured-attachments.json"
+    repo = create_record_attachment_repository(load_settings({"LOCAL_RECORD_ATTACHMENTS_FILE": str(data_file)}))
+
+    assert isinstance(repo, LocalRecordAttachmentRepository)
+    assert repo.file_path == data_file
+
+
+def test_record_attachment_repository_factory_selects_dynamodb_without_real_aws_call():
+    fake_table = FakeDynamoTable()
+    settings = load_settings({"PERSISTENCE_MODE": "dynamodb"})
+
+    repo = create_record_attachment_repository(settings, dynamo_table=fake_table)
+
+    assert isinstance(repo, DynamoRecordAttachmentRepository)
     assert repo.table is fake_table
 
 

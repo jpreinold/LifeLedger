@@ -87,6 +87,27 @@ class RecordStatus(str, Enum):
     ACTIVE = "active"
     ARCHIVED = "archived"
 
+
+class AttachmentStatus(str, Enum):
+    PENDING_UPLOAD = "pending_upload"
+    UPLOADED = "uploaded"
+    SCANNING = "scanning"
+    AVAILABLE = "available"
+    REJECTED = "rejected"
+    SCAN_FAILED = "scan_failed"
+    DELETING = "deleting"
+    DELETED = "deleted"
+
+
+class AttachmentScanResult(str, Enum):
+    PENDING = "pending"
+    NO_THREATS_FOUND = "no_threats_found"
+    THREATS_FOUND = "threats_found"
+    UNSUPPORTED = "unsupported"
+    ACCESS_DENIED = "access_denied"
+    FAILED = "failed"
+
+
 class RenewalKind(str, Enum):
     RENEWAL = "renewal"
     EXPIRATION = "expiration"
@@ -547,6 +568,53 @@ class RecordResponse(RecordBase):
     protected_field_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class RecordAttachmentUploadIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(..., min_length=1, max_length=255)
+    content_type: str = Field(..., min_length=1, max_length=120)
+    size_bytes: int = Field(..., ge=1)
+
+    @field_validator("filename", "content_type", mode="before")
+    @classmethod
+    def normalize_attachment_text(cls, value: str) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class PresignedPostResponse(BaseModel):
+    url: str
+    fields: dict[str, str]
+
+
+class RecordAttachmentUploadIntentResponse(BaseModel):
+    attachment_id: str
+    upload: PresignedPostResponse
+    expires_at: datetime
+    max_size_bytes: int
+
+
+class RecordAttachmentResponse(BaseModel):
+    attachment_id: str
+    record_id: str
+    display_name: str
+    content_type: str
+    size_bytes: int
+    status: AttachmentStatus
+    scan_result: AttachmentScanResult | None = None
+    created_at: datetime
+    uploaded_at: datetime | None = None
+    scan_completed_at: datetime | None = None
+    available_at: datetime | None = None
+    deleted_at: datetime | None = None
+
+
+class RecordAttachmentDownloadUrlResponse(BaseModel):
+    url: str
+    expires_at: datetime
 
 
 class AlertSnoozeRequest(BaseModel):

@@ -3,6 +3,8 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.schemas import (
+    AttachmentScanResult,
+    AttachmentStatus,
     BirthdayDetails,
     CalendarSyncStatus,
     GoogleCalendarConnectionStatus,
@@ -94,6 +96,29 @@ class Record(BaseModel):
     protected_field_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class RecordAttachment(BaseModel):
+    attachment_id: str
+    user_id: str
+    owner_hash: str
+    record_id: str
+    record_attachment_key: str
+    display_name: str
+    content_type: str
+    size_bytes: int
+    status: AttachmentStatus
+    scan_result: AttachmentScanResult | None = None
+    quarantine_object_key: str | None = None
+    clean_object_key: str | None = None
+    upload_expires_at: datetime | None = None
+    created_at: datetime
+    uploaded_at: datetime | None = None
+    scan_completed_at: datetime | None = None
+    available_at: datetime | None = None
+    deleted_at: datetime | None = None
+    etag: str | None = None
+    encryption_key_arn: str | None = None
 
 
 class UserPreferences(BaseModel):

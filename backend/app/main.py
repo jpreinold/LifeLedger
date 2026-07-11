@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from secrets import token_urlsafe
 from uuid import uuid4
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.alerts import (
@@ -15,6 +15,22 @@ from app.alerts import (
     snooze_alert_state,
     sort_alerts,
 )
+from app.attachments import (
+    ATTACHMENT_NOT_AVAILABLE,
+    DOWNLOAD_URL_EXPIRATION_SECONDS,
+    DocumentStorageConfigurationError,
+    DocumentStorageOperationError,
+    UPLOAD_INTENT_EXPIRATION_SECONDS,
+    AttachmentValidationError,
+    active_attachment_count,
+    attachment_content_disposition,
+    complete_attachment_upload,
+    create_document_storage_service,
+    new_record_attachment,
+    reconcile_attachment_scan_status,
+    sort_attachments,
+)
+from app.attachments_repository import RecordAttachmentRepository
 from app.auth import UserContext, get_current_user
 from app.birthdays import (
     enrich_birthday_details,
@@ -48,7 +64,7 @@ from app.maintenance import (
     get_maintenance_status_label,
     prepare_maintenance_details,
 )
-from app.models import GoogleCalendarConnection, GoogleOAuthState, PushSubscription, Record, Reminder
+from app.models import GoogleCalendarConnection, GoogleOAuthState, PushSubscription, Record, RecordAttachment, Reminder
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
@@ -67,12 +83,15 @@ from app.repository_factory import (
     create_encryption_service,
     create_preferences_repository,
     create_push_subscription_repository,
+    create_record_attachment_repository,
     create_record_repository,
     create_repository,
 )
 from app.records_repository import RecordRepository
 from app.schemas import (
     AlertSnoozeRequest,
+    AttachmentScanResult,
+    AttachmentStatus,
     CalendarSyncStatus,
     DigestPreferences,
     DigestPreferencesUpdate,
@@ -93,6 +112,10 @@ from app.schemas import (
     ReminderCreate,
     ReminderAlertResponse,
     ReminderLeadUnit,
+    RecordAttachmentDownloadUrlResponse,
+    RecordAttachmentResponse,
+    RecordAttachmentUploadIntentRequest,
+    RecordAttachmentUploadIntentResponse,
     RecordCreate,
     RecordResponse,
     RecordStatus,
@@ -148,12 +171,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_store_attachment_responses(request: Request, call_next):
+    response = await call_next(request)
+    if "/attachments" in request.url.path:
+        for header, value in no_store_headers().items():
+            response.headers[header] = value
+    return response
+
 repository = create_repository()
 record_repository = create_record_repository()
 preferences_repository = create_preferences_repository()
 push_subscription_repository = create_push_subscription_repository()
 google_calendar_connection_repository = create_google_calendar_connection_repository()
 google_oauth_state_repository = create_google_oauth_state_repository()
+record_attachment_repository = create_record_attachment_repository()
 
 
 def get_app_settings() -> Settings:
@@ -166,6 +199,10 @@ def get_repository() -> ReminderRepository:
 
 def get_record_repository() -> RecordRepository:
     return record_repository
+
+
+def get_record_attachment_repository() -> RecordAttachmentRepository:
+    return record_attachment_repository
 
 
 def get_preferences_repository() -> PreferencesRepository:
@@ -194,6 +231,10 @@ def get_push_sender(app_settings: Settings = Depends(get_app_settings)) -> PushS
 
 def get_encryption_service(app_settings: Settings = Depends(get_app_settings)) -> EncryptionService:
     return create_encryption_service(app_settings)
+
+
+def get_document_storage_service(app_settings: Settings = Depends(get_app_settings)):
+    return create_document_storage_service(app_settings)
 
 
 @app.get("/health")
@@ -317,13 +358,252 @@ def delete_record(
     record_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
 ) -> Response:
     require_record(repo, current_user.user_id, record_id)
+    cleanup_record_attachments_before_delete(
+        current_user.user_id,
+        record_id,
+        attachment_repo,
+        document_storage,
+    )
     deleted = repo.delete_record(current_user.user_id, record_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/records/{record_id}/attachments", response_model=list[RecordAttachmentResponse])
+def list_record_attachments(
+    record_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> list[RecordAttachmentResponse]:
+    set_attachment_no_store(response)
+    require_record(record_repo, current_user.user_id, record_id)
+    attachments = [
+        maybe_reconcile_attachment(attachment, attachment_repo, document_storage, app_settings)
+        for attachment in attachment_repo.list_for_record(current_user.user_id, record_id)
+    ]
+    return [to_attachment_response(attachment) for attachment in sort_attachments(attachments)]
+
+
+@app.post(
+    "/records/{record_id}/attachments/upload-intent",
+    response_model=RecordAttachmentUploadIntentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_record_attachment_upload_intent(
+    record_id: str,
+    payload: RecordAttachmentUploadIntentRequest,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> RecordAttachmentUploadIntentResponse:
+    set_attachment_no_store(response)
+    require_record(record_repo, current_user.user_id, record_id)
+    require_document_storage_configured(document_storage)
+
+    try:
+        attachment = new_record_attachment(
+            user_id=current_user.user_id,
+            record_id=record_id,
+            filename=payload.filename,
+            content_type=payload.content_type,
+            size_bytes=payload.size_bytes,
+            settings=app_settings,
+            now=utc_now(),
+        )
+    except AttachmentValidationError as exc:
+        raise attachment_http_exception(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.safe_message) from exc
+
+    existing = attachment_repo.list_for_record(current_user.user_id, record_id)
+    if active_attachment_count(existing) >= app_settings.attachment_max_per_record:
+        raise attachment_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Records can have up to 5 active attachments.",
+        )
+
+    saved = attachment_repo.create_attachment(attachment)
+    try:
+        presigned_upload = document_storage.create_presigned_upload(
+            saved,
+            max_size_bytes=app_settings.attachment_max_size_bytes,
+            expires_in_seconds=UPLOAD_INTENT_EXPIRATION_SECONDS,
+        )
+    except (DocumentStorageConfigurationError, DocumentStorageOperationError) as exc:
+        attachment_repo.delete_attachment_metadata(current_user.user_id, record_id, saved.attachment_id)
+        raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
+
+    log_security_event(
+        "attachment_upload_intent_created",
+        user_id=current_user.user_id,
+        record_id=record_id,
+        attachment_id=saved.attachment_id,
+        content_type=saved.content_type,
+        size=saved.size_bytes,
+        result="created",
+    )
+    return RecordAttachmentUploadIntentResponse(
+        attachment_id=saved.attachment_id,
+        upload=presigned_upload,
+        expires_at=saved.upload_expires_at,
+        max_size_bytes=app_settings.attachment_max_size_bytes,
+    )
+
+
+@app.post("/records/{record_id}/attachments/{attachment_id}/complete", response_model=RecordAttachmentResponse)
+def complete_record_attachment_upload(
+    record_id: str,
+    attachment_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> RecordAttachmentResponse:
+    set_attachment_no_store(response)
+    require_record(record_repo, current_user.user_id, record_id)
+    require_document_storage_configured(document_storage)
+    attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
+
+    try:
+        completed = complete_attachment_upload(
+            attachment=attachment,
+            storage=document_storage,
+            settings=app_settings,
+            now=utc_now(),
+        )
+    except AttachmentValidationError as exc:
+        reject_failed_upload(attachment, attachment_repo, document_storage)
+        raise attachment_http_exception(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.safe_message) from exc
+    except (DocumentStorageConfigurationError, DocumentStorageOperationError) as exc:
+        raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
+
+    saved = attachment_repo.update_attachment(completed)
+    log_security_event(
+        "attachment_upload_completed",
+        user_id=current_user.user_id,
+        record_id=record_id,
+        attachment_id=attachment_id,
+        content_type=saved.content_type,
+        size=saved.size_bytes,
+        result="scanning",
+    )
+    return to_attachment_response(saved)
+
+
+@app.get("/records/{record_id}/attachments/{attachment_id}", response_model=RecordAttachmentResponse)
+def get_record_attachment(
+    record_id: str,
+    attachment_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> RecordAttachmentResponse:
+    set_attachment_no_store(response)
+    require_record(record_repo, current_user.user_id, record_id)
+    attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
+    return to_attachment_response(maybe_reconcile_attachment(attachment, attachment_repo, document_storage, app_settings))
+
+
+@app.post("/records/{record_id}/attachments/{attachment_id}/refresh-status", response_model=RecordAttachmentResponse)
+def refresh_record_attachment_status(
+    record_id: str,
+    attachment_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> RecordAttachmentResponse:
+    set_attachment_no_store(response)
+    require_record(record_repo, current_user.user_id, record_id)
+    attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
+    return to_attachment_response(maybe_reconcile_attachment(attachment, attachment_repo, document_storage, app_settings))
+
+
+@app.post("/records/{record_id}/attachments/{attachment_id}/download-url", response_model=RecordAttachmentDownloadUrlResponse)
+def create_record_attachment_download_url(
+    record_id: str,
+    attachment_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> RecordAttachmentDownloadUrlResponse:
+    set_attachment_no_store(response)
+    require_record(record_repo, current_user.user_id, record_id)
+    require_document_storage_configured(document_storage)
+    attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
+    attachment = maybe_reconcile_attachment(attachment, attachment_repo, document_storage, app_settings)
+
+    if attachment.status != AttachmentStatus.AVAILABLE or not attachment.clean_object_key:
+        raise attachment_http_exception(status.HTTP_409_CONFLICT, ATTACHMENT_NOT_AVAILABLE)
+
+    try:
+        document_storage.head_clean_object(attachment.clean_object_key)
+        url = document_storage.create_presigned_download(
+            attachment,
+            content_disposition=attachment_content_disposition(attachment),
+            expires_in_seconds=DOWNLOAD_URL_EXPIRATION_SECONDS,
+        )
+    except (DocumentStorageConfigurationError, DocumentStorageOperationError) as exc:
+        raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
+
+    log_security_event(
+        "attachment_download_url_issued",
+        user_id=current_user.user_id,
+        record_id=record_id,
+        attachment_id=attachment_id,
+        content_type=attachment.content_type,
+        size=attachment.size_bytes,
+        result="issued",
+    )
+    return RecordAttachmentDownloadUrlResponse(
+        url=url,
+        expires_at=utc_now() + timedelta(seconds=DOWNLOAD_URL_EXPIRATION_SECONDS),
+    )
+
+
+@app.delete("/records/{record_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_record_attachment(
+    record_id: str,
+    attachment_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+) -> Response:
+    require_record(record_repo, current_user.user_id, record_id)
+    attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
+    cleanup_attachment_or_raise(attachment, attachment_repo, document_storage)
+    log_security_event(
+        "attachment_deleted",
+        user_id=current_user.user_id,
+        record_id=record_id,
+        attachment_id=attachment_id,
+        content_type=attachment.content_type,
+        size=attachment.size_bytes,
+        result="deleted",
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers=no_store_headers())
 
 
 @app.get("/records/{record_id}/protected/status", response_model=ProtectedRecordStatusResponse)
@@ -1425,6 +1705,148 @@ def require_record(repo: RecordRepository, user_id: str, record_id: str) -> Reco
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
     return record
+
+
+def require_attachment(
+    repo: RecordAttachmentRepository,
+    user_id: str,
+    record_id: str,
+    attachment_id: str,
+) -> RecordAttachment:
+    attachment = repo.get_attachment(user_id, record_id, attachment_id)
+    if attachment is None:
+        raise attachment_http_exception(status.HTTP_404_NOT_FOUND, "Attachment not found")
+
+    return attachment
+
+
+def require_document_storage_configured(document_storage) -> None:
+    if not getattr(document_storage, "configured", False):
+        raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, DocumentStorageConfigurationError.safe_message)
+
+
+def maybe_reconcile_attachment(
+    attachment: RecordAttachment,
+    repo: RecordAttachmentRepository,
+    document_storage,
+    settings: Settings,
+) -> RecordAttachment:
+    if not getattr(document_storage, "configured", False):
+        return attachment
+    try:
+        return reconcile_attachment_scan_status(
+            attachment=attachment,
+            repo=repo,
+            storage=document_storage,
+            settings=settings,
+            now=utc_now(),
+        )
+    except (DocumentStorageConfigurationError, DocumentStorageOperationError):
+        return attachment
+
+
+def reject_failed_upload(
+    attachment: RecordAttachment,
+    repo: RecordAttachmentRepository,
+    document_storage,
+) -> None:
+    if attachment.quarantine_object_key and getattr(document_storage, "configured", False):
+        try:
+            document_storage.delete_quarantine_object(attachment.quarantine_object_key)
+        except DocumentStorageOperationError:
+            log_security_event(
+                "attachment_cleanup_failed",
+                user_id=attachment.user_id,
+                record_id=attachment.record_id,
+                attachment_id=attachment.attachment_id,
+                content_type=attachment.content_type,
+                size=attachment.size_bytes,
+                result="quarantine_delete_failed",
+            )
+
+    repo.update_attachment(
+        attachment.model_copy(
+            update={
+                "status": AttachmentStatus.REJECTED,
+                "scan_result": AttachmentScanResult.FAILED,
+                "quarantine_object_key": None,
+                "clean_object_key": None,
+            }
+        )
+    )
+
+
+def cleanup_record_attachments_before_delete(
+    user_id: str,
+    record_id: str,
+    repo: RecordAttachmentRepository,
+    document_storage,
+) -> None:
+    for attachment in repo.list_for_record(user_id, record_id):
+        cleanup_attachment_or_raise(attachment, repo, document_storage)
+
+
+def cleanup_attachment_or_raise(
+    attachment: RecordAttachment,
+    repo: RecordAttachmentRepository,
+    document_storage,
+) -> None:
+    try:
+        if attachment.quarantine_object_key:
+            require_document_storage_configured(document_storage)
+            document_storage.delete_quarantine_object(attachment.quarantine_object_key)
+        if attachment.clean_object_key:
+            require_document_storage_configured(document_storage)
+            document_storage.delete_clean_object(attachment.clean_object_key)
+        repo.delete_attachment_metadata(attachment.user_id, attachment.record_id, attachment.attachment_id)
+    except HTTPException:
+        log_attachment_cleanup_failed(attachment, "storage_not_configured")
+        raise
+    except DocumentStorageOperationError as exc:
+        log_attachment_cleanup_failed(attachment, "object_delete_failed")
+        raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
+
+
+def log_attachment_cleanup_failed(attachment: RecordAttachment, result: str) -> None:
+    log_security_event(
+        "attachment_cleanup_failed",
+        user_id=attachment.user_id,
+        record_id=attachment.record_id,
+        attachment_id=attachment.attachment_id,
+        content_type=attachment.content_type,
+        size=attachment.size_bytes,
+        result=result,
+    )
+
+
+def to_attachment_response(attachment: RecordAttachment) -> RecordAttachmentResponse:
+    return RecordAttachmentResponse(
+        attachment_id=attachment.attachment_id,
+        record_id=attachment.record_id,
+        display_name=attachment.display_name,
+        content_type=attachment.content_type,
+        size_bytes=attachment.size_bytes,
+        status=attachment.status,
+        scan_result=attachment.scan_result,
+        created_at=attachment.created_at,
+        uploaded_at=attachment.uploaded_at,
+        scan_completed_at=attachment.scan_completed_at,
+        available_at=attachment.available_at,
+        deleted_at=attachment.deleted_at,
+    )
+
+
+def no_store_headers() -> dict[str, str]:
+    return {"Cache-Control": "no-store, private", "Pragma": "no-cache"}
+
+
+def set_attachment_no_store(response: Response) -> None:
+    for header, value in no_store_headers().items():
+        response.headers[header] = value
+
+
+def attachment_http_exception(status_code: int, detail: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail=detail, headers=no_store_headers())
 
 
 def to_record_response(record: Record) -> RecordResponse:

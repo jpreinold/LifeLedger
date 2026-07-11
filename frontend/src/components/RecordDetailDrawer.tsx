@@ -1,5 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Archive, Eye, EyeOff, LockKeyhole, Pencil, RotateCcw, Trash2, X } from 'lucide-react'
+import { type ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  AlertCircle,
+  Archive,
+  Download,
+  Eye,
+  EyeOff,
+  FileImage,
+  FileText,
+  FileUp,
+  LockKeyhole,
+  Pencil,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react'
 
 import { recordsApi } from '../api/recordsApi'
 import {
@@ -11,7 +26,8 @@ import {
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
-import type { LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
+import type { LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus, RecordAttachment } from '../types/record'
+import { ConfirmDialog } from './ConfirmDialog'
 import { SheetDrawer } from './SheetDrawer'
 
 interface RecordDetailDrawerProps {
@@ -31,6 +47,11 @@ interface DetailRow {
 
 const drawerCloseMs = 220
 const protectedRevealMs = 60_000
+const attachmentPollMs = 4_000
+const attachmentMaxSizeBytes = 10 * 1024 * 1024
+const attachmentMaxPerRecord = 5
+const allowedAttachmentTypes = new Set(['application/pdf', 'image/jpeg', 'image/png'])
+const allowedAttachmentExtensions = new Set(['.pdf', '.jpg', '.jpeg', '.png'])
 
 export function RecordDetailDrawer({
   record,
@@ -47,8 +68,16 @@ export function RecordDetailDrawer({
   const [isClearingProtected, setIsClearingProtected] = useState(false)
   const [protectedPayload, setProtectedPayload] = useState<ProtectedRecordPayload | null>(null)
   const [protectedError, setProtectedError] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<RecordAttachment[]>([])
+  const [isAttachmentsLoading, setIsAttachmentsLoading] = useState(false)
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
+  const [isDeletingAttachment, setIsDeletingAttachment] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  const [attachmentMessage, setAttachmentMessage] = useState<string | null>(null)
+  const [pendingAttachmentDelete, setPendingAttachmentDelete] = useState<RecordAttachment | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
   const revealTimerRef = useRef<number | null>(null)
   const definition = getRecordTypeDefinition(record.record_type)
@@ -68,11 +97,42 @@ export function RecordDetailDrawer({
       revealTimerRef.current = null
     }
   }, [])
+  const clearAttachmentTransientState = useCallback(() => {
+    setAttachmentError(null)
+    setAttachmentMessage(null)
+    setIsUploadingAttachment(false)
+    setIsDeletingAttachment(false)
+    setPendingAttachmentDelete(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [])
+  const loadAttachments = useCallback(
+    async (options: { quiet?: boolean } = {}) => {
+      if (!options.quiet) {
+        setIsAttachmentsLoading(true)
+      }
+      try {
+        const nextAttachments = await recordsApi.listAttachments(record.id)
+        setAttachments(nextAttachments)
+      } catch (requestError) {
+        setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to load attachments.')
+      } finally {
+        if (!options.quiet) {
+          setIsAttachmentsLoading(false)
+        }
+      }
+    },
+    [record.id],
+  )
 
   useEffect(() => {
     clearProtectedState()
+    clearAttachmentTransientState()
+    setAttachments([])
     setIsDrawerOpen(false)
     resetDetailScroll()
+    void loadAttachments()
     openFrameRef.current = window.requestAnimationFrame(() => {
       resetDetailScroll()
       setIsDrawerOpen(true)
@@ -84,7 +144,7 @@ export function RecordDetailDrawer({
         window.cancelAnimationFrame(openFrameRef.current)
       }
     }
-  }, [clearProtectedState, record.id, resetDetailScroll])
+  }, [clearAttachmentTransientState, clearProtectedState, loadAttachments, record.id, resetDetailScroll])
 
   useEffect(() => {
     return () => {
@@ -115,6 +175,7 @@ export function RecordDetailDrawer({
     function handleVisibilityChange() {
       if (document.visibilityState === 'hidden') {
         clearProtectedState()
+        clearAttachmentTransientState()
       }
     }
 
@@ -122,19 +183,33 @@ export function RecordDetailDrawer({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [clearProtectedState])
+  }, [clearAttachmentTransientState, clearProtectedState])
+
+  useEffect(() => {
+    if (!isDrawerOpen || !attachments.some((attachment) => isAttachmentPendingScan(attachment))) {
+      return undefined
+    }
+
+    const pollId = window.setInterval(() => {
+      void loadAttachments({ quiet: true })
+    }, attachmentPollMs)
+
+    return () => window.clearInterval(pollId)
+  }, [attachments, isDrawerOpen, loadAttachments])
 
   const requestClose = useCallback(() => {
     clearProtectedState()
+    clearAttachmentTransientState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onClose()
     }, drawerCloseMs)
-  }, [clearProtectedState, onClose])
+  }, [clearAttachmentTransientState, clearProtectedState, onClose])
 
   function handleEdit() {
     clearProtectedState()
+    clearAttachmentTransientState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
@@ -183,19 +258,97 @@ export function RecordDetailDrawer({
     }
   }
 
-  return (
-    <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
-      <div className="sheet-header detail-header">
-        <div>
-          <h2 id="record-detail-heading">Record details</h2>
-          <p>{definition.label}</p>
-        </div>
-        <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
-          <X size={19} aria-hidden="true" />
-        </button>
-      </div>
+  function handleChooseAttachment() {
+    setAttachmentError(null)
+    setAttachmentMessage(null)
+    fileInputRef.current?.click()
+  }
 
-      <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
+  async function handleAttachmentFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    event.currentTarget.value = ''
+    if (!file) {
+      return
+    }
+
+    const validationError = validateAttachmentFile(file, attachments)
+    if (validationError) {
+      setAttachmentError(validationError)
+      setAttachmentMessage(null)
+      return
+    }
+
+    setIsUploadingAttachment(true)
+    setAttachmentError(null)
+    setAttachmentMessage(null)
+
+    try {
+      const intent = await recordsApi.createAttachmentUploadIntent(record.id, {
+        filename: file.name,
+        content_type: file.type,
+        size_bytes: file.size,
+      })
+      await recordsApi.uploadAttachmentFile(intent.upload, file)
+      const completed = await recordsApi.completeAttachmentUpload(record.id, intent.attachment_id)
+      setAttachments((current) => upsertAttachment(current, completed))
+      setAttachmentMessage('File uploaded. Security scan in progress.')
+      void loadAttachments({ quiet: true })
+    } catch (requestError) {
+      setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to upload attachment.')
+    } finally {
+      setIsUploadingAttachment(false)
+    }
+  }
+
+  async function handleDownloadAttachment(attachment: RecordAttachment) {
+    if (attachment.status !== 'available') {
+      return
+    }
+
+    setAttachmentError(null)
+    setAttachmentMessage(null)
+    try {
+      const download = await recordsApi.createAttachmentDownloadUrl(record.id, attachment.attachment_id)
+      window.location.assign(download.url)
+    } catch (requestError) {
+      setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to download attachment.')
+    }
+  }
+
+  async function confirmDeleteAttachment() {
+    if (!pendingAttachmentDelete) {
+      return
+    }
+
+    setIsDeletingAttachment(true)
+    setAttachmentError(null)
+    setAttachmentMessage(null)
+    try {
+      await recordsApi.deleteAttachment(record.id, pendingAttachmentDelete.attachment_id)
+      setAttachments((current) => current.filter((attachment) => attachment.attachment_id !== pendingAttachmentDelete.attachment_id))
+      setPendingAttachmentDelete(null)
+      setAttachmentMessage('Attachment deleted.')
+    } catch (requestError) {
+      setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to delete attachment.')
+    } finally {
+      setIsDeletingAttachment(false)
+    }
+  }
+
+  return (
+    <>
+      <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
+        <div className="sheet-header detail-header">
+          <div>
+            <h2 id="record-detail-heading">Record details</h2>
+            <p>{definition.label}</p>
+          </div>
+          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
+            <X size={19} aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
         <section className={`detail-hero tone-${definition.tone}`} aria-labelledby="record-detail-title">
           <div className={`category-icon category-icon-large tone-${definition.tone}`} aria-hidden="true">
             <Icon size={30} />
@@ -268,6 +421,17 @@ export function RecordDetailDrawer({
           onReveal={() => void handleRevealProtected()}
         />
 
+        <AttachmentsSection
+          attachments={attachments}
+          error={attachmentError}
+          isLoading={isAttachmentsLoading}
+          isUploading={isUploadingAttachment}
+          message={attachmentMessage}
+          onChooseFile={handleChooseAttachment}
+          onDelete={setPendingAttachmentDelete}
+          onDownload={(attachment) => void handleDownloadAttachment(attachment)}
+        />
+
         <DetailSection
           title="History"
           rows={[
@@ -291,7 +455,141 @@ export function RecordDetailDrawer({
           Delete
         </button>
       </section>
+      <input
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+        className="attachment-file-input"
+        ref={fileInputRef}
+        onChange={(event) => void handleAttachmentFileChange(event)}
+      />
     </SheetDrawer>
+      <ConfirmDialog
+        body={pendingAttachmentDelete ? `Delete ${pendingAttachmentDelete.display_name}? This removes the stored file.` : ''}
+        confirmLabel="Delete attachment"
+        isBusy={isDeletingAttachment}
+        isOpen={pendingAttachmentDelete !== null}
+        title="Delete attachment?"
+        onCancel={() => setPendingAttachmentDelete(null)}
+        onConfirm={() => void confirmDeleteAttachment()}
+      />
+    </>
+  )
+}
+
+function AttachmentsSection({
+  attachments,
+  error,
+  isLoading,
+  isUploading,
+  message,
+  onChooseFile,
+  onDelete,
+  onDownload,
+}: {
+  attachments: RecordAttachment[]
+  error: string | null
+  isLoading: boolean
+  isUploading: boolean
+  message: string | null
+  onChooseFile: () => void
+  onDelete: (attachment: RecordAttachment) => void
+  onDownload: (attachment: RecordAttachment) => void
+}) {
+  const activeCount = activeAttachmentCount(attachments)
+  const canAddAttachment = activeCount < attachmentMaxPerRecord && !isUploading
+
+  return (
+    <section className="detail-section attachments-section" aria-label="Attachments">
+      <div className="attachments-heading">
+        <div>
+          <h3>Attachments</h3>
+          <p>Files are encrypted in storage and scanned before they become available.</p>
+        </div>
+        <ShieldCheck size={18} aria-hidden="true" />
+      </div>
+
+      <div className="attachments-toolbar">
+        <button type="button" className="secondary-button attachment-add-button" disabled={!canAddAttachment} onClick={onChooseFile}>
+          <FileUp size={16} aria-hidden="true" />
+          {isUploading ? 'Uploading...' : 'Add document'}
+        </button>
+        <span>{activeCount}/{attachmentMaxPerRecord} attached - PDF, JPEG, PNG - 10 MB max</span>
+      </div>
+
+      {error ? (
+        <p className="field-error attachment-message">
+          <AlertCircle size={14} aria-hidden="true" />
+          {error}
+        </p>
+      ) : null}
+      {message ? <p className="attachment-message attachment-message-success">{message}</p> : null}
+
+      {isLoading ? <p className="attachments-empty">Loading attachments...</p> : null}
+      {!isLoading && attachments.length === 0 ? <p className="attachments-empty">No attachments yet.</p> : null}
+
+      {!isLoading && attachments.length > 0 ? (
+        <div className="attachments-list">
+          {attachments.map((attachment) => (
+            <AttachmentRow
+              attachment={attachment}
+              key={attachment.attachment_id}
+              onDelete={() => onDelete(attachment)}
+              onDownload={() => onDownload(attachment)}
+              onRetry={onChooseFile}
+            />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function AttachmentRow({
+  attachment,
+  onDelete,
+  onDownload,
+  onRetry,
+}: {
+  attachment: RecordAttachment
+  onDelete: () => void
+  onDownload: () => void
+  onRetry: () => void
+}) {
+  const Icon = attachment.content_type.startsWith('image/') ? FileImage : FileText
+  const statusLabel = getAttachmentStatusLabel(attachment)
+  const statusClass = getAttachmentStatusClass(attachment)
+  const dateLabel = formatAttachmentDate(attachment.available_at ?? attachment.uploaded_at ?? attachment.created_at)
+  const isAvailable = attachment.status === 'available'
+  const isFailed = attachment.status === 'rejected' || attachment.status === 'scan_failed'
+
+  return (
+    <article className="attachment-row">
+      <div className="attachment-main">
+        <span className="attachment-icon" aria-hidden="true">
+          <Icon size={18} />
+        </span>
+        <div className="attachment-copy">
+          <strong>{attachment.display_name}</strong>
+          <span>{formatAttachmentSize(attachment.size_bytes)} - {dateLabel}</span>
+          <small className={statusClass}>{statusLabel}</small>
+        </div>
+      </div>
+      <div className="attachment-actions">
+        {isAvailable ? (
+          <button type="button" className="icon-button attachment-action-button" onClick={onDownload} aria-label={`Download ${attachment.display_name}`}>
+            <Download size={16} aria-hidden="true" />
+          </button>
+        ) : null}
+        {isFailed ? (
+          <button type="button" className="icon-button attachment-action-button" onClick={onRetry} aria-label="Retry with another file">
+            <FileUp size={16} aria-hidden="true" />
+          </button>
+        ) : null}
+        <button type="button" className="icon-button attachment-action-button attachment-delete-action" onClick={onDelete} aria-label={`Delete ${attachment.display_name}`}>
+          <Trash2 size={15} aria-hidden="true" />
+        </button>
+      </div>
+    </article>
   )
 }
 
@@ -402,4 +700,97 @@ function ProtectedDetailsSection({
 
 function hasValue(value: string | null | undefined) {
   return value !== null && value !== undefined && value.trim().length > 0
+}
+
+function validateAttachmentFile(file: File, attachments: RecordAttachment[]) {
+  if (activeAttachmentCount(attachments) >= attachmentMaxPerRecord) {
+    return 'Records can have up to 5 active attachments.'
+  }
+  if (file.size <= 0) {
+    return 'File must not be empty.'
+  }
+  if (file.size > attachmentMaxSizeBytes) {
+    return 'File is larger than the 10 MB limit.'
+  }
+  if (!allowedAttachmentTypes.has(file.type)) {
+    return 'Only PDF, JPEG, and PNG files are supported.'
+  }
+  const extension = getFileExtension(file.name)
+  if (!allowedAttachmentExtensions.has(extension)) {
+    return 'Only PDF, JPEG, and PNG files are supported.'
+  }
+  if (file.type === 'application/pdf' && extension !== '.pdf') {
+    return 'Filename extension does not match the selected file type.'
+  }
+  if (file.type === 'image/png' && extension !== '.png') {
+    return 'Filename extension does not match the selected file type.'
+  }
+  if (file.type === 'image/jpeg' && extension !== '.jpg' && extension !== '.jpeg') {
+    return 'Filename extension does not match the selected file type.'
+  }
+  return null
+}
+
+function activeAttachmentCount(attachments: RecordAttachment[]) {
+  return attachments.filter((attachment) => ['pending_upload', 'uploaded', 'scanning', 'available'].includes(attachment.status)).length
+}
+
+function upsertAttachment(attachments: RecordAttachment[], nextAttachment: RecordAttachment) {
+  const exists = attachments.some((attachment) => attachment.attachment_id === nextAttachment.attachment_id)
+  if (exists) {
+    return attachments.map((attachment) => (attachment.attachment_id === nextAttachment.attachment_id ? nextAttachment : attachment))
+  }
+  return [...attachments, nextAttachment]
+}
+
+function isAttachmentPendingScan(attachment: RecordAttachment) {
+  return attachment.status === 'uploaded' || attachment.status === 'scanning'
+}
+
+function getFileExtension(filename: string) {
+  const dotIndex = filename.lastIndexOf('.')
+  return dotIndex === -1 ? '' : filename.slice(dotIndex).toLowerCase()
+}
+
+function getAttachmentStatusLabel(attachment: RecordAttachment) {
+  if (attachment.status === 'available') {
+    return 'Available - security scanned'
+  }
+  if (attachment.status === 'rejected') {
+    return attachment.scan_result === 'threats_found' ? 'File failed security scan.' : 'File could not be accepted.'
+  }
+  if (attachment.status === 'scan_failed') {
+    return 'Scan failed. Delete and retry with a supported file.'
+  }
+  if (attachment.status === 'pending_upload') {
+    return 'Waiting for upload'
+  }
+  if (attachment.status === 'deleting') {
+    return 'Deleting'
+  }
+  return 'Scanning before download'
+}
+
+function getAttachmentStatusClass(attachment: RecordAttachment) {
+  if (attachment.status === 'available') {
+    return 'attachment-status attachment-status-available'
+  }
+  if (attachment.status === 'rejected' || attachment.status === 'scan_failed') {
+    return 'attachment-status attachment-status-failed'
+  }
+  return 'attachment-status attachment-status-scanning'
+}
+
+function formatAttachmentSize(sizeBytes: number) {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / (1024 * 1024)).toFixed(sizeBytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`
+  }
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`
+}
+
+function formatAttachmentDate(value: string | null) {
+  if (!value) {
+    return 'Date unknown'
+  }
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 }

@@ -33,10 +33,19 @@ def test_sam_template_defaults_to_local_persistence():
     assert "AllowAdminCreateUserOnly: true" in template
     assert "LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json" in template
     assert "LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json" in template
+    assert "LOCAL_RECORD_ATTACHMENTS_FILE: /tmp/lifeledger-record-attachments.json" in template
     assert "LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json" in template
     assert "LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json" in template
     assert "PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable" in template
     assert "RECORDS_TABLE_NAME: !Ref RecordsTable" in template
+    assert "RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable" in template
+    assert "DocumentStorageMode:" in template
+    assert "DOCUMENT_STORAGE_MODE: !Ref DocumentStorageMode" in template
+    assert "DOCUMENTS_QUARANTINE_BUCKET: !Ref DocumentsQuarantineBucket" in template
+    assert "DOCUMENTS_CLEAN_BUCKET: !Ref DocumentsCleanBucket" in template
+    assert "DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn" in template
+    assert "ATTACHMENT_MAX_SIZE_BYTES: !Ref AttachmentMaxSizeBytes" in template
+    assert "ATTACHMENT_MAX_PER_RECORD: !Ref AttachmentMaxPerRecord" in template
     assert "GoogleClientId:" in template
     assert "GoogleOAuthSecretArn:" in template
     assert "GoogleOAuthRedirectUri:" in template
@@ -60,6 +69,19 @@ def test_sam_template_defaults_to_local_persistence():
     assert "LifeLedgerDataEncryptionKey:" in template
     assert "EnableKeyRotation: true" in template
     assert "LifeLedgerDataEncryptionAlias:" in template
+    assert "LifeLedgerDocumentsKey:" in template
+    assert "LifeLedgerDocumentsKeyAlias:" in template
+    assert "alias/${AWS::StackName}-documents" in template
+    assert "DocumentsQuarantineBucket:" in template
+    assert "DocumentsCleanBucket:" in template
+    assert "BlockPublicAcls: true" in template
+    assert "ObjectOwnership: BucketOwnerEnforced" in template
+    assert "BucketKeyEnabled: true" in template
+    assert "ExpireAbandonedQuarantineUploads" in template
+    assert "RecordAttachmentsTable:" in template
+    assert "OwnerHashRecordAttachmentIndex" in template
+    assert "AWS::GuardDuty::MalwareProtectionPlan" in template
+    assert "GuardDuty Malware Protection Object Scan Result" in template
     assert "DATA_ENCRYPTION_KMS_KEY_ARN: !GetAtt LifeLedgerDataEncryptionKey.Arn" in template
     assert "kms:GenerateDataKey" in template
     assert "kms:Decrypt" in template
@@ -85,10 +107,15 @@ def test_sam_template_defaults_to_local_persistence():
     assert "PointInTimeRecoveryEnabled: true" in template
     assert "DataEncryptionKeyArn:" in template
     assert "DataEncryptionKeyAlias:" in template
+    assert "DocumentsKeyArn:" in template
+    assert "DocumentsQuarantineBucketName:" in template
+    assert "RecordAttachmentsTableName:" in template
 
     digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "RemindersTable:")
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
     assert "kms:EncryptionContext:app" not in digest_section
+    assert "DOCUMENTS_QUARANTINE_BUCKET" not in digest_section
+    assert "LifeLedgerDocumentsKey" not in digest_section
 
 
 def test_sam_kms_permissions_split_app_and_dynamodb_access():
@@ -100,6 +127,10 @@ def test_sam_kms_permissions_split_app_and_dynamodb_access():
     assert "kms:Decrypt" in api_section
     assert "kms:EncryptionContext:app: lifeledger" in api_section
     assert "DATA_ENCRYPTION_KMS_KEY_ARN: !GetAtt LifeLedgerDataEncryptionKey.Arn" in api_section
+    assert "DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn" in api_section
+    assert "Resource: !GetAtt LifeLedgerDocumentsKey.Arn" in api_section
+    assert "Resource: !Sub \"${DocumentsQuarantineBucket.Arn}/quarantine/*\"" in api_section
+    assert "Resource: !Sub \"${DocumentsCleanBucket.Arn}/clean/*\"" in api_section
 
     for section in (api_section, digest_section):
         assert "kms:Encrypt" in section
@@ -116,6 +147,7 @@ def test_sam_kms_permissions_split_app_and_dynamodb_access():
 
     assert "kms:EncryptionContext:app" not in digest_section
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
+    assert "LifeLedgerDocumentsKey" not in digest_section
 
 
 def test_sam_local_env_file_uses_local_persistence():
@@ -127,10 +159,12 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["PERSISTENCE_MODE"] == "local"
     assert function_env["LOCAL_DATA_FILE"] == "/tmp/lifeledger-reminders.json"
     assert function_env["LOCAL_RECORDS_FILE"] == "/tmp/lifeledger-records.json"
+    assert function_env["LOCAL_RECORD_ATTACHMENTS_FILE"] == "/tmp/lifeledger-record-attachments.json"
     assert function_env["LOCAL_PREFERENCES_FILE"] == "/tmp/lifeledger-preferences.json"
     assert function_env["LOCAL_PUSH_SUBSCRIPTIONS_FILE"] == "/tmp/lifeledger-push-subscriptions.json"
     assert function_env["PUSH_SUBSCRIPTIONS_TABLE_NAME"] == "lifeledger-push-subscriptions-auth"
     assert function_env["RECORDS_TABLE_NAME"] == "lifeledger-records-auth"
+    assert function_env["RECORD_ATTACHMENTS_TABLE_NAME"] == "lifeledger-record-attachments-auth"
     assert function_env["GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME"] == "lifeledger-google-calendar-connections-auth"
     assert function_env["GOOGLE_OAUTH_STATES_TABLE_NAME"] == "lifeledger-google-oauth-states-auth"
     assert function_env["LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE"] == "/tmp/lifeledger-google-calendar-connections.json"
@@ -138,6 +172,12 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["DATA_ENCRYPTION_KMS_KEY_ARN"] == ""
     assert function_env["RECORD_ENCRYPTION_MODE"] == "disabled"
     assert function_env["LOCAL_RECORDS_ENCRYPTION_KEY"] == ""
+    assert function_env["DOCUMENT_STORAGE_MODE"] == "disabled"
+    assert function_env["DOCUMENTS_QUARANTINE_BUCKET"] == ""
+    assert function_env["DOCUMENTS_CLEAN_BUCKET"] == ""
+    assert function_env["DOCUMENTS_KMS_KEY_ARN"] == ""
+    assert function_env["ATTACHMENT_MAX_SIZE_BYTES"] == "10485760"
+    assert function_env["ATTACHMENT_MAX_PER_RECORD"] == "5"
     assert function_env["GOOGLE_OAUTH_SECRET_ARN"] == ""
     assert function_env["PUSH_SECRET_ARN"] == ""
     assert function_env["ALLOW_PLAINTEXT_PRODUCTION_SECRETS"] == "false"
@@ -157,7 +197,15 @@ def test_sam_local_env_file_uses_local_persistence():
     digest_env = env_file["LifeLedgerDigestPushFunction"]
     assert digest_env["PERSISTENCE_MODE"] == "local"
     assert digest_env["LOCAL_RECORDS_FILE"] == "/tmp/lifeledger-records.json"
+    assert digest_env["LOCAL_RECORD_ATTACHMENTS_FILE"] == "/tmp/lifeledger-record-attachments.json"
     assert digest_env["LOCAL_PUSH_SUBSCRIPTIONS_FILE"] == "/tmp/lifeledger-push-subscriptions.json"
     assert digest_env["PUSH_SECRET_ARN"] == ""
     assert digest_env["ALLOW_PLAINTEXT_PRODUCTION_SECRETS"] == "false"
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_env
+    assert "DOCUMENTS_KMS_KEY_ARN" not in digest_env
+
+    finalizer_env = env_file["LifeLedgerAttachmentScanFinalizerFunction"]
+    assert finalizer_env["PERSISTENCE_MODE"] == "local"
+    assert finalizer_env["LOCAL_RECORD_ATTACHMENTS_FILE"] == "/tmp/lifeledger-record-attachments.json"
+    assert finalizer_env["RECORD_ATTACHMENTS_TABLE_NAME"] == "lifeledger-record-attachments-auth"
+    assert finalizer_env["DOCUMENT_STORAGE_MODE"] == "disabled"

@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Google Calendar sync is available as a one-way, per-reminder integration from LifeLedger to the user's selected Google Calendar. Records are now first-class, structured personal entities that users can create, view, edit, archive, restore, and delete, with optional protected details encrypted at the application layer before persistence. Google OAuth token bundles are also application-encrypted when encryption is enabled. Email, SMS, public sign-up, document uploads, AI, and automatic record-to-reminder generation are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, records, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Google Calendar sync is available as a one-way, per-reminder integration from LifeLedger to the user's selected Google Calendar. Records are now first-class, structured personal entities that users can create, view, edit, archive, restore, delete, and attach scanned PDF/JPEG/PNG files to after malware scanning. Optional protected details are encrypted at the application layer before persistence. Google OAuth token bundles are also application-encrypted when encryption is enabled. Email, SMS, public sign-up, OCR, AI/RAG, document preview, file sharing, and automatic record-to-reminder generation are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, records, record attachments, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -103,7 +103,7 @@ Cognito authenticates deployed users before private routes reach the backend, an
 
 This is not zero-knowledge or end-to-end encryption. The authenticated LifeLedger backend can decrypt protected fields after it verifies that the record belongs to the current user and the user explicitly requests reveal. Ordinary list/detail APIs, Daily Digest, push payloads, calendar event descriptions, URLs, service-worker caches, and record cards do not include protected plaintext.
 
-Protected fields are stored separately from normal metadata. Supported protected fields are `document_number`, `license_number`, `vin`, `policy_number`, `member_number`, `serial_number`, `account_reference`, and `sensitive_notes`, with fields limited by record type. LifeLedger still does not support storing SSNs, payment card data, bank account or routing numbers, passwords, PINs, MFA or recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, file uploads, images, scans, OCR, AI/RAG, shared household access, or global search over protected fields.
+Protected fields are stored separately from normal metadata. Supported protected fields are `document_number`, `license_number`, `vin`, `policy_number`, `member_number`, `serial_number`, `account_reference`, and `sensitive_notes`, with fields limited by record type. LifeLedger still does not support storing SSNs, payment card data, bank account or routing numbers, passwords, PINs, MFA or recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, OCR, AI/RAG, shared household access, file sharing, public links, document preview, reminder attachments, or global search over protected fields/files.
 
 Protected record routes:
 
@@ -111,6 +111,79 @@ Protected record routes:
 - `PUT /records/{id}/protected` replaces protected fields after ownership validation and immediate encryption.
 - `GET /records/{id}/protected` explicitly reveals plaintext after ownership validation and returns `Cache-Control: no-store, private`.
 - `DELETE /records/{id}/protected` clears the encrypted protected payload and leaves normal record metadata intact.
+
+## Secure Record Document Storage
+
+Records can have up to five active PDF, JPEG, or PNG attachments, each limited to 10 MB. The frontend never sends `user_id`; the backend derives ownership from Cognito/local auth, verifies the record belongs to that user, and stores attachment metadata in `lifeledger-record-attachments-auth` using `user_id` plus `<record_id>#<attachment_id>`. Normal attachment responses never include object keys, bucket names, KMS details, or presigned URLs.
+
+This is not zero-knowledge or end-to-end encrypted storage. Authorized LifeLedger backend roles, Amazon S3, AWS KMS, and GuardDuty Malware Protection for S3 can access decrypted file contents for storage, scanning, validation, download, and deletion workflows. Do not upload passwords, private keys, seed phrases, recovery codes, banking secrets, payment-card data, or highly sensitive medical records.
+
+Storage uses two retained private S3 buckets with Block Public Access on, Bucket owner enforced object ownership, no static website hosting, and SSE-KMS defaults using a separate customer-managed document key (`alias/${AWS::StackName}-documents`) with rotation enabled. Quarantine objects are written under `quarantine/<owner_hash>/<record_id>/<attachment_id>/object`; clean objects are written under `clean/<owner_hash>/<record_id>/<attachment_id>/object`. Original filenames are never used in object keys.
+
+Upload flow:
+
+- The browser requests `POST /records/{id}/attachments/upload-intent` with filename, MIME type, and size only.
+- The backend validates extension, declared MIME type, size, attachment count, and record ownership, then creates pending metadata.
+- The backend returns a short-lived presigned POST for one exact quarantine key, with content-length, content type, SSE-KMS, and document-key conditions.
+- The browser posts the file directly to S3 and then calls `POST /records/{id}/attachments/{attachment_id}/complete`.
+- Completion checks the exact object with `HeadObject`, including length, stored content type, SSE-KMS, and expected document KMS key. Invalid uploads are deleted and rejected.
+
+Scan and promotion flow:
+
+- GuardDuty Malware Protection protects the quarantine `quarantine/` prefix and managed tagging is enabled.
+- Files stay unavailable until the object tag `GuardDutyMalwareScanStatus=NO_THREATS_FOUND` is present.
+- `THREATS_FOUND`, `UNSUPPORTED`, `ACCESS_DENIED`, and `FAILED` never promote and never download.
+- An EventBridge rule forwards official `GuardDuty Malware Protection Object Scan Result` events to the attachment scan finalizer Lambda.
+- Attachment list/detail/refresh endpoints also reconcile the managed object tag, so delayed or missed EventBridge events recover safely.
+- Before promotion, the backend re-checks size, content type, SSE-KMS, and magic bytes (`%PDF-`, PNG signature, or JPEG `FF D8 FF`), copies only clean files into the clean bucket with SSE-KMS, verifies the clean object, deletes quarantine, and marks the attachment available.
+
+Download and delete flow:
+
+- `POST /records/{id}/attachments/{attachment_id}/download-url` works only for owned attachments with `status=available` and a clean object key. It returns a fresh presigned GET URL valid for about 60 seconds with `Content-Disposition: attachment`, expected content type, and `Cache-Control: no-store, private`.
+- List/detail endpoints return metadata only and no URLs.
+- `DELETE /records/{id}/attachments/{attachment_id}` deletes quarantine and clean objects if present before removing metadata. Deleting a record cleans up associated attachment objects first and fails instead of silently orphaning known private objects.
+
+Browser protections:
+
+- Attachment API responses use `Cache-Control: no-store, private` and `Pragma: no-cache`.
+- The service worker bypasses `/records/*/attachments*` and S3 presigned upload/download traffic.
+- The frontend does not write attachment bytes, files, presigned URLs, or filenames to localStorage, sessionStorage, IndexedDB, Cache Storage, push notifications, digest content, calendar descriptions, or analytics.
+- Cloudflare receives only public Vite configuration. AWS credentials, KMS material, bucket policies, and presigning stay in AWS.
+
+Local development defaults to `DOCUMENT_STORAGE_MODE=disabled`. The accepted `local` value is reserved for a future explicit fake adapter and currently fails closed with the same "not configured" behavior; local uploaded files are not stored or presented as secure.
+
+Operational setup:
+
+1. Deploy the SAM stack with `DocumentStorageMode=s3` and `MalwareProtectionEnabled=true`.
+2. Confirm the SAM-created `AWS::GuardDuty::MalwareProtectionPlan` is active for the quarantine bucket/prefix and managed tagging is enabled. If your account or Region blocks this resource, enable Malware Protection for S3 manually in GuardDuty for the quarantine bucket `quarantine/` prefix with tag objects enabled.
+3. Redeploy Cloudflare Pages so the attachment UI and CSP updates are live.
+4. Test with non-sensitive sample PDF/JPEG/PNG files only.
+
+Production verification checklist:
+
+- Both document buckets show Block all public access: On.
+- Object Ownership is Bucket owner enforced.
+- Default encryption is SSE-KMS with the LifeLedger document key and S3 Bucket Keys enabled.
+- The document KMS key has rotation enabled and is retained.
+- Quarantine lifecycle expires abandoned quarantine objects after about one day; clean documents do not expire.
+- Clean bucket has no public policy and no static website hosting.
+- GuardDuty Malware Protection protects the quarantine bucket/prefix and managed tagging is enabled.
+- A clean sample file becomes available only after `NO_THREATS_FOUND`.
+- Unsupported or password-protected files remain unavailable.
+- Use only safe, industry-standard antivirus test procedures for malware-scan validation; do not create or download live malware on a personal machine.
+- API and finalizer Lambda S3/KMS permissions are scoped to document buckets/prefixes and the document key.
+- Digest Lambda has no document bucket, document key, or attachment-table access.
+- Presigned upload and download URLs expire and are not logged.
+- CloudTrail shows expected S3/KMS activity, and CloudWatch logs contain no filenames, URLs, object keys, file bytes, protected record values, tokens, or KMS data.
+- Browser Cache Storage contains no attachment API responses or S3 objects.
+
+Rollout and rollback:
+
+- Roll out by deploying S3/KMS/DynamoDB resources, verifying GuardDuty tags, then deploying the frontend.
+- If GuardDuty is absent, delayed, or broken, files remain scanning/unavailable. There is no "download anyway" fallback.
+- Disabling frontend upload stops new uploads but does not delete stored attachments.
+- Keep the document KMS key and both buckets retained during rollback. Do not schedule the document key for deletion.
+- To preserve downloads/deletion while blocking new uploads, hide or disable the frontend upload control and keep backend storage resources/permissions in place.
 
 Envelope encryption flow:
 
@@ -261,6 +334,13 @@ Frontend security headers are deployed through `frontend/public/_headers`, which
 - `PUT /records/{id}/protected` requires authentication in Cognito mode and encrypts/replaces protected fields only for an owned record.
 - `GET /records/{id}/protected` requires authentication in Cognito mode, explicitly reveals protected fields only for an owned record, and returns no-store headers.
 - `DELETE /records/{id}/protected` requires authentication in Cognito mode and clears only the encrypted protected payload for an owned record.
+- `GET /records/{id}/attachments` requires authentication and returns safe attachment metadata only for an owned record.
+- `POST /records/{id}/attachments/upload-intent` requires authentication and returns one short-lived presigned S3 POST for an owned record.
+- `POST /records/{id}/attachments/{attachment_id}/complete` requires authentication and verifies the exact quarantine object before marking it scanning.
+- `GET /records/{id}/attachments/{attachment_id}` requires authentication and returns safe attachment metadata/status only.
+- `POST /records/{id}/attachments/{attachment_id}/refresh-status` requires authentication and reconciles the GuardDuty managed scan tag.
+- `POST /records/{id}/attachments/{attachment_id}/download-url` requires authentication and returns a short-lived presigned GET URL only for available clean files.
+- `DELETE /records/{id}/attachments/{attachment_id}` requires authentication and deletes stored attachment objects before metadata removal.
 - `POST /records/{id}/archive` requires authentication in Cognito mode and archives only an owned record.
 - `POST /records/{id}/restore` requires authentication in Cognito mode and restores only an owned record.
 - `DELETE /records/{id}` requires authentication in Cognito mode and deletes only an owned record.
@@ -293,12 +373,15 @@ Frontend security headers are deployed through `frontend/public/_headers`, which
 - Config in `backend/app/config.py` chooses auth mode, persistence mode, CORS origins, table names, local data paths, and backend-only Google OAuth settings.
 - Application encryption lives in `backend/app/encryption_service.py`; Secrets Manager retrieval and process-level secret caching live in `backend/app/secret_provider.py`.
 - Records use `RecordRepository`, `LocalRecordRepository`, and `DynamoRecordRepository`, all keyed by backend-derived `user_id`.
+- Secure record attachments use `backend/app/attachments.py` for validation, S3, scan reconciliation, and clean promotion logic.
+- Attachment metadata persistence uses `backend/app/attachments_repository.py`, with local JSON and DynamoDB implementations keyed by authenticated user and record.
+- GuardDuty scan EventBridge events invoke `backend/attachment_scan_finalizer.py`, which reconciles the quarantine object tag and promotes only clean, validated files.
 - Digest preferences use a separate user-scoped preferences repository with local JSON and DynamoDB implementations.
 - Google Calendar connections and OAuth states use separate user-scoped/short-lived repositories with local JSON and DynamoDB implementations. Google token bundles are encrypted before storage when record encryption is enabled, with legacy plaintext token items migrated lazily.
 - Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
 - `backend/template.yaml` describes the SAM serverless deployment shape.
 
-Reminder and record items include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and item `id` as the sort key for reminders and records, so users cannot read or mutate each other's data through the repository layer. Reminder timing preferences, smart birthday fields, smart renewal fields, smart maintenance fields, and alert state fields such as `alert_dismissed_until`, `alert_snoozed_until`, and `alert_last_action_at` are stored on each reminder item without changing the DynamoDB key schema. Records are stored in a separate retained table so future documents, search, AI, and reminder links can be added without overloading reminder storage. Digest preferences are stored in a separate table keyed by `user_id`, so future notification scheduling can read per-user digest time, timezone, lookahead, enabled state, and last-seen state without changing reminder storage. Google Calendar tokens are stored in a separate connection table keyed by `user_id`; OAuth state is stored server-side and expires before token exchange is allowed.
+Reminder, record, and attachment metadata items include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and item `id` as the sort key for reminders and records, so users cannot read or mutate each other's data through the repository layer. Attachment metadata uses `user_id` plus `<record_id>#<attachment_id>`, and the trusted scan finalizer can resolve a quarantine object through an owner-hash GSI without putting plaintext user ids in S3 keys. Reminder timing preferences, smart birthday fields, smart renewal fields, smart maintenance fields, and alert state fields such as `alert_dismissed_until`, `alert_snoozed_until`, and `alert_last_action_at` are stored on each reminder item without changing the DynamoDB key schema. Records and attachments are stored in separate retained tables so future search, AI, and reminder links can be added without overloading reminder storage. Digest preferences are stored in a separate table keyed by `user_id`, so future notification scheduling can read per-user digest time, timezone, lookahead, enabled state, and last-seen state without changing reminder storage. Google Calendar tokens are stored in a separate connection table keyed by `user_id`; OAuth state is stored server-side and expires before token exchange is allowed.
 
 ## Environment Variables
 
@@ -312,10 +395,12 @@ Backend local development works without setting any variables.
 | `PERSISTENCE_MODE` | `local` | Use `local` for JSON or `dynamodb` for DynamoDB. |
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name when DynamoDB mode is enabled. |
 | `RECORDS_TABLE_NAME` | `lifeledger-records-auth` | DynamoDB records table name when DynamoDB mode is enabled. |
+| `RECORD_ATTACHMENTS_TABLE_NAME` | `lifeledger-record-attachments-auth` | DynamoDB record attachments metadata table name when DynamoDB mode is enabled. |
 | `PREFERENCES_TABLE_NAME` | `lifeledger-preferences-auth` | DynamoDB preferences table name when DynamoDB mode is enabled. |
 | `AWS_REGION` | `us-east-1` | Region used by the DynamoDB repository. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
 | `LOCAL_RECORDS_FILE` | `backend/data/records.json` locally, `/tmp/lifeledger-records.json` in Lambda/SAM local | JSON file used for records when `PERSISTENCE_MODE=local`. |
+| `LOCAL_RECORD_ATTACHMENTS_FILE` | `backend/data/record-attachments.json` locally, `/tmp/lifeledger-record-attachments.json` in Lambda/SAM local | JSON file used for attachment metadata when `PERSISTENCE_MODE=local`. |
 | `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences when `PERSISTENCE_MODE=local`. |
 | `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name when DynamoDB mode is enabled. |
 | `LOCAL_PUSH_SUBSCRIPTIONS_FILE` | `backend/data/push-subscriptions.json` locally, `/tmp/lifeledger-push-subscriptions.json` in Lambda/SAM local | JSON file used for push subscriptions when `PERSISTENCE_MODE=local`. |
@@ -337,8 +422,14 @@ Backend local development works without setting any variables.
 | `VAPID_SUBJECT` | empty | VAPID contact subject, such as `mailto:you@example.com`. |
 | `ALLOW_PLAINTEXT_PRODUCTION_SECRETS` | `false` | Set only for deliberate emergency compatibility. Production should use Secrets Manager. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
+| `DOCUMENT_STORAGE_MODE` | `disabled` locally, `s3` when `APP_ENV=production` unless overridden | `disabled`, `local`, or `s3`. Local/SAM local defaults to disabled; production should use `s3`. |
+| `DOCUMENTS_QUARANTINE_BUCKET` | empty | Private quarantine S3 bucket used for untrusted browser uploads. SAM sets this from the stack bucket. |
+| `DOCUMENTS_CLEAN_BUCKET` | empty | Private clean S3 bucket used only after clean scan and validation. SAM sets this from the stack bucket. |
+| `DOCUMENTS_KMS_KEY_ARN` | empty | Dedicated document KMS key ARN used for S3 SSE-KMS. SAM sets this from the stack key output. |
+| `ATTACHMENT_MAX_SIZE_BYTES` | `10485760` | Maximum attachment size, 10 MB by default. |
+| `ATTACHMENT_MAX_PER_RECORD` | `5` | Maximum active attachments per record. |
 
-SAM parameters use `RecordEncryptionMode`, `GoogleOAuthSecretArn`, `VapidPublicKey`, `PushSecretArn`, and `VapidSubject`; Cloudflare Pages uses only `VITE_VAPID_PUBLIC_KEY`.
+SAM parameters use `RecordEncryptionMode`, `DocumentStorageMode`, `MalwareProtectionEnabled`, `GoogleOAuthSecretArn`, `VapidPublicKey`, `PushSecretArn`, and `VapidSubject`; Cloudflare Pages uses only public `VITE_*` values such as `VITE_VAPID_PUBLIC_KEY`.
 
 Local protected-field testing:
 
@@ -364,13 +455,20 @@ The SAM template defines:
 - An unauthenticated `OPTIONS /{proxy+}` route so browser preflight requests can complete before authenticated reminder calls.
 - A Lambda function running FastAPI through Mangum.
 - A retained customer-managed symmetric KMS key with rotation enabled and alias `alias/${AWS::StackName}-data`.
+- A separate retained customer-managed symmetric document KMS key with rotation enabled and alias `alias/${AWS::StackName}-documents`.
 - A DynamoDB table named `lifeledger-reminders-auth` with `user_id` partition key and `id` sort key.
 - A DynamoDB table named `lifeledger-records-auth` with `user_id` partition key and `id` sort key.
+- A DynamoDB table named `lifeledger-record-attachments-auth` with `user_id` partition key, `<record_id>#<attachment_id>` sort key, PITR, SSE-KMS, and an owner-hash GSI for trusted scan finalization.
 - A DynamoDB table named `lifeledger-preferences-auth` with `user_id` partition key for Daily Digest preferences.
 - A DynamoDB table named `lifeledger-google-calendar-connections-auth` with `user_id` partition key for backend-only Google Calendar tokens.
 - A DynamoDB table named `lifeledger-google-oauth-states-auth` with `state` partition key for expiring OAuth state validation.
 - Customer-managed DynamoDB SSE-KMS and point-in-time recovery on retained data tables.
+- Two retained private S3 document buckets: quarantine for presigned browser uploads and clean for scan-passed downloads.
+- S3 Block Public Access, Bucket owner enforced object ownership, SSE-KMS document-key defaults, bucket-key support, insecure-transport denies, and incorrect-encryption denies on document buckets.
+- GuardDuty Malware Protection for S3 on the quarantine `quarantine/` prefix with managed object tagging when `MalwareProtectionEnabled=true`.
+- An attachment scan finalizer Lambda and EventBridge rule for `GuardDuty Malware Protection Object Scan Result` events.
 - API Lambda permissions for `kms:GenerateDataKey` and `kms:Decrypt` are scoped to the stack KMS key and require encryption context `app=lifeledger`.
+- API and finalizer Lambda document S3/KMS permissions are scoped to the document buckets, `quarantine/*` and `clean/*` prefixes, and the document KMS key through S3.
 - API Lambda Secrets Manager access is scoped to `GoogleOAuthSecretArn` and `PushSecretArn`; the Digest push Lambda may read only `PushSecretArn` and does not receive record KMS decrypt permissions.
 - `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain` on the KMS key and retained DynamoDB tables.
 
@@ -391,8 +489,11 @@ For deployed auth and DynamoDB, use these SAM parameter values during deploy:
 AuthMode=cognito
 PersistenceMode=dynamodb
 RecordEncryptionMode=kms
+DocumentStorageMode=s3
+MalwareProtectionEnabled=true
 RemindersTableName=lifeledger-reminders-auth
 RecordsTableName=lifeledger-records-auth
+RecordAttachmentsTableName=lifeledger-record-attachments-auth
 CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 VapidPublicKey=<public-vapid-key>
 PushSecretArn=<secrets-manager-arn-with-vapid_private_key>
@@ -451,4 +552,4 @@ Rollback notes:
 
 ## Not In This Phase
 
-This phase does not add two-way Google Calendar sync, Google Calendar import, Google Calendar edit ingestion, attendees, shared calendars, email sending, SMS, password-manager functionality, AI/RAG, OCR, global search over protected fields, file uploads, photos, social login, public registration, mileage-based maintenance, usage-based maintenance, supply inventory, automatic record-to-reminder generation, custom per-reminder push rules, notification history, shared households, roles/admin dashboards, or another frontend redesign. Do not store SSNs, payment card numbers, bank account or routing numbers, passwords, PINs, MFA/recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, or uploaded documents in reminders or records. Future smart reminder work may include usage-based maintenance, record-linked reminders, secure file storage, search, AI, and calendar or notification integrations.
+This phase does not add two-way Google Calendar sync, Google Calendar import, Google Calendar edit ingestion, attendees, shared calendars, email sending, SMS, password-manager functionality, AI/RAG, OCR, global search over protected fields/files, file sharing, public links, inline preview, Office documents, archives, audio/video, reminder attachments, social login, public registration, mileage-based maintenance, usage-based maintenance, supply inventory, automatic record-to-reminder generation, custom per-reminder push rules, notification history, shared households, roles/admin dashboards, or another frontend redesign. Do not store SSNs, payment card numbers, bank account or routing numbers, passwords, PINs, MFA/recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, or secret/recovery documents in reminders, records, or attachments. Future smart reminder work may include usage-based maintenance, record-linked reminders, search, AI, and calendar or notification integrations.

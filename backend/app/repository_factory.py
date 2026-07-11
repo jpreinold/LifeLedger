@@ -1,6 +1,11 @@
 from pathlib import Path
 from typing import Any
 
+from app.attachments_repository import (
+    DynamoRecordAttachmentRepository,
+    LocalRecordAttachmentRepository,
+    RecordAttachmentRepository,
+)
 from app.config import DYNAMODB_PERSISTENCE, Settings, get_settings
 from app.dynamo_repository import DynamoRecordRepository, DynamoReminderRepository
 from app.encryption_service import EncryptionService
@@ -52,6 +57,24 @@ def create_record_repository(
         )
 
     return LocalRecordRepository(local_file_path or resolved_settings.local_records_file)
+
+
+def create_record_attachment_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> RecordAttachmentRepository:
+    resolved_settings = settings or get_settings()
+
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoRecordAttachmentRepository(
+            table_name=resolved_settings.record_attachments_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+
+    return LocalRecordAttachmentRepository(local_file_path or resolved_settings.local_record_attachments_file)
 
 
 def create_preferences_repository(

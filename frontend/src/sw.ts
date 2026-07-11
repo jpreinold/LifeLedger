@@ -95,5 +95,24 @@ function shouldBypassRuntimeCaching(request: Request) {
   }
 
   const url = new URL(request.url)
-  return /\/records\/[^/]+\/protected(?:\/status)?$/.test(url.pathname)
+  if (/\/records\/[^/]+\/protected(?:\/status)?$/.test(url.pathname)) {
+    return true
+  }
+  if (/\/records\/[^/]+\/attachments(?:\/.*)?$/.test(url.pathname)) {
+    return true
+  }
+
+  return isS3DocumentRequest(url)
+}
+
+function isS3DocumentRequest(url: URL) {
+  const hostname = url.hostname.toLowerCase()
+  if (!hostname.endsWith('.amazonaws.com')) {
+    return false
+  }
+  if (!hostname.includes('.s3.') && !hostname.endsWith('.s3.amazonaws.com')) {
+    return false
+  }
+
+  return url.pathname.includes('/quarantine/') || url.pathname.includes('/clean/') || url.searchParams.has('X-Amz-Signature')
 }

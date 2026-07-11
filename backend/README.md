@@ -1,6 +1,6 @@
 # LifeLedger Backend
 
-FastAPI backend for LifeLedger reminders and records. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and remain separate from reminders. Optional protected record details and Google OAuth token bundles are application-encrypted before persistence when encryption is configured.
+FastAPI backend for LifeLedger reminders and records. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and remain separate from reminders. Records can also have secure PDF/JPEG/PNG attachments stored in private S3 quarantine/clean buckets after malware scanning and file validation. Optional protected record details and Google OAuth token bundles are application-encrypted before persistence when encryption is configured.
 
 ## Run Locally
 
@@ -37,6 +37,7 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `GET /preferences/digest` and `PUT /preferences/digest` require authentication in Cognito mode.
 - `GET /records`, `POST /records`, `GET /records/{id}`, `PUT /records/{id}`, `POST /records/{id}/archive`, `POST /records/{id}/restore`, and `DELETE /records/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
 - `GET /records/{id}/protected/status`, `PUT /records/{id}/protected`, `GET /records/{id}/protected`, and `DELETE /records/{id}/protected` require authentication, verify record ownership, keep protected values out of standard record responses, and reveal plaintext only through the explicit no-store reveal route.
+- `GET /records/{id}/attachments`, `POST /records/{id}/attachments/upload-intent`, `POST /records/{id}/attachments/{attachment_id}/complete`, `GET /records/{id}/attachments/{attachment_id}`, `POST /records/{id}/attachments/{attachment_id}/refresh-status`, `POST /records/{id}/attachments/{attachment_id}/download-url`, and `DELETE /records/{id}/attachments/{attachment_id}` require authentication, verify record ownership, return no-store responses, and never expose permanent S3 object paths.
 - `GET /push/config`, `GET /push/status`, `GET /push/subscriptions`, `POST /push/subscriptions`, `POST /push/test`, and `DELETE /push/subscriptions/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
 - `GET /integrations/google-calendar/status`, `POST /integrations/google-calendar/connect`, `POST /integrations/google-calendar/callback`, and `DELETE /integrations/google-calendar/disconnect` require authentication in Cognito mode and are scoped to the authenticated user.
 - `POST /reminders/{id}/calendar-sync/enable` and `POST /reminders/{id}/calendar-sync/disable` require authentication and only operate on reminders owned by the authenticated user.
@@ -54,6 +55,9 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `app/dynamo_repository.py` implements DynamoDB repositories with `user_id` plus `id` keys.
 - `app/config.py` reads environment configuration with local-safe defaults.
 - `app/encryption_service.py` provides AES-256-GCM envelope encryption for protected record fields and Google token bundles, with local and KMS modes.
+- `app/attachments.py` validates attachment policy, creates presigned S3 upload/download operations, reconciles GuardDuty scan tags, verifies magic bytes, and promotes clean files.
+- `app/attachments_repository.py` persists attachment metadata locally or in DynamoDB using authenticated user and record scope.
+- `attachment_scan_finalizer.py` handles GuardDuty EventBridge object scan result events and reuses the same fail-closed promotion logic.
 - `app/secret_provider.py` retrieves Google OAuth and push private secrets from AWS Secrets Manager with process-level caching.
 - `app/repository_factory.py` selects repositories in one place.
 - `app/google_calendar_repository.py` stores backend-only Google Calendar connections and OAuth states in local JSON or DynamoDB.
@@ -63,7 +67,7 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 
 The route layer stays unaware of whether reminders or records are stored in JSON files or DynamoDB. It only receives a current user context and passes `user_id` into the repository layer. The frontend never sends or controls `user_id`.
 
-Normal record schemas are safe-by-default. They support `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty` types, plus safe text/date/tag fields. Protected fields are handled by dedicated write/reveal schemas and encrypted before storage. This is not zero-knowledge encryption: the authenticated backend can decrypt protected values after ownership validation and explicit reveal. Do not store SSNs, payment card data, banking data, passwords, PINs, recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, uploaded documents, OCR, or AI/RAG data.
+Normal record schemas are safe-by-default. They support `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty` types, plus safe text/date/tag fields. Protected fields are handled by dedicated write/reveal schemas and encrypted before storage. Attachments are not zero-knowledge storage: authorized backend services, S3, KMS, and GuardDuty can access decrypted file contents for storage, scanning, validation, download, and deletion. Do not store SSNs, payment card data, banking data, passwords, PINs, recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, secret/recovery documents, OCR, or AI/RAG data.
 
 ## Environment Variables
 
@@ -77,9 +81,11 @@ Local development does not require environment variables.
 | `PERSISTENCE_MODE` | `local` | `local` uses JSON; `dynamodb` uses DynamoDB. |
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name. |
 | `RECORDS_TABLE_NAME` | `lifeledger-records-auth` | DynamoDB records table name. |
+| `RECORD_ATTACHMENTS_TABLE_NAME` | `lifeledger-record-attachments-auth` | DynamoDB record attachments metadata table name. |
 | `AWS_REGION` | `us-east-1` | DynamoDB region. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
 | `LOCAL_RECORDS_FILE` | `backend/data/records.json` locally, `/tmp/lifeledger-records.json` in Lambda/SAM local | JSON file used for records when `PERSISTENCE_MODE=local`. |
+| `LOCAL_RECORD_ATTACHMENTS_FILE` | `backend/data/record-attachments.json` locally, `/tmp/lifeledger-record-attachments.json` in Lambda/SAM local | JSON file used for attachment metadata in local persistence. |
 | `PREFERENCES_TABLE_NAME` | `lifeledger-preferences-auth` | DynamoDB preferences table name. |
 | `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name. |
 | `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences in local persistence. |
@@ -102,6 +108,14 @@ Local development does not require environment variables.
 | `VAPID_SUBJECT` | empty | VAPID contact subject such as `mailto:you@example.com`. |
 | `ALLOW_PLAINTEXT_PRODUCTION_SECRETS` | `false` | Production guard for legacy plaintext secret fallback. Keep false for normal production. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
+| `DOCUMENT_STORAGE_MODE` | `disabled` locally, `s3` in production defaults | `disabled`, `local`, or `s3`. Local/SAM local is explicitly disabled. |
+| `DOCUMENTS_QUARANTINE_BUCKET` | empty | Private S3 quarantine bucket for presigned browser uploads. |
+| `DOCUMENTS_CLEAN_BUCKET` | empty | Private S3 clean bucket for scan-passed validated downloads. |
+| `DOCUMENTS_KMS_KEY_ARN` | empty | Dedicated document KMS key ARN for S3 SSE-KMS. |
+| `ATTACHMENT_MAX_SIZE_BYTES` | `10485760` | Maximum attachment size, 10 MB by default. |
+| `ATTACHMENT_MAX_PER_RECORD` | `5` | Maximum active attachments per record. |
+
+`DOCUMENT_STORAGE_MODE=local` is accepted for future compatibility but currently fails closed like `disabled`; this backend does not present local temp files as secure document storage.
 
 Generate VAPID keys with `npx web-push generate-vapid-keys`. The backend receives `VAPID_PUBLIC_KEY`, `PUSH_SECRET_ARN`, and `VAPID_SUBJECT`; the frontend receives only `VITE_VAPID_PUBLIC_KEY`. Google Calendar sync requires a Google Cloud OAuth web client, an OAuth consent screen/test users for private beta, and an authorized redirect URI that exactly matches `GOOGLE_OAUTH_REDIRECT_URI`. The Google client secret and VAPID private key stay backend-only in Secrets Manager for production. Existing Google Calendar connections may need to reconnect once to grant the CalendarList read-only scope used by the calendar picker.
 
@@ -169,7 +183,7 @@ Reminder and record items are scoped by `user_id`. The deployed DynamoDB tables 
 handler = Mangum(app)
 ```
 
-SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, a retained customer-managed KMS key and alias, retained DynamoDB tables for reminders, records, preferences, push subscriptions, Google Calendar connections, and OAuth states, a scheduled Daily Digest push Lambda, and scoped CRUD/KMS/Secrets Manager permissions for the Lambda functions. The API Lambda can use the data KMS key with encryption context `app=lifeledger`; the Digest push Lambda can read only the push secret and cannot decrypt protected records.
+SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, a retained customer-managed data KMS key and alias, a separate retained document KMS key and alias, retained DynamoDB tables for reminders, records, record attachments, preferences, push subscriptions, Google Calendar connections, and OAuth states, retained private S3 quarantine/clean document buckets, a GuardDuty Malware Protection plan with managed tagging, an EventBridge scan-result finalizer Lambda, a scheduled Daily Digest push Lambda, and scoped CRUD/KMS/S3/Secrets Manager permissions for the Lambda functions. The API Lambda can use the data KMS key with encryption context `app=lifeledger`; the Digest push Lambda can read only the push secret and cannot decrypt protected records or access document buckets.
 
 SAM local uses `backend/env.local.json`, which sets local auth and local persistence:
 
@@ -211,8 +225,11 @@ Use these parameter values for deployed auth:
 AuthMode=cognito
 PersistenceMode=dynamodb
 RecordEncryptionMode=kms
+DocumentStorageMode=s3
+MalwareProtectionEnabled=true
 RemindersTableName=lifeledger-reminders-auth
 RecordsTableName=lifeledger-records-auth
+RecordAttachmentsTableName=lifeledger-record-attachments-auth
 CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 VapidPublicKey=<public-vapid-key>
 PushSecretArn=<secrets-manager-arn-with-vapid_private_key>
