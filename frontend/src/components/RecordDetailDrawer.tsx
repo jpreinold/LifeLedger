@@ -686,9 +686,15 @@ function AttachmentRow({
       </div>
       <div className="attachment-actions">
         {isAvailable ? (
-          <button type="button" className="icon-button attachment-action-button" onClick={onDownload} aria-label={`Download ${attachment.display_name}`}>
-            <Download size={16} aria-hidden="true" />
-          </button>
+          <>
+            <button type="button" className="secondary-button attachment-preview-button" onClick={onPreview}>
+              <Eye size={15} aria-hidden="true" />
+              Preview
+            </button>
+            <button type="button" className="icon-button attachment-action-button" onClick={onDownload} aria-label={`Download ${attachment.display_name}`}>
+              <Download size={16} aria-hidden="true" />
+            </button>
+          </>
         ) : null}
         {isFailed ? (
           <button type="button" className="icon-button attachment-action-button" onClick={onRetry} aria-label="Retry with another file">

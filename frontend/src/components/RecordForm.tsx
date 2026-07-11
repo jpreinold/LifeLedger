@@ -25,7 +25,7 @@ interface RecordFormProps {
   recordType: RecordType
   onClose: () => void
   onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[]) => Promise<boolean>
-  onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
+  onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[]) => Promise<boolean>
 }
 
 const dateFields: RecordField[] = ['start_date', 'issue_date', 'expiration_date', 'purchase_date', 'renewal_date']
@@ -75,7 +75,7 @@ export function RecordForm({
 
     setValidationError(null)
     const protectedInput = normalizeProtectedRecordInput(input.record_type, protectedForm)
-    const wasSaved = record ? await onUpdate(record.id, input, protectedInput) : await onCreate(input, protectedInput, queuedAttachments)
+    const wasSaved = record ? await onUpdate(record.id, input, protectedInput, queuedAttachments) : await onCreate(input, protectedInput, queuedAttachments)
 
     if (wasSaved) {
       setQueuedAttachments([])
@@ -201,14 +201,12 @@ export function RecordForm({
           onChange={updateProtectedField}
         />
 
-        {!isEditing ? (
-          <QueuedAttachmentsSection
-            attachments={queuedAttachments}
-            isSaving={isSaving}
-            onChooseAttachment={handleChooseAttachment}
-            onRemoveAttachment={removeQueuedAttachment}
-          />
-        ) : null}
+        <QueuedAttachmentsSection
+          attachments={queuedAttachments}
+          isSaving={isSaving}
+          onChooseAttachment={handleChooseAttachment}
+          onRemoveAttachment={removeQueuedAttachment}
+        />
 
         {validationError ? <p className="field-error">{validationError}</p> : null}
 

@@ -4332,7 +4332,17 @@ textarea:focus-visible {
 .attachment-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
+}
+
+.attachment-preview-button {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  font-size: 0.72rem;
+  font-weight: 780;
 }
 
 .attachment-action-button {
@@ -4347,6 +4357,16 @@ textarea:focus-visible {
 .attachment-delete-action {
   color: var(--color-danger);
   background: var(--color-danger-soft);
+}
+
+@media (max-width: 560px) {
+  .attachment-row {
+    grid-template-columns: 1fr;
+  }
+
+  .attachment-actions {
+    justify-content: flex-start;
+  }
 }
 
 .attachment-preview-backdrop {

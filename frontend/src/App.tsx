@@ -425,7 +425,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleUpdateRecord(id: string, input: RecordInput, protectedInput: ProtectedRecordInput) {
+  async function handleUpdateRecord(id: string, input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[] = []) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
@@ -434,6 +434,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       const updated = await recordsApi.update(id, input)
       let nextRecord = updated
       let protectedSaved = true
+      let uploadedAttachmentCount = 0
+      let attachmentUploadFailed = false
       if (hasProtectedRecordInput(protectedInput)) {
         try {
           const protectedStatus = await recordsApi.setProtected(id, protectedInput)
@@ -442,12 +444,27 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           protectedSaved = false
         }
       }
+      for (const attachment of attachments) {
+        try {
+          await uploadRecordAttachment(id, attachment)
+          uploadedAttachmentCount += 1
+        } catch {
+          attachmentUploadFailed = true
+        }
+      }
       await loadRecordData()
       setViewingRecord((current) => (current?.id === id ? nextRecord : current))
-      if (protectedSaved) {
-        setNotice('Record updated.')
-      } else {
+      if (!protectedSaved && attachmentUploadFailed) {
+        setError('Record updated, but protected details were not saved and one or more attachments could not be uploaded.')
+      } else if (!protectedSaved) {
         setError('Record updated, but protected details were not saved. Protected record storage may not be configured.')
+      } else if (attachmentUploadFailed) {
+        const failedCount = attachments.length - uploadedAttachmentCount
+        setError(`Record updated, but ${formatAttachmentFailureCount(failedCount)} could not be uploaded. Open the record to retry.`)
+      } else if (attachments.length > 0) {
+        setNotice(`Record updated. ${attachments.length === 1 ? 'Attachment uploaded and scanning.' : 'Attachments uploaded and scanning.'}`)
+      } else {
+        setNotice('Record updated.')
       }
       return true
     } catch (requestError) {
