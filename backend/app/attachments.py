@@ -204,6 +204,7 @@ class S3DocumentStorageService:
                 ContentDisposition=content_disposition,
                 CacheControl="no-store, private",
                 MetadataDirective="REPLACE",
+                TaggingDirective="REPLACE",
                 ServerSideEncryption="aws:kms",
                 SSEKMSKeyId=self.kms_key_arn,
             )

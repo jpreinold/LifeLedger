@@ -15,7 +15,7 @@ from app.main import (
     get_record_attachment_repository,
     get_record_repository,
 )
-from app.models import Record
+from app.models import Record, RecordAttachment
 from app.records_repository import LocalRecordRepository
 from app.schemas import AttachmentScanResult, RecordStatus
 
@@ -183,6 +183,57 @@ def test_s3_storage_client_uses_signature_v4_for_kms_presigned_posts(monkeypatch
     assert captured["service_name"] == "s3"
     assert captured["region_name"] == "us-west-2"
     assert captured["config"].signature_version == "s3v4"
+
+
+def test_s3_promotion_replaces_tags_instead_of_copying_quarantine_tags():
+    settings = load_settings(
+        {
+            "DOCUMENT_STORAGE_MODE": "s3",
+            "DOCUMENTS_QUARANTINE_BUCKET": "quarantine-bucket",
+            "DOCUMENTS_CLEAN_BUCKET": "clean-bucket",
+            "DOCUMENTS_KMS_KEY_ARN": DOCUMENTS_KMS_KEY_ARN,
+        }
+    )
+    fake_client = CapturingS3Client()
+    storage = S3DocumentStorageService(settings, s3_client=fake_client)
+    now = datetime.now(timezone.utc)
+    attachment = RecordAttachment(
+        attachment_id="attachment-1",
+        user_id="user-a",
+        owner_hash="owner-hash",
+        record_id="record-1",
+        record_attachment_key="record-1#attachment-1",
+        display_name="Document.pdf",
+        content_type="application/pdf",
+        size_bytes=8,
+        quarantine_object_key="quarantine/owner-hash/record-1/attachment-1/object",
+        clean_object_key="clean/owner-hash/record-1/attachment-1/object",
+        status="scanning",
+        scan_result="pending",
+        upload_expires_at=now,
+        created_at=now,
+        uploaded_at=now,
+        scan_completed_at=None,
+        available_at=None,
+        deleted_at=None,
+        etag=None,
+        encryption_key_arn=DOCUMENTS_KMS_KEY_ARN,
+    )
+
+    storage.promote_to_clean(attachment, 'attachment; filename="Document.pdf"')
+
+    assert fake_client.copy_kwargs["TaggingDirective"] == "REPLACE"
+    assert fake_client.copy_kwargs["ServerSideEncryption"] == "aws:kms"
+    assert fake_client.copy_kwargs["SSEKMSKeyId"] == DOCUMENTS_KMS_KEY_ARN
+
+
+class CapturingS3Client:
+    def __init__(self):
+        self.copy_kwargs = {}
+
+    def copy_object(self, **kwargs):
+        self.copy_kwargs = kwargs
+        return {}
 
 
 def prepare_completed_attachment(client, record_repo, attachment_repo, storage, *, user_id="user-a"):

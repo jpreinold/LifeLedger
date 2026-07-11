@@ -440,6 +440,7 @@ Resources:
                 - s3:PutObject
                 - s3:GetObject
                 - s3:DeleteObject
+                - s3:PutObjectTagging
               Resource: !Sub "${DocumentsCleanBucket.Arn}/clean/*"
             - Effect: Allow
               Action:
@@ -882,6 +883,7 @@ Resources:
                 - s3:PutObject
                 - s3:GetObject
                 - s3:DeleteObject
+                - s3:PutObjectTagging
               Resource: !Sub "${DocumentsCleanBucket.Arn}/clean/*"
             - Effect: Allow
               Action:

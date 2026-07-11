@@ -122,6 +122,9 @@ def test_sam_kms_permissions_split_app_and_dynamodb_access():
     template = template_text()
     api_section = template_section(template, "LifeLedgerApiFunction:", "LifeLedgerDigestPushFunction:")
     digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "RemindersTable:")
+    finalizer_section = template_section(
+        template, "LifeLedgerAttachmentScanFinalizerFunction:", "AttachmentScanResultRule:"
+    )
 
     assert "kms:GenerateDataKey" in api_section
     assert "kms:Decrypt" in api_section
@@ -131,6 +134,9 @@ def test_sam_kms_permissions_split_app_and_dynamodb_access():
     assert "Resource: !GetAtt LifeLedgerDocumentsKey.Arn" in api_section
     assert "Resource: !Sub \"${DocumentsQuarantineBucket.Arn}/quarantine/*\"" in api_section
     assert "Resource: !Sub \"${DocumentsCleanBucket.Arn}/clean/*\"" in api_section
+    assert "s3:PutObjectTagging" in api_section
+    assert "s3:PutObjectTagging" in finalizer_section
+    assert "Resource: !Sub \"${DocumentsCleanBucket.Arn}/clean/*\"" in finalizer_section
 
     for section in (api_section, digest_section):
         assert "kms:Encrypt" in section
