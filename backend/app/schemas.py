@@ -492,10 +492,59 @@ class RecordUpdate(BaseModel):
         return RecordBase.normalize_tags(value)
 
 
+class ProtectedRecordPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_number: str | None = Field(default=None, max_length=120)
+    license_number: str | None = Field(default=None, max_length=120)
+    vin: str | None = Field(default=None, max_length=17)
+    policy_number: str | None = Field(default=None, max_length=120)
+    member_number: str | None = Field(default=None, max_length=120)
+    serial_number: str | None = Field(default=None, max_length=120)
+    account_reference: str | None = Field(default=None, max_length=120)
+    sensitive_notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def normalize_protected_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("vin")
+    @classmethod
+    def normalize_vin(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        normalized = value.upper()
+        if len(normalized) != 17 or any(character in "IOQ" for character in normalized):
+            raise ValueError("VIN must be 17 characters and cannot contain I, O, or Q")
+        if not all(character.isdigit() or "A" <= character <= "Z" for character in normalized):
+            raise ValueError("VIN can contain only letters and numbers")
+        return normalized
+
+    def safe_values(self) -> dict[str, str]:
+        data = self.model_dump(exclude_none=True)
+        return {key: value for key, value in data.items() if isinstance(value, str) and value}
+
+
+class ProtectedRecordStatusResponse(BaseModel):
+    has_protected_data: bool
+    protected_field_names: list[str] = Field(default_factory=list)
+    protected_encryption_version: int | None = None
+    protected_updated_at: datetime | None = None
+
+
 class RecordResponse(RecordBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    has_protected_data: bool = False
+    protected_field_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

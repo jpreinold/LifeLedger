@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Archive, Pencil, RotateCcw, Trash2, X } from 'lucide-react'
+import { Archive, Eye, EyeOff, LockKeyhole, Pencil, RotateCcw, Trash2, X } from 'lucide-react'
 
+import { recordsApi } from '../api/recordsApi'
 import {
   formatRecordDate,
   formatRecordKeyDate,
@@ -9,8 +10,8 @@ import {
   getRecordStatusClass,
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
-import { getRecordTypeDefinition } from '../lib/recordTypes'
-import type { LifeRecord } from '../types/record'
+import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
+import type { LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
 import { SheetDrawer } from './SheetDrawer'
 
 interface RecordDetailDrawerProps {
@@ -18,6 +19,7 @@ interface RecordDetailDrawerProps {
   onArchive: (record: LifeRecord) => Promise<void>
   onClose: () => void
   onEdit: (record: LifeRecord) => void
+  onProtectedStatusChange: (id: string, status: ProtectedRecordStatus) => void
   onRequestDelete: (record: LifeRecord) => void
   onRestore: (record: LifeRecord) => Promise<void>
 }
@@ -28,20 +30,27 @@ interface DetailRow {
 }
 
 const drawerCloseMs = 220
+const protectedRevealMs = 60_000
 
 export function RecordDetailDrawer({
   record,
   onArchive,
   onClose,
   onEdit,
+  onProtectedStatusChange,
   onRequestDelete,
   onRestore,
 }: RecordDetailDrawerProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isArchiving, setIsArchiving] = useState(false)
+  const [isRevealingProtected, setIsRevealingProtected] = useState(false)
+  const [isClearingProtected, setIsClearingProtected] = useState(false)
+  const [protectedPayload, setProtectedPayload] = useState<ProtectedRecordPayload | null>(null)
+  const [protectedError, setProtectedError] = useState<string | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
+  const revealTimerRef = useRef<number | null>(null)
   const definition = getRecordTypeDefinition(record.record_type)
   const Icon = definition.icon
   const providerLine = getRecordProviderLine(record)
@@ -50,8 +59,18 @@ export function RecordDetailDrawer({
   const resetDetailScroll = useCallback(() => {
     detailBodyRef.current?.scrollTo({ top: 0 })
   }, [])
+  const clearProtectedState = useCallback(() => {
+    setProtectedPayload(null)
+    setProtectedError(null)
+    setIsRevealingProtected(false)
+    if (revealTimerRef.current !== null) {
+      window.clearTimeout(revealTimerRef.current)
+      revealTimerRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
+    clearProtectedState()
     setIsDrawerOpen(false)
     resetDetailScroll()
     openFrameRef.current = window.requestAnimationFrame(() => {
@@ -65,30 +84,90 @@ export function RecordDetailDrawer({
         window.cancelAnimationFrame(openFrameRef.current)
       }
     }
-  }, [record.id, resetDetailScroll])
+  }, [clearProtectedState, record.id, resetDetailScroll])
 
   useEffect(() => {
     return () => {
       if (closeTimerRef.current !== null) {
         window.clearTimeout(closeTimerRef.current)
       }
+      if (revealTimerRef.current !== null) {
+        window.clearTimeout(revealTimerRef.current)
+      }
     }
   }, [])
 
+  useEffect(() => {
+    if (protectedPayload === null) {
+      return undefined
+    }
+
+    revealTimerRef.current = window.setTimeout(clearProtectedState, protectedRevealMs)
+    return () => {
+      if (revealTimerRef.current !== null) {
+        window.clearTimeout(revealTimerRef.current)
+        revealTimerRef.current = null
+      }
+    }
+  }, [clearProtectedState, protectedPayload])
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        clearProtectedState()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [clearProtectedState])
+
   const requestClose = useCallback(() => {
+    clearProtectedState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onClose()
     }, drawerCloseMs)
-  }, [onClose])
+  }, [clearProtectedState, onClose])
 
   function handleEdit() {
+    clearProtectedState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onEdit(record)
     }, drawerCloseMs)
+  }
+
+  async function handleRevealProtected() {
+    setIsRevealingProtected(true)
+    setProtectedError(null)
+    try {
+      const revealed = await recordsApi.revealProtected(record.id)
+      setProtectedPayload(revealed)
+    } catch (requestError) {
+      setProtectedPayload(null)
+      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to reveal protected details.')
+    } finally {
+      setIsRevealingProtected(false)
+    }
+  }
+
+  async function handleClearProtected() {
+    setIsClearingProtected(true)
+    setProtectedError(null)
+    try {
+      const nextStatus = await recordsApi.clearProtected(record.id)
+      clearProtectedState()
+      onProtectedStatusChange(record.id, nextStatus)
+    } catch (requestError) {
+      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to clear protected details.')
+    } finally {
+      setIsClearingProtected(false)
+    }
   }
 
   async function handleArchiveToggle() {
@@ -178,6 +257,17 @@ export function RecordDetailDrawer({
           </section>
         ) : null}
 
+        <ProtectedDetailsSection
+          error={protectedError}
+          isClearing={isClearingProtected}
+          isRevealing={isRevealingProtected}
+          payload={protectedPayload}
+          record={record}
+          onClear={() => void handleClearProtected()}
+          onHide={clearProtectedState}
+          onReveal={() => void handleRevealProtected()}
+        />
+
         <DetailSection
           title="History"
           rows={[
@@ -223,6 +313,89 @@ function DetailSection({ className = '', rows, title }: { className?: string; ro
           </div>
         ))}
       </dl>
+    </section>
+  )
+}
+
+function ProtectedDetailsSection({
+  error,
+  isClearing,
+  isRevealing,
+  onClear,
+  onHide,
+  onReveal,
+  payload,
+  record,
+}: {
+  error: string | null
+  isClearing: boolean
+  isRevealing: boolean
+  onClear: () => void
+  onHide: () => void
+  onReveal: () => void
+  payload: ProtectedRecordPayload | null
+  record: LifeRecord
+}) {
+  const definition = getRecordTypeDefinition(record.record_type)
+  const hasProtectedFieldsForType = definition.protectedFields.length > 0
+  const hasProtectedData = record.has_protected_data && record.protected_field_names.length > 0
+
+  if (!hasProtectedFieldsForType && !hasProtectedData) {
+    return null
+  }
+
+  const isRevealed = payload !== null
+  const fieldNames = hasProtectedData ? record.protected_field_names : definition.protectedFields
+  const rows = fieldNames.map((field) => ({
+    field,
+    label: getProtectedFieldLabel(field),
+    value: isRevealed ? payload?.[field] ?? null : null,
+  }))
+
+  return (
+    <section className="detail-section protected-details-section" aria-label="Protected details">
+      <div className="protected-details-heading">
+        <div>
+          <h3>Protected details</h3>
+          <p>Encrypted before storage and revealed only when requested.</p>
+        </div>
+        <LockKeyhole size={18} aria-hidden="true" />
+      </div>
+
+      {!hasProtectedData ? <p className="protected-details-empty">No protected details saved.</p> : null}
+
+      {hasProtectedData ? (
+        <dl className="detail-list protected-detail-list">
+          {rows.map((row) => (
+            <div className="detail-row" key={row.field}>
+              <dt>{row.label}</dt>
+              <dd>{isRevealed && row.value ? row.value : 'Hidden'}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
+      {error ? <p className="field-error protected-detail-error">{error}</p> : null}
+
+      {hasProtectedData ? (
+        <div className="protected-detail-actions">
+          {isRevealed ? (
+            <button type="button" className="secondary-button" onClick={onHide}>
+              <EyeOff size={16} aria-hidden="true" />
+              Hide details
+            </button>
+          ) : (
+            <button type="button" className="primary-button" disabled={isRevealing} onClick={onReveal}>
+              <Eye size={16} aria-hidden="true" />
+              {isRevealing ? 'Revealing...' : 'Reveal protected details'}
+            </button>
+          )}
+          <button type="button" className="text-danger-button" disabled={isClearing} onClick={onClear}>
+            <Trash2 size={15} aria-hidden="true" />
+            {isClearing ? 'Clearing...' : 'Clear protected details'}
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

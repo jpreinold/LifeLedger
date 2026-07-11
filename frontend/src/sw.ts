@@ -41,6 +41,12 @@ self.addEventListener('push', (event) => {
   )
 })
 
+self.addEventListener('fetch', (event) => {
+  if (shouldBypassRuntimeCaching(event.request)) {
+    return
+  }
+})
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const notificationData = event.notification.data as { url?: string } | undefined
@@ -81,4 +87,13 @@ async function openOrFocusClient(targetUrl: string) {
   }
 
   await self.clients.openWindow(targetUrl)
+}
+
+function shouldBypassRuntimeCaching(request: Request) {
+  if (request.headers.get('Cache-Control')?.toLowerCase().includes('no-store')) {
+    return true
+  }
+
+  const url = new URL(request.url)
+  return /\/records\/[^/]+\/protected(?:\/status)?$/.test(url.pathname)
 }

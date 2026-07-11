@@ -3,6 +3,7 @@ from typing import Any
 
 from app.config import DYNAMODB_PERSISTENCE, Settings, get_settings
 from app.dynamo_repository import DynamoRecordRepository, DynamoReminderRepository
+from app.encryption_service import EncryptionService
 from app.google_calendar_repository import (
     DynamoGoogleCalendarConnectionRepository,
     DynamoGoogleOAuthStateRepository,
@@ -94,18 +95,22 @@ def create_google_calendar_connection_repository(
     *,
     local_file_path: str | Path | None = None,
     dynamo_table: Any | None = None,
+    encryption_service: EncryptionService | None = None,
 ) -> GoogleCalendarConnectionRepository:
     resolved_settings = settings or get_settings()
+    resolved_encryption_service = encryption_service or create_encryption_service(resolved_settings)
 
     if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
         return DynamoGoogleCalendarConnectionRepository(
             table_name=resolved_settings.google_calendar_connections_table_name,
             region_name=resolved_settings.aws_region,
             table=dynamo_table,
+            encryption_service=resolved_encryption_service,
         )
 
     return LocalGoogleCalendarConnectionRepository(
-        local_file_path or resolved_settings.local_google_calendar_connections_file
+        local_file_path or resolved_settings.local_google_calendar_connections_file,
+        encryption_service=resolved_encryption_service,
     )
 
 
@@ -125,3 +130,7 @@ def create_google_oauth_state_repository(
         )
 
     return LocalGoogleOAuthStateRepository(local_file_path or resolved_settings.local_google_oauth_states_file)
+
+
+def create_encryption_service(settings: Settings | None = None) -> EncryptionService:
+    return EncryptionService(settings or get_settings())

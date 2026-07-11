@@ -5,8 +5,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.encryption_service import (
+    EncryptedPayload,
+    EncryptionOperationError,
+    EncryptionService,
+    google_token_encryption_context,
+)
 from app.models import GoogleCalendarConnection, GoogleOAuthState
 from app.schemas import GoogleCalendarConnectionStatus
+from app.security_audit import log_security_event
 
 
 class GoogleCalendarConnectionRepository(Protocol):
@@ -32,8 +39,9 @@ class GoogleOAuthStateRepository(Protocol):
 
 
 class LocalGoogleCalendarConnectionRepository:
-    def __init__(self, file_path: str | Path):
+    def __init__(self, file_path: str | Path, encryption_service: EncryptionService | None = None):
         self.file_path = Path(file_path)
+        self.encryption_service = encryption_service
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
@@ -42,7 +50,19 @@ class LocalGoogleCalendarConnectionRepository:
 
     def get_connection(self, user_id: str) -> GoogleCalendarConnection | None:
         with self._lock:
-            return next((item for item in self._read_all_unlocked() if item.user_id == user_id), None)
+            raw_items = self._read_raw_all_unlocked()
+            item = next((item for item in raw_items if item.get("user_id") == user_id), None)
+            if item is None:
+                return None
+
+            connection = self._from_item(item)
+            if self._should_migrate_legacy_tokens(item):
+                try:
+                    self.save_connection(connection)
+                except Exception:
+                    return connection
+                log_security_event("legacy_google_token_migrated", user_id=user_id, result="success")
+            return connection
 
     def save_connection(self, connection: GoogleCalendarConnection) -> GoogleCalendarConnection:
         with self._lock:
@@ -76,17 +96,29 @@ class LocalGoogleCalendarConnectionRepository:
             return self.save_connection(disconnected)
 
     def _read_all_unlocked(self) -> list[GoogleCalendarConnection]:
+        return [self._from_item(item) for item in self._read_raw_all_unlocked()]
+
+    def _read_raw_all_unlocked(self) -> list[dict[str, Any]]:
         if not self.file_path.exists():
             return []
 
         raw_data = json.loads(self.file_path.read_text(encoding="utf-8") or "[]")
-        return [GoogleCalendarConnection.model_validate(item) for item in raw_data]
+        return raw_data if isinstance(raw_data, list) else []
 
     def _write_all_unlocked(self, connections: list[GoogleCalendarConnection]) -> None:
-        serialized = [connection.model_dump(mode="json") for connection in connections]
+        serialized = [self._to_item(connection) for connection in connections]
         temp_path = self.file_path.with_suffix(".tmp")
         temp_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
         os.replace(temp_path, self.file_path)
+
+    def _to_item(self, connection: GoogleCalendarConnection) -> dict[str, Any]:
+        return google_connection_to_item(connection, self.encryption_service)
+
+    def _from_item(self, item: dict[str, Any]) -> GoogleCalendarConnection:
+        return google_connection_from_item(item, self.encryption_service)
+
+    def _should_migrate_legacy_tokens(self, item: dict[str, Any]) -> bool:
+        return should_migrate_legacy_google_tokens(item, self.encryption_service)
 
 
 class LocalGoogleOAuthStateRepository:
@@ -140,10 +172,17 @@ class LocalGoogleOAuthStateRepository:
 
 
 class DynamoGoogleCalendarConnectionRepository:
-    def __init__(self, table_name: str, region_name: str, table: Any | None = None):
+    def __init__(
+        self,
+        table_name: str,
+        region_name: str,
+        table: Any | None = None,
+        encryption_service: EncryptionService | None = None,
+    ):
         self.table_name = table_name
         self.region_name = region_name
         self.table = table or self._build_table(table_name, region_name)
+        self.encryption_service = encryption_service
 
     def get_connection(self, user_id: str) -> GoogleCalendarConnection | None:
         response = self.table.get_item(Key={"user_id": user_id})
@@ -151,7 +190,14 @@ class DynamoGoogleCalendarConnectionRepository:
         if item is None:
             return None
 
-        return self._from_item(item)
+        connection = self._from_item(item)
+        if self._should_migrate_legacy_tokens(item):
+            try:
+                self.save_connection(connection)
+            except Exception:
+                return connection
+            log_security_event("legacy_google_token_migrated", user_id=user_id, result="success")
+        return connection
 
     def save_connection(self, connection: GoogleCalendarConnection) -> GoogleCalendarConnection:
         self.table.put_item(Item=self._to_item(connection))
@@ -180,10 +226,13 @@ class DynamoGoogleCalendarConnectionRepository:
         return boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def _to_item(self, connection: GoogleCalendarConnection) -> dict[str, Any]:
-        return connection.model_dump(mode="json")
+        return google_connection_to_item(connection, self.encryption_service)
 
     def _from_item(self, item: dict[str, Any]) -> GoogleCalendarConnection:
-        return GoogleCalendarConnection.model_validate(item)
+        return google_connection_from_item(item, self.encryption_service)
+
+    def _should_migrate_legacy_tokens(self, item: dict[str, Any]) -> bool:
+        return should_migrate_legacy_google_tokens(item, self.encryption_service)
 
 
 class DynamoGoogleOAuthStateRepository:
@@ -249,3 +298,89 @@ def is_dynamo_conditional_check_failure(exc: Exception) -> bool:
 
     error = response.get("Error")
     return isinstance(error, dict) and error.get("Code") == "ConditionalCheckFailedException"
+
+
+def google_connection_to_item(
+    connection: GoogleCalendarConnection,
+    encryption_service: EncryptionService | None = None,
+) -> dict[str, Any]:
+    item = connection.model_dump(mode="json", exclude_none=True)
+    if encryption_service is None or not encryption_service.enabled or connection.status == GoogleCalendarConnectionStatus.DISCONNECTED:
+        return item
+
+    token_bundle = {
+        "access_token": connection.access_token,
+        "refresh_token": connection.refresh_token,
+        "token_expires_at": connection.token_expires_at.isoformat(),
+        "scopes": connection.scopes,
+    }
+    encrypted = encryption_service.encrypt_json(
+        token_bundle,
+        google_token_encryption_context(connection.user_id),
+    )
+    item.update(
+        {
+            "token_ciphertext": encrypted.ciphertext,
+            "token_encrypted_data_key": encrypted.encrypted_data_key,
+            "token_nonce": encrypted.nonce,
+            "token_encryption_version": encrypted.encryption_version,
+            "token_key_arn": encrypted.key_arn,
+            "token_updated_at": connection.updated_at.isoformat(),
+        }
+    )
+    item.pop("access_token", None)
+    item.pop("refresh_token", None)
+    return item
+
+
+def google_connection_from_item(
+    item: dict[str, Any],
+    encryption_service: EncryptionService | None = None,
+) -> GoogleCalendarConnection:
+    connection = GoogleCalendarConnection.model_validate(item)
+    if not connection.token_ciphertext:
+        return connection
+
+    if encryption_service is None or not encryption_service.enabled:
+        log_security_event("google_token_decrypt_failed", user_id=connection.user_id, result="encryption_unavailable")
+        return connection
+
+    encrypted = EncryptedPayload(
+        ciphertext=connection.token_ciphertext,
+        encrypted_data_key=connection.token_encrypted_data_key or "",
+        nonce=connection.token_nonce or "",
+        encryption_version=connection.token_encryption_version or 0,
+        key_arn=connection.token_key_arn,
+    )
+    try:
+        token_bundle = encryption_service.decrypt_json(
+            encrypted,
+            google_token_encryption_context(connection.user_id),
+        )
+    except EncryptionOperationError:
+        log_security_event("google_token_decrypt_failed", user_id=connection.user_id, result="decrypt_failed")
+        return connection
+
+    updates: dict[str, Any] = {
+        "access_token": safe_string(token_bundle.get("access_token")),
+        "refresh_token": safe_string(token_bundle.get("refresh_token")),
+        "scopes": safe_string(token_bundle.get("scopes")) or connection.scopes,
+    }
+    token_expires_at = token_bundle.get("token_expires_at")
+    if isinstance(token_expires_at, str) and token_expires_at:
+        updates["token_expires_at"] = datetime.fromisoformat(token_expires_at)
+
+    return connection.model_copy(update=updates)
+
+
+def should_migrate_legacy_google_tokens(
+    item: dict[str, Any],
+    encryption_service: EncryptionService | None = None,
+) -> bool:
+    if encryption_service is None or not encryption_service.enabled:
+        return False
+    return bool((item.get("access_token") or item.get("refresh_token")) and not item.get("token_ciphertext"))
+
+
+def safe_string(value: Any) -> str:
+    return value if isinstance(value, str) else ""

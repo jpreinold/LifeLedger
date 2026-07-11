@@ -4,14 +4,17 @@ import { Plus, Save, ShieldCheck, X } from 'lucide-react'
 
 import {
   createRecordInput,
+  createProtectedRecordInput,
   getRecordTypeDefinition,
+  getProtectedFieldLabel,
   normalizeRecordInput,
+  normalizeProtectedRecordInput,
   recordToInput,
   tagsFromText,
   tagsToText,
   type RecordField,
 } from '../lib/recordTypes'
-import type { LifeRecord, RecordInput, RecordType } from '../types/record'
+import type { LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 import { SheetDrawer } from './SheetDrawer'
 
 interface RecordFormProps {
@@ -20,8 +23,8 @@ interface RecordFormProps {
   record: LifeRecord | null
   recordType: RecordType
   onClose: () => void
-  onCreate: (input: RecordInput) => Promise<boolean>
-  onUpdate: (id: string, input: RecordInput) => Promise<boolean>
+  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
+  onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
 }
 
 const dateFields: RecordField[] = ['start_date', 'issue_date', 'expiration_date', 'purchase_date', 'renewal_date']
@@ -36,6 +39,7 @@ export function RecordForm({
   onUpdate,
 }: RecordFormProps) {
   const [form, setForm] = useState<RecordInput>(() => createRecordInput(recordType))
+  const [protectedForm, setProtectedForm] = useState<ProtectedRecordInput>(() => createProtectedRecordInput(recordType))
   const [tagsText, setTagsText] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
   const definition = getRecordTypeDefinition(form.record_type)
@@ -49,6 +53,7 @@ export function RecordForm({
 
     const nextForm = record ? recordToInput(record) : createRecordInput(recordType)
     setForm(nextForm)
+    setProtectedForm(createProtectedRecordInput(nextForm.record_type))
     setTagsText(tagsToText(nextForm.tags))
     setValidationError(null)
   }, [isOpen, record, recordType])
@@ -63,7 +68,8 @@ export function RecordForm({
     }
 
     setValidationError(null)
-    const wasSaved = record ? await onUpdate(record.id, input) : await onCreate(input)
+    const protectedInput = normalizeProtectedRecordInput(input.record_type, protectedForm)
+    const wasSaved = record ? await onUpdate(record.id, input, protectedInput) : await onCreate(input, protectedInput)
 
     if (wasSaved) {
       onClose()
@@ -72,6 +78,10 @@ export function RecordForm({
 
   function updateField(field: keyof RecordInput, value: string | null) {
     setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateProtectedField(field: ProtectedRecordField, value: string | null) {
+    setProtectedForm((current) => ({ ...current, [field]: value }))
   }
 
   return (
@@ -101,7 +111,7 @@ export function RecordForm({
       <form className="reminder-form sheet-body record-form" onSubmit={handleSubmit}>
         <section className="record-safety-note" aria-label="Record privacy guardrails">
           <ShieldCheck size={16} aria-hidden="true" />
-          <span>Keep numbers, passwords, account details, and document identifiers out of records.</span>
+          <span>Do not store SSNs, card or bank data, passwords, recovery codes, keys, or medical documents.</span>
         </section>
 
         <label>
@@ -147,6 +157,13 @@ export function RecordForm({
           </label>
         ) : null}
 
+        <ProtectedRecordFields
+          input={protectedForm}
+          isEditing={isEditing}
+          recordType={form.record_type}
+          onChange={updateProtectedField}
+        />
+
         {validationError ? <p className="field-error">{validationError}</p> : null}
 
         <button className="primary-button" type="submit" disabled={isSaving}>
@@ -183,6 +200,61 @@ function RecordFieldGrid({
         ),
       )}
     </div>
+  )
+}
+
+function ProtectedRecordFields({
+  input,
+  isEditing,
+  onChange,
+  recordType,
+}: {
+  input: ProtectedRecordInput
+  isEditing: boolean
+  onChange: (field: ProtectedRecordField, value: string | null) => void
+  recordType: RecordType
+}) {
+  const definition = getRecordTypeDefinition(recordType)
+
+  if (definition.protectedFields.length === 0) {
+    return null
+  }
+
+  return (
+    <section className="record-protected-section" aria-labelledby="record-protected-heading">
+      <div className="record-protected-header">
+        <div>
+          <h3 id="record-protected-heading">Protected details</h3>
+          <p>Encrypted before storage and revealed only when requested.</p>
+        </div>
+        <ShieldCheck size={17} aria-hidden="true" />
+      </div>
+      {isEditing ? <p className="record-protected-edit-note">Leave blank to keep existing protected details.</p> : null}
+      <div className="record-form-grid">
+        {definition.protectedFields.map((field) =>
+          field === 'sensitive_notes' ? (
+            <label className="record-protected-wide-field" key={field}>
+              <span>{getProtectedFieldLabel(field)}</span>
+              <textarea
+                maxLength={1000}
+                rows={3}
+                value={getProtectedTextValue(input, field)}
+                onChange={(event) => onChange(field, event.target.value || null)}
+              />
+            </label>
+          ) : (
+            <label key={field}>
+              <span>{getProtectedFieldLabel(field)}</span>
+              <input
+                maxLength={field === 'vin' ? 17 : 120}
+                value={getProtectedTextValue(input, field)}
+                onChange={(event) => onChange(field, event.target.value || null)}
+              />
+            </label>
+          ),
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -259,6 +331,11 @@ function RecordTextArea({
 }
 
 function getTextValue(form: RecordInput, field: RecordField) {
+  const value = form[field]
+  return typeof value === 'string' ? value : ''
+}
+
+function getProtectedTextValue(form: ProtectedRecordInput, field: ProtectedRecordField) {
   const value = form[field]
   return typeof value === 'string' ? value : ''
 }

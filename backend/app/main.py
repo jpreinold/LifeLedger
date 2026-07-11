@@ -23,6 +23,13 @@ from app.birthdays import (
     get_next_birthday_due_date,
 )
 from app.config import Settings, get_settings
+from app.encryption_service import (
+    EncryptedPayload,
+    EncryptionConfigurationError,
+    EncryptionOperationError,
+    EncryptionService,
+    record_encryption_context,
+)
 from app.google_calendar_repository import GoogleCalendarConnectionRepository, GoogleOAuthStateRepository
 from app.google_calendar_service import (
     GoogleCalendarAuthError,
@@ -57,6 +64,7 @@ from app.repository import ReminderRepository
 from app.repository_factory import (
     create_google_calendar_connection_repository,
     create_google_oauth_state_repository,
+    create_encryption_service,
     create_preferences_repository,
     create_push_subscription_repository,
     create_record_repository,
@@ -80,12 +88,15 @@ from app.schemas import (
     PushSubscriptionCreate,
     PushSubscriptionResponse,
     PushTestResponse,
+    ProtectedRecordPayload,
+    ProtectedRecordStatusResponse,
     ReminderCreate,
     ReminderAlertResponse,
     ReminderLeadUnit,
     RecordCreate,
     RecordResponse,
     RecordStatus,
+    RecordType,
     RecordUpdate,
     ReminderResponse,
     ReminderType,
@@ -93,6 +104,7 @@ from app.schemas import (
     RenewalDetails,
     RepeatOption,
 )
+from app.security_audit import log_security_event
 from app.push_sender import (
     InvalidPushSubscriptionError,
     PushConfigurationError,
@@ -115,6 +127,18 @@ TEST_PUSH_PAYLOAD = PushPayload(
     tag="test-push",
     type="test_push",
 )
+PROTECTED_RECORD_FIELDS_BY_TYPE: dict[RecordType, set[str]] = {
+    RecordType.GENERAL: {"sensitive_notes"},
+    RecordType.PASSPORT: {"document_number"},
+    RecordType.DRIVER_LICENSE: {"license_number"},
+    RecordType.VEHICLE: {"vin"},
+    RecordType.INSURANCE: {"policy_number", "member_number"},
+    RecordType.APPLIANCE: {"serial_number"},
+    RecordType.PET: set(),
+    RecordType.HOME: set(),
+    RecordType.SUBSCRIPTION: {"account_reference"},
+    RecordType.WARRANTY: {"serial_number"},
+}
 
 app.add_middleware(
     CORSMiddleware,
@@ -166,6 +190,10 @@ def get_google_calendar_service(app_settings: Settings = Depends(get_app_setting
 
 def get_push_sender(app_settings: Settings = Depends(get_app_settings)) -> PushSender:
     return PyWebPushSender(app_settings)
+
+
+def get_encryption_service(app_settings: Settings = Depends(get_app_settings)) -> EncryptionService:
+    return create_encryption_service(app_settings)
 
 
 @app.get("/health")
@@ -296,6 +324,136 @@ def delete_record(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/records/{record_id}/protected/status", response_model=ProtectedRecordStatusResponse)
+def get_protected_record_status(
+    record_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> ProtectedRecordStatusResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    return to_protected_record_status(record)
+
+
+@app.put("/records/{record_id}/protected", response_model=ProtectedRecordStatusResponse)
+def set_protected_record_payload(
+    record_id: str,
+    payload: ProtectedRecordPayload,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
+) -> ProtectedRecordStatusResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    values = payload.safe_values()
+    validate_protected_record_fields(record, values)
+    now = utc_now()
+
+    if not values:
+        cleared = repo.update_record(clear_record_protected_fields(record, now))
+        log_security_event(
+            "protected_record_cleared",
+            user_id=current_user.user_id,
+            record_id=record.id,
+            record_type=record.record_type.value,
+            result="success",
+        )
+        return to_protected_record_status(cleared)
+
+    try:
+        encrypted = encryption_service.encrypt_json(values, record_encryption_context(record.user_id, record.id))
+    except EncryptionConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.safe_message) from exc
+    except EncryptionOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.safe_message) from exc
+
+    updated = record.model_copy(
+        update={
+            "protected_ciphertext": encrypted.ciphertext,
+            "protected_encrypted_data_key": encrypted.encrypted_data_key,
+            "protected_nonce": encrypted.nonce,
+            "protected_encryption_version": encrypted.encryption_version,
+            "protected_key_arn": encrypted.key_arn,
+            "protected_updated_at": now,
+            "protected_field_names": sorted(values.keys()),
+            "updated_at": now,
+        }
+    )
+    saved = repo.update_record(updated)
+    log_security_event(
+        "protected_record_set",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        record_type=record.record_type.value,
+        result="success",
+    )
+    return to_protected_record_status(saved)
+
+
+@app.get("/records/{record_id}/protected", response_model=ProtectedRecordPayload)
+def reveal_protected_record_payload(
+    record_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
+) -> ProtectedRecordPayload:
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    record = require_record(repo, current_user.user_id, record_id)
+
+    if not record_has_protected_data(record):
+        return ProtectedRecordPayload()
+
+    try:
+        decrypted = encryption_service.decrypt_json(record_encrypted_payload(record), record_encryption_context(record.user_id, record.id))
+    except EncryptionConfigurationError as exc:
+        log_security_event(
+            "protected_record_decrypt_failed",
+            user_id=current_user.user_id,
+            record_id=record.id,
+            record_type=record.record_type.value,
+            result="configuration_missing",
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.safe_message) from exc
+    except EncryptionOperationError as exc:
+        log_security_event(
+            "protected_record_decrypt_failed",
+            user_id=current_user.user_id,
+            record_id=record.id,
+            record_type=record.record_type.value,
+            result="decrypt_failed",
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.safe_message) from exc
+
+    allowed = protected_fields_for_record(record)
+    safe_payload = {field: value for field, value in decrypted.items() if field in allowed}
+    log_security_event(
+        "protected_record_revealed",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        record_type=record.record_type.value,
+        result="success",
+    )
+    return ProtectedRecordPayload.model_validate(safe_payload)
+
+
+@app.delete("/records/{record_id}/protected", response_model=ProtectedRecordStatusResponse)
+def clear_protected_record_payload(
+    record_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> ProtectedRecordStatusResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    cleared = repo.update_record(clear_record_protected_fields(record, utc_now()))
+    log_security_event(
+        "protected_record_cleared",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        record_type=record.record_type.value,
+        result="success",
+    )
+    return to_protected_record_status(cleared)
 
 
 @app.get("/preferences/digest", response_model=DigestPreferences)
@@ -1270,7 +1428,74 @@ def require_record(repo: RecordRepository, user_id: str, record_id: str) -> Reco
 
 
 def to_record_response(record: Record) -> RecordResponse:
-    return RecordResponse.model_validate(record)
+    return RecordResponse.model_validate(
+        {
+            **record.model_dump(),
+            "has_protected_data": record_has_protected_data(record),
+            "protected_field_names": safe_protected_field_names(record),
+        }
+    )
+
+
+def to_protected_record_status(record: Record) -> ProtectedRecordStatusResponse:
+    return ProtectedRecordStatusResponse(
+        has_protected_data=record_has_protected_data(record),
+        protected_field_names=safe_protected_field_names(record),
+        protected_encryption_version=record.protected_encryption_version if record_has_protected_data(record) else None,
+        protected_updated_at=record.protected_updated_at if record_has_protected_data(record) else None,
+    )
+
+
+def record_has_protected_data(record: Record) -> bool:
+    return bool(record.protected_ciphertext and record.protected_encrypted_data_key and record.protected_nonce)
+
+
+def safe_protected_field_names(record: Record) -> list[str]:
+    if not record_has_protected_data(record):
+        return []
+    allowed = protected_fields_for_record(record)
+    return sorted(field for field in record.protected_field_names if field in allowed)
+
+
+def protected_fields_for_record(record: Record) -> set[str]:
+    return PROTECTED_RECORD_FIELDS_BY_TYPE.get(record.record_type, set())
+
+
+def validate_protected_record_fields(record: Record, values: dict[str, str]) -> None:
+    allowed = protected_fields_for_record(record)
+    unsupported_fields = set(values) - allowed
+    if unsupported_fields:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="One or more protected fields are not supported for this record type.",
+        )
+
+
+def record_encrypted_payload(record: Record) -> EncryptedPayload:
+    if not record_has_protected_data(record):
+        raise EncryptionOperationError()
+    return EncryptedPayload(
+        ciphertext=record.protected_ciphertext or "",
+        encrypted_data_key=record.protected_encrypted_data_key or "",
+        nonce=record.protected_nonce or "",
+        encryption_version=record.protected_encryption_version or 0,
+        key_arn=record.protected_key_arn,
+    )
+
+
+def clear_record_protected_fields(record: Record, now: datetime) -> Record:
+    return record.model_copy(
+        update={
+            "protected_ciphertext": None,
+            "protected_encrypted_data_key": None,
+            "protected_nonce": None,
+            "protected_encryption_version": None,
+            "protected_key_arn": None,
+            "protected_updated_at": None,
+            "protected_field_names": [],
+            "updated_at": now,
+        }
+    )
 
 
 def to_response(reminder: Reminder) -> ReminderResponse:

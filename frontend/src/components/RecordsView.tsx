@@ -1,4 +1,4 @@
-import { Archive, ChevronRight, FileText, Plus } from 'lucide-react'
+import { Archive, ChevronRight, FileText, LockKeyhole, Plus } from 'lucide-react'
 
 import {
   formatRecordKeyDate,
@@ -133,6 +133,12 @@ function RecordCard({ record, onView }: { record: LifeRecord; onView: () => void
           <span>{record.subtitle || definition.category}</span>
           {keyDate ? <small>{keyDate}</small> : null}
           {providerLine ? <small>{providerLine}</small> : null}
+          {record.has_protected_data ? (
+            <small className="record-protected-indicator">
+              <LockKeyhole size={13} aria-hidden="true" />
+              Protected details saved
+            </small>
+          ) : null}
         </span>
         <ChevronRight size={18} aria-hidden="true" className="record-card-chevron" />
       </button>

@@ -1,6 +1,6 @@
 # LifeLedger Backend
 
-FastAPI backend for LifeLedger reminders and records. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and remain separate from reminders.
+FastAPI backend for LifeLedger reminders and records. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and remain separate from reminders. Optional protected record details and Google OAuth token bundles are application-encrypted before persistence when encryption is configured.
 
 ## Run Locally
 
@@ -36,6 +36,7 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `POST /reminders/{id}/complete` requires authentication in Cognito mode.
 - `GET /preferences/digest` and `PUT /preferences/digest` require authentication in Cognito mode.
 - `GET /records`, `POST /records`, `GET /records/{id}`, `PUT /records/{id}`, `POST /records/{id}/archive`, `POST /records/{id}/restore`, and `DELETE /records/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
+- `GET /records/{id}/protected/status`, `PUT /records/{id}/protected`, `GET /records/{id}/protected`, and `DELETE /records/{id}/protected` require authentication, verify record ownership, keep protected values out of standard record responses, and reveal plaintext only through the explicit no-store reveal route.
 - `GET /push/config`, `GET /push/status`, `GET /push/subscriptions`, `POST /push/subscriptions`, `POST /push/test`, and `DELETE /push/subscriptions/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
 - `GET /integrations/google-calendar/status`, `POST /integrations/google-calendar/connect`, `POST /integrations/google-calendar/callback`, and `DELETE /integrations/google-calendar/disconnect` require authentication in Cognito mode and are scoped to the authenticated user.
 - `POST /reminders/{id}/calendar-sync/enable` and `POST /reminders/{id}/calendar-sync/disable` require authentication and only operate on reminders owned by the authenticated user.
@@ -52,6 +53,8 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `app/records_repository.py` defines the record repository protocol and local JSON repository.
 - `app/dynamo_repository.py` implements DynamoDB repositories with `user_id` plus `id` keys.
 - `app/config.py` reads environment configuration with local-safe defaults.
+- `app/encryption_service.py` provides AES-256-GCM envelope encryption for protected record fields and Google token bundles, with local and KMS modes.
+- `app/secret_provider.py` retrieves Google OAuth and push private secrets from AWS Secrets Manager with process-level caching.
 - `app/repository_factory.py` selects repositories in one place.
 - `app/google_calendar_repository.py` stores backend-only Google Calendar connections and OAuth states in local JSON or DynamoDB.
 - `app/google_calendar_service.py` builds Google OAuth URLs, exchanges/refreshes tokens, and creates/updates/deletes all-day Calendar events.
@@ -60,7 +63,7 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 
 The route layer stays unaware of whether reminders or records are stored in JSON files or DynamoDB. It only receives a current user context and passes `user_id` into the repository layer. The frontend never sends or controls `user_id`.
 
-Record schemas are safe-by-default. They support `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty` types, plus safe text/date/tag fields. They intentionally omit passport numbers, driver license numbers, SSNs, payment card numbers, bank account numbers, insurance policy numbers, VINs, passwords, credentials, API keys, uploaded documents, OCR, and AI/RAG fields.
+Normal record schemas are safe-by-default. They support `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty` types, plus safe text/date/tag fields. Protected fields are handled by dedicated write/reveal schemas and encrypted before storage. This is not zero-knowledge encryption: the authenticated backend can decrypt protected values after ownership validation and explicit reveal. Do not store SSNs, payment card data, banking data, passwords, PINs, recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, uploaded documents, OCR, or AI/RAG data.
 
 ## Environment Variables
 
@@ -85,16 +88,34 @@ Local development does not require environment variables.
 | `GOOGLE_OAUTH_STATES_TABLE_NAME` | `lifeledger-google-oauth-states-auth` | DynamoDB OAuth state table name. |
 | `LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE` | `backend/data/google-calendar-connections.json` locally, `/tmp/lifeledger-google-calendar-connections.json` in Lambda/SAM local | JSON file used for Google Calendar connections in local persistence. |
 | `LOCAL_GOOGLE_OAUTH_STATES_FILE` | `backend/data/google-oauth-states.json` locally, `/tmp/lifeledger-google-oauth-states.json` in Lambda/SAM local | JSON file used for OAuth states in local persistence. |
+| `RECORD_ENCRYPTION_MODE` | `disabled` | `disabled`, `local`, or `kms`. Production should use `kms`. |
+| `DATA_ENCRYPTION_KMS_KEY_ARN` | empty | KMS key ARN used by the API Lambda in `kms` mode. |
+| `LOCAL_RECORDS_ENCRYPTION_KEY` | empty | Base64-encoded 32-byte local wrapping key for local protected-record testing. Never commit it. |
 | `GOOGLE_CLIENT_ID` | empty | Google OAuth web client ID for Calendar sync. |
-| `GOOGLE_CLIENT_SECRET` | empty | Google OAuth web client secret. Backend-only; do not commit or expose to frontend env vars. |
+| `GOOGLE_OAUTH_SECRET_ARN` | empty | Secrets Manager ARN for JSON `{"client_secret":"..."}` in production. |
+| `GOOGLE_CLIENT_SECRET` | empty | Local-only plaintext fallback. Production defaults to disallow plaintext fallback. |
 | `GOOGLE_OAUTH_REDIRECT_URI` | empty | Authorized Google OAuth redirect URI used for code exchange. |
 | `GOOGLE_CALENDAR_SCOPES` | `https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly` | Calendar event write scope plus CalendarList read-only scope for the Settings picker. |
 | `VAPID_PUBLIC_KEY` | empty | Public VAPID key. |
-| `VAPID_PRIVATE_KEY` | empty | Private VAPID key used only by the backend sender. Do not commit it. |
+| `PUSH_SECRET_ARN` | empty | Secrets Manager ARN for JSON `{"vapid_private_key":"..."}` in production. |
+| `VAPID_PRIVATE_KEY` | empty | Local-only plaintext fallback. Do not commit it. |
 | `VAPID_SUBJECT` | empty | VAPID contact subject such as `mailto:you@example.com`. |
+| `ALLOW_PLAINTEXT_PRODUCTION_SECRETS` | `false` | Production guard for legacy plaintext secret fallback. Keep false for normal production. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 
-Generate VAPID keys with `npx web-push generate-vapid-keys`. The backend receives `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`; the frontend receives only `VITE_VAPID_PUBLIC_KEY`. Google Calendar sync requires a Google Cloud OAuth web client, an OAuth consent screen/test users for private beta, and an authorized redirect URI that exactly matches `GOOGLE_OAUTH_REDIRECT_URI`. The Google client secret stays backend-only. Existing Google Calendar connections may need to reconnect once to grant the CalendarList read-only scope used by the calendar picker.
+Generate VAPID keys with `npx web-push generate-vapid-keys`. The backend receives `VAPID_PUBLIC_KEY`, `PUSH_SECRET_ARN`, and `VAPID_SUBJECT`; the frontend receives only `VITE_VAPID_PUBLIC_KEY`. Google Calendar sync requires a Google Cloud OAuth web client, an OAuth consent screen/test users for private beta, and an authorized redirect URI that exactly matches `GOOGLE_OAUTH_REDIRECT_URI`. The Google client secret and VAPID private key stay backend-only in Secrets Manager for production. Existing Google Calendar connections may need to reconnect once to grant the CalendarList read-only scope used by the calendar picker.
+
+Local protected-field testing can use a generated base64 32-byte key:
+
+```powershell
+$keyBytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($keyBytes)
+$env:RECORD_ENCRYPTION_MODE = "local"
+$env:LOCAL_RECORDS_ENCRYPTION_KEY = [Convert]::ToBase64String($keyBytes)
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+If local encryption is enabled without a key, protected-field writes fail closed. Existing non-protected records continue to work.
 
 ## Authentication Modes
 
@@ -148,7 +169,7 @@ Reminder and record items are scoped by `user_id`. The deployed DynamoDB tables 
 handler = Mangum(app)
 ```
 
-SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, retained DynamoDB tables for reminders, records, preferences, push subscriptions, Google Calendar connections, and OAuth states, a scheduled Daily Digest push Lambda, and CRUD permissions for the Lambda functions.
+SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, a retained customer-managed KMS key and alias, retained DynamoDB tables for reminders, records, preferences, push subscriptions, Google Calendar connections, and OAuth states, a scheduled Daily Digest push Lambda, and scoped CRUD/KMS/Secrets Manager permissions for the Lambda functions. The API Lambda can use the data KMS key with encryption context `app=lifeledger`; the Digest push Lambda can read only the push secret and cannot decrypt protected records.
 
 SAM local uses `backend/env.local.json`, which sets local auth and local persistence:
 
@@ -189,14 +210,15 @@ Use these parameter values for deployed auth:
 ```text
 AuthMode=cognito
 PersistenceMode=dynamodb
+RecordEncryptionMode=kms
 RemindersTableName=lifeledger-reminders-auth
 RecordsTableName=lifeledger-records-auth
 CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 VapidPublicKey=<public-vapid-key>
-VapidPrivateKey=<private-vapid-key>
+PushSecretArn=<secrets-manager-arn-with-vapid_private_key>
 VapidSubject=mailto:you@example.com
 GoogleClientId=<google-oauth-web-client-id>
-GoogleClientSecret=<google-oauth-web-client-secret>
+GoogleOAuthSecretArn=<secrets-manager-arn-with-client_secret>
 GoogleOAuthRedirectUri=<authorized-google-oauth-redirect-uri>
 GoogleCalendarScopes=https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly
 ```

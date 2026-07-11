@@ -1,3 +1,5 @@
+import json
+import base64
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
@@ -6,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import UserContext, get_current_user
 from app.config import load_settings
+from app.encryption_service import EncryptionService
 from app.google_calendar_repository import (
     DynamoGoogleCalendarConnectionRepository,
     DynamoGoogleOAuthStateRepository,
@@ -705,3 +708,75 @@ def test_dynamo_google_oauth_state_consumes_legacy_null_consumed_at():
 
     assert consumed is not None
     assert consumed.consumed_at == now
+
+
+def encrypted_settings():
+    return load_settings(
+        {
+            "RECORD_ENCRYPTION_MODE": "local",
+            "LOCAL_RECORDS_ENCRYPTION_KEY": base64.b64encode(b"2" * 32).decode("ascii"),
+        }
+    )
+
+
+def test_google_connection_repository_encrypts_new_token_bundle(tmp_path):
+    connection_file = tmp_path / "connections.json"
+    repo = LocalGoogleCalendarConnectionRepository(
+        connection_file,
+        encryption_service=EncryptionService(encrypted_settings()),
+    )
+
+    saved = save_connection(repo, "user-a")
+
+    raw_items = json.loads(connection_file.read_text(encoding="utf-8"))
+    raw_item = raw_items[0]
+    assert "access_token" not in raw_item
+    assert "refresh_token" not in raw_item
+    assert raw_item["token_ciphertext"]
+    assert raw_item["token_encrypted_data_key"]
+    assert "access-token" not in str(raw_item)
+    assert "refresh-token" not in str(raw_item)
+
+    loaded = repo.get_connection("user-a")
+    assert loaded.access_token == saved.access_token
+    assert loaded.refresh_token == saved.refresh_token
+
+
+def test_legacy_google_token_migration_removes_plaintext_after_success(tmp_path):
+    connection_file = tmp_path / "connections.json"
+    legacy_repo = LocalGoogleCalendarConnectionRepository(connection_file)
+    save_connection(legacy_repo, "user-a")
+
+    repo = LocalGoogleCalendarConnectionRepository(
+        connection_file,
+        encryption_service=EncryptionService(encrypted_settings()),
+    )
+    loaded = repo.get_connection("user-a")
+
+    assert loaded.access_token == "access-token"
+    assert loaded.refresh_token == "refresh-token"
+    raw_item = json.loads(connection_file.read_text(encoding="utf-8"))[0]
+    assert "access_token" not in raw_item
+    assert "refresh_token" not in raw_item
+    assert raw_item["token_ciphertext"]
+
+
+def test_failed_google_token_migration_keeps_legacy_plaintext_copy(tmp_path, monkeypatch):
+    connection_file = tmp_path / "connections.json"
+    legacy_repo = LocalGoogleCalendarConnectionRepository(connection_file)
+    save_connection(legacy_repo, "user-a")
+    repo = LocalGoogleCalendarConnectionRepository(
+        connection_file,
+        encryption_service=EncryptionService(encrypted_settings()),
+    )
+
+    def fail_save(_connection):
+        raise RuntimeError("write failed")
+
+    monkeypatch.setattr(repo, "save_connection", fail_save)
+    loaded = repo.get_connection("user-a")
+
+    assert loaded.access_token == "access-token"
+    raw_item = json.loads(connection_file.read_text(encoding="utf-8"))[0]
+    assert raw_item["access_token"] == "access-token"
+    assert raw_item["refresh_token"] == "refresh-token"

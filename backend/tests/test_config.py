@@ -20,6 +20,9 @@ from app.config import (
     LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE,
     LOCAL_AUTH_MODE,
     LOCAL_PERSISTENCE,
+    RECORD_ENCRYPTION_DISABLED,
+    RECORD_ENCRYPTION_KMS,
+    RECORD_ENCRYPTION_LOCAL,
     load_settings,
 )
 
@@ -59,6 +62,11 @@ def test_config_defaults_are_local_safe():
     assert settings.push_notifications_configured is False
     assert settings.google_calendar_configured is False
     assert settings.google_calendar_scopes == DEFAULT_GOOGLE_CALENDAR_SCOPES
+    assert settings.record_encryption_mode == RECORD_ENCRYPTION_DISABLED
+    assert settings.data_encryption_kms_key_arn == ""
+    assert settings.google_oauth_secret_arn == ""
+    assert settings.push_secret_arn == ""
+    assert settings.allow_plaintext_production_secrets is False
     assert settings.cors_allowed_origins == DEFAULT_CORS_ALLOWED_ORIGINS
     assert "https://lifeledger.jpreinold.com" in settings.cors_allowed_origins
     assert "https://www.lifeledger.jpreinold.com" in settings.cors_allowed_origins
@@ -80,6 +88,12 @@ def test_config_reads_environment_values():
             "VAPID_PUBLIC_KEY": "public",
             "VAPID_PRIVATE_KEY": "private",
             "VAPID_SUBJECT": "mailto:test@example.com",
+            "DATA_ENCRYPTION_KMS_KEY_ARN": "arn:aws:kms:us-west-2:123456789012:key/example",
+            "RECORD_ENCRYPTION_MODE": "kms",
+            "LOCAL_RECORDS_ENCRYPTION_KEY": "local-key",
+            "GOOGLE_OAUTH_SECRET_ARN": "arn:aws:secretsmanager:us-west-2:123456789012:secret:google",
+            "PUSH_SECRET_ARN": "arn:aws:secretsmanager:us-west-2:123456789012:secret:push",
+            "ALLOW_PLAINTEXT_PRODUCTION_SECRETS": "true",
             "AWS_REGION": "us-west-2",
             "GOOGLE_CLIENT_ID": "google-client-id",
             "GOOGLE_CLIENT_SECRET": "google-client-secret",
@@ -101,6 +115,12 @@ def test_config_reads_environment_values():
     assert settings.google_oauth_states_table_name == "custom-google-states"
     assert settings.push_notifications_configured is True
     assert settings.google_calendar_configured is True
+    assert settings.record_encryption_mode == RECORD_ENCRYPTION_KMS
+    assert settings.data_encryption_kms_key_arn == "arn:aws:kms:us-west-2:123456789012:key/example"
+    assert settings.local_records_encryption_key == "local-key"
+    assert settings.google_oauth_secret_arn == "arn:aws:secretsmanager:us-west-2:123456789012:secret:google"
+    assert settings.push_secret_arn == "arn:aws:secretsmanager:us-west-2:123456789012:secret:push"
+    assert settings.allow_plaintext_production_secrets is True
     assert settings.aws_region == "us-west-2"
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
@@ -164,3 +184,48 @@ def test_config_rejects_unknown_persistence_mode():
 def test_config_rejects_unknown_auth_mode():
     with pytest.raises(ValueError):
         load_settings({"AUTH_MODE": "magic-link"})
+
+
+def test_config_rejects_unknown_record_encryption_mode():
+    with pytest.raises(ValueError):
+        load_settings({"RECORD_ENCRYPTION_MODE": "plaintext"})
+
+
+def test_production_disallows_plaintext_secret_fallback_by_default():
+    settings = load_settings(
+        {
+            "APP_ENV": "production",
+            "GOOGLE_CLIENT_ID": "client-id",
+            "GOOGLE_CLIENT_SECRET": "client-secret",
+            "GOOGLE_OAUTH_REDIRECT_URI": "https://example.com/oauth",
+            "VAPID_PUBLIC_KEY": "public",
+            "VAPID_PRIVATE_KEY": "private",
+            "VAPID_SUBJECT": "mailto:test@example.com",
+        }
+    )
+
+    assert settings.google_calendar_configured is False
+    assert settings.push_notifications_configured is False
+
+
+def test_secret_arns_configure_production_google_and_push():
+    settings = load_settings(
+        {
+            "APP_ENV": "production",
+            "GOOGLE_CLIENT_ID": "client-id",
+            "GOOGLE_OAUTH_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:google",
+            "GOOGLE_OAUTH_REDIRECT_URI": "https://example.com/oauth",
+            "VAPID_PUBLIC_KEY": "public",
+            "PUSH_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:push",
+            "VAPID_SUBJECT": "mailto:test@example.com",
+        }
+    )
+
+    assert settings.google_calendar_configured is True
+    assert settings.push_notifications_configured is True
+
+
+def test_local_record_encryption_mode_can_be_selected():
+    settings = load_settings({"RECORD_ENCRYPTION_MODE": "local"})
+
+    assert settings.record_encryption_mode == RECORD_ENCRYPTION_LOCAL

@@ -53,6 +53,7 @@ import {
   emptyMaintenanceDetails,
   emptyRenewalDetails,
 } from './lib/reminderInput'
+import { hasProtectedRecordInput } from './lib/recordTypes'
 import {
   defaultDigestPreferences,
   digestLookaheadOptions,
@@ -62,7 +63,7 @@ import {
   type DigestPreferencesUpdate,
 } from './types/preferences'
 import type { Reminder, ReminderAlert, ReminderInput } from './types/reminder'
-import type { LifeRecord, RecordInput, RecordType } from './types/record'
+import type { LifeRecord, ProtectedRecordInput, ProtectedRecordStatus, RecordInput, RecordType } from './types/record'
 import type { RecordFilter } from './lib/recordTypes'
 
 function App() {
@@ -376,16 +377,28 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleCreateRecord(input: RecordInput) {
+  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
 
     try {
-      await recordsApi.create(input)
+      const created = await recordsApi.create(input)
+      let protectedSaved = true
+      if (hasProtectedRecordInput(protectedInput)) {
+        try {
+          await recordsApi.setProtected(created.id, protectedInput)
+        } catch {
+          protectedSaved = false
+        }
+      }
       await loadRecordData()
       setActivePage('records')
-      setNotice('Record added.')
+      if (protectedSaved) {
+        setNotice('Record added.')
+      } else {
+        setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
+      }
       return true
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to create record.')
@@ -395,16 +408,30 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleUpdateRecord(id: string, input: RecordInput) {
+  async function handleUpdateRecord(id: string, input: RecordInput, protectedInput: ProtectedRecordInput) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
 
     try {
       const updated = await recordsApi.update(id, input)
+      let nextRecord = updated
+      let protectedSaved = true
+      if (hasProtectedRecordInput(protectedInput)) {
+        try {
+          const protectedStatus = await recordsApi.setProtected(id, protectedInput)
+          nextRecord = withProtectedStatus(updated, protectedStatus)
+        } catch {
+          protectedSaved = false
+        }
+      }
       await loadRecordData()
-      setViewingRecord((current) => (current?.id === id ? updated : current))
-      setNotice('Record updated.')
+      setViewingRecord((current) => (current?.id === id ? nextRecord : current))
+      if (protectedSaved) {
+        setNotice('Record updated.')
+      } else {
+        setError('Record updated, but protected details were not saved. Protected record storage may not be configured.')
+      }
       return true
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to update record.')
@@ -602,6 +629,12 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
+  function handleProtectedRecordStatusChange(id: string, protectedStatus: ProtectedRecordStatus) {
+    setRecords((current) => current.map((record) => (record.id === id ? withProtectedStatus(record, protectedStatus) : record)))
+    setViewingRecord((current) => (current?.id === id ? withProtectedStatus(current, protectedStatus) : current))
+    setEditingRecord((current) => (current?.id === id ? withProtectedStatus(current, protectedStatus) : current))
+  }
+
   function openAddReminder() {
     setAddDateContext(null)
     setEditingRecord(null)
@@ -729,6 +762,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function showPage(page: AppPage) {
+    if (page !== 'records') {
+      setViewingRecord(null)
+    }
     setActivePage(page)
     document.getElementById('app-top')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -1036,6 +1072,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onArchive={handleArchiveRecord}
           onClose={() => setViewingRecord(null)}
           onEdit={openRecordDetailEdit}
+          onProtectedStatusChange={handleProtectedRecordStatusChange}
           onRequestDelete={requestRecordDelete}
           onRestore={handleRestoreRecord}
         />
@@ -2061,6 +2098,14 @@ function getRecordDeleteConfirmationBody(record: LifeRecord | null) {
   }
 
   return 'Are you sure you want to delete this record? This cannot be undone.'
+}
+
+function withProtectedStatus(record: LifeRecord, protectedStatus: ProtectedRecordStatus): LifeRecord {
+  return {
+    ...record,
+    has_protected_data: protectedStatus.has_protected_data,
+    protected_field_names: protectedStatus.protected_field_names,
+  }
 }
 
 function getDateOverride(date: string | null): Partial<ReminderInput> {

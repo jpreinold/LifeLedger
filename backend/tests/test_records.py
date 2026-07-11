@@ -1,12 +1,15 @@
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
+import base64
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import UserContext, get_current_user
+from app.config import load_settings
 from app.dynamo_repository import DynamoRecordRepository
-from app.main import app, get_record_repository
+from app.encryption_service import EncryptionService
+from app.main import app, get_encryption_service, get_record_repository
 from app.models import Record
 from app.records_repository import LocalRecordRepository
 from app.schemas import RecordCreate, RecordResponse, RecordStatus, RecordUpdate
@@ -20,6 +23,25 @@ def record_repo(tmp_path):
 @pytest.fixture()
 def client(record_repo):
     app.dependency_overrides[get_record_repository] = lambda: record_repo
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def encrypted_client(record_repo):
+    encryption_service = EncryptionService(
+        load_settings(
+            {
+                "RECORD_ENCRYPTION_MODE": "local",
+                "LOCAL_RECORDS_ENCRYPTION_KEY": base64.b64encode(b"1" * 32).decode("ascii"),
+            }
+        )
+    )
+    app.dependency_overrides[get_record_repository] = lambda: record_repo
+    app.dependency_overrides[get_encryption_service] = lambda: encryption_service
 
     with TestClient(app) as test_client:
         yield test_client
@@ -215,6 +237,104 @@ def test_sensitive_identifier_fields_are_not_exposed_in_record_schemas():
 
     for schema in (RecordCreate, RecordUpdate, RecordResponse):
         assert forbidden_fields.isdisjoint(schema.model_fields)
+
+
+def test_protected_payload_is_encrypted_and_omitted_from_standard_responses(encrypted_client, record_repo, caplog):
+    caplog.set_level("INFO", logger="app.security")
+    created = encrypted_client.post("/records", json=record_payload(record_type="passport", title="Passport")).json()
+
+    protected_response = encrypted_client.put(
+        f"/records/{created['id']}/protected",
+        json={"document_number": "P1234567"},
+    )
+    assert protected_response.status_code == 200
+    assert protected_response.json()["has_protected_data"] is True
+    assert protected_response.json()["protected_field_names"] == ["document_number"]
+
+    saved = record_repo.get_record("local-dev-user", created["id"])
+    assert saved is not None
+    assert saved.protected_ciphertext
+    assert saved.protected_encrypted_data_key
+    assert saved.protected_nonce
+    assert "P1234567" not in str(saved.model_dump())
+
+    list_body = encrypted_client.get("/records").json()
+    detail_body = encrypted_client.get(f"/records/{created['id']}").json()
+    assert "P1234567" not in str(list_body)
+    assert "P1234567" not in str(detail_body)
+    assert list_body[0]["has_protected_data"] is True
+    assert detail_body["protected_field_names"] == ["document_number"]
+    assert "protected_ciphertext" not in detail_body
+    assert "protected_encrypted_data_key" not in detail_body
+
+    assert "P1234567" not in caplog.text
+
+
+def test_reveal_is_explicit_no_store_and_user_scoped(encrypted_client):
+    set_auth_user("user-a")
+    created = encrypted_client.post("/records", json=record_payload(record_type="passport", title="Passport")).json()
+    assert encrypted_client.put(f"/records/{created['id']}/protected", json={"document_number": "P1234567"}).status_code == 200
+
+    reveal_response = encrypted_client.get(f"/records/{created['id']}/protected")
+    assert reveal_response.status_code == 200
+    assert reveal_response.json()["document_number"] == "P1234567"
+    assert reveal_response.headers["cache-control"] == "no-store, private"
+    assert reveal_response.headers["pragma"] == "no-cache"
+
+    set_auth_user("user-b")
+    assert encrypted_client.get(f"/records/{created['id']}/protected/status").status_code == 404
+    assert encrypted_client.get(f"/records/{created['id']}/protected").status_code == 404
+    assert encrypted_client.put(f"/records/{created['id']}/protected", json={"document_number": "blocked"}).status_code == 404
+    assert encrypted_client.delete(f"/records/{created['id']}/protected").status_code == 404
+
+
+def test_copied_protected_ciphertext_does_not_decrypt_under_another_record_context(encrypted_client, record_repo):
+    set_auth_user("user-a")
+    first = encrypted_client.post("/records", json=record_payload(record_type="passport", title="First")).json()
+    second = encrypted_client.post("/records", json=record_payload(record_type="passport", title="Second")).json()
+    encrypted_client.put(f"/records/{first['id']}/protected", json={"document_number": "P1234567"})
+
+    first_record = record_repo.get_record("user-a", first["id"])
+    second_record = record_repo.get_record("user-a", second["id"])
+    copied = second_record.model_copy(
+        update={
+            "protected_ciphertext": first_record.protected_ciphertext,
+            "protected_encrypted_data_key": first_record.protected_encrypted_data_key,
+            "protected_nonce": first_record.protected_nonce,
+            "protected_encryption_version": first_record.protected_encryption_version,
+            "protected_key_arn": first_record.protected_key_arn,
+            "protected_updated_at": first_record.protected_updated_at,
+            "protected_field_names": first_record.protected_field_names,
+        }
+    )
+    record_repo.update_record(copied)
+
+    response = encrypted_client.get(f"/records/{second['id']}/protected")
+    assert response.status_code == 503
+    assert "P1234567" not in response.text
+
+
+def test_clear_protected_data_leaves_metadata_intact(encrypted_client, record_repo):
+    created = encrypted_client.post("/records", json=record_payload(record_type="insurance", title="Insurance")).json()
+    encrypted_client.put(f"/records/{created['id']}/protected", json={"policy_number": "POL-123"})
+
+    clear_response = encrypted_client.delete(f"/records/{created['id']}/protected")
+
+    assert clear_response.status_code == 200
+    assert clear_response.json()["has_protected_data"] is False
+    saved = record_repo.get_record("local-dev-user", created["id"])
+    assert saved is not None
+    assert saved.title == "Insurance"
+    assert saved.protected_ciphertext is None
+
+
+def test_missing_encryption_configuration_fails_closed(client):
+    created = client.post("/records", json=record_payload(record_type="passport", title="Passport")).json()
+
+    response = client.put(f"/records/{created['id']}/protected", json={"document_number": "P1234567"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Protected record storage is not configured for this environment."
 
 
 def build_record(user_id="local-dev-user"):

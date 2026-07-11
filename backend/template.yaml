@@ -45,10 +45,9 @@ Parameters:
   GoogleClientId:
     Type: String
     Default: ""
-  GoogleClientSecret:
+  GoogleOAuthSecretArn:
     Type: String
     Default: ""
-    NoEcho: true
   GoogleOAuthRedirectUri:
     Type: String
     Default: ""
@@ -58,16 +57,26 @@ Parameters:
   VapidPublicKey:
     Type: String
     Default: ""
-  VapidPrivateKey:
+  PushSecretArn:
     Type: String
     Default: ""
-    NoEcho: true
   VapidSubject:
     Type: String
     Default: ""
+  RecordEncryptionMode:
+    Type: String
+    Default: disabled
+    AllowedValues:
+      - disabled
+      - local
+      - kms
   CorsAllowedOrigins:
     Type: String
     Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
+
+Conditions:
+  HasGoogleOAuthSecretArn: !Not [!Equals [!Ref GoogleOAuthSecretArn, ""]]
+  HasPushSecretArn: !Not [!Equals [!Ref PushSecretArn, ""]]
 
 Globals:
   Function:
@@ -76,6 +85,30 @@ Globals:
     MemorySize: 512
 
 Resources:
+  LifeLedgerDataEncryptionKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: LifeLedger protected records and integration token encryption
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  LifeLedgerDataEncryptionAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-data"
+      TargetKeyId: !Ref LifeLedgerDataEncryptionKey
+
   LifeLedgerUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -167,12 +200,15 @@ Resources:
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
           LOCAL_GOOGLE_OAUTH_STATES_FILE: /tmp/lifeledger-google-oauth-states.json
           GOOGLE_CLIENT_ID: !Ref GoogleClientId
-          GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
+          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
           GOOGLE_OAUTH_REDIRECT_URI: !Ref GoogleOAuthRedirectUri
           GOOGLE_CALENDAR_SCOPES: !Ref GoogleCalendarScopes
           VAPID_PUBLIC_KEY: !Ref VapidPublicKey
-          VAPID_PRIVATE_KEY: !Ref VapidPrivateKey
+          PUSH_SECRET_ARN: !Ref PushSecretArn
           VAPID_SUBJECT: !Ref VapidSubject
+          DATA_ENCRYPTION_KMS_KEY_ARN: !GetAtt LifeLedgerDataEncryptionKey.Arn
+          RECORD_ENCRYPTION_MODE: !Ref RecordEncryptionMode
+          ALLOW_PLAINTEXT_PRODUCTION_SECRETS: "false"
           CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins
       Policies:
         - DynamoDBCrudPolicy:
@@ -187,6 +223,31 @@ Resources:
             TableName: !Ref GoogleCalendarConnectionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref GoogleOAuthStatesTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:GenerateDataKey
+                - kms:Decrypt
+              Resource: !GetAtt LifeLedgerDataEncryptionKey.Arn
+              Condition:
+                StringEquals:
+                  kms:EncryptionContext:app: lifeledger
+        - !If
+          - HasGoogleOAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref GoogleOAuthSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasPushSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PushSecretArn
+          - !Ref AWS::NoValue
       Events:
         Health:
           Type: HttpApi
@@ -232,8 +293,9 @@ Resources:
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           VAPID_PUBLIC_KEY: !Ref VapidPublicKey
-          VAPID_PRIVATE_KEY: !Ref VapidPrivateKey
+          PUSH_SECRET_ARN: !Ref PushSecretArn
           VAPID_SUBJECT: !Ref VapidSubject
+          ALLOW_PLAINTEXT_PRODUCTION_SECRETS: "false"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RemindersTable
@@ -241,6 +303,14 @@ Resources:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PushSubscriptionsTable
+        - !If
+          - HasPushSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PushSecretArn
+          - !Ref AWS::NoValue
       Events:
         DailyDigestSchedule:
           Type: Schedule
@@ -255,6 +325,12 @@ Resources:
     Properties:
       TableName: !Ref RemindersTableName
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -273,6 +349,12 @@ Resources:
     Properties:
       TableName: !Ref RecordsTableName
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -291,6 +373,12 @@ Resources:
     Properties:
       TableName: !Ref PreferencesTableName
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -305,6 +393,12 @@ Resources:
     Properties:
       TableName: !Ref PushSubscriptionsTableName
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -323,6 +417,12 @@ Resources:
     Properties:
       TableName: !Ref GoogleCalendarConnectionsTableName
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -337,6 +437,12 @@ Resources:
     Properties:
       TableName: !Ref GoogleOAuthStatesTableName
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: state
           AttributeType: S
@@ -345,6 +451,12 @@ Resources:
           KeyType: HASH
 
 Outputs:
+  DataEncryptionKeyArn:
+    Description: KMS key ARN for LifeLedger application-level and DynamoDB encryption.
+    Value: !GetAtt LifeLedgerDataEncryptionKey.Arn
+  DataEncryptionKeyAlias:
+    Description: KMS alias for LifeLedger application data encryption.
+    Value: !Ref LifeLedgerDataEncryptionAlias
   ApiUrl:
     Description: HTTP API endpoint for the LifeLedger backend.
     Value: !Sub "https://${LifeLedgerHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"

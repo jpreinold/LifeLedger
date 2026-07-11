@@ -1,5 +1,11 @@
 import { getAuthorizationHeaders } from '../auth/session'
-import type { LifeRecord, RecordInput } from '../types/record'
+import type {
+  LifeRecord,
+  ProtectedRecordInput,
+  ProtectedRecordPayload,
+  ProtectedRecordStatus,
+  RecordInput,
+} from '../types/record'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
@@ -45,6 +51,29 @@ export const recordsApi = {
     request<LifeRecord[]>(`/records${includeArchived ? '?include_archived=true' : ''}`),
 
   get: (id: string) => request<LifeRecord>(`/records/${id}`),
+
+  protectedStatus: (id: string) =>
+    request<ProtectedRecordStatus>(`/records/${id}/protected/status`, {
+      cache: 'no-store',
+    }),
+
+  revealProtected: (id: string) =>
+    request<ProtectedRecordPayload>(`/records/${id}/protected`, {
+      cache: 'no-store',
+    }),
+
+  setProtected: (id: string, input: ProtectedRecordInput) =>
+    request<ProtectedRecordStatus>(`/records/${id}/protected`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    }),
+
+  clearProtected: (id: string) =>
+    request<ProtectedRecordStatus>(`/records/${id}/protected`, {
+      method: 'DELETE',
+      cache: 'no-store',
+    }),
 
   create: (input: RecordInput) =>
     request<LifeRecord>('/records', {

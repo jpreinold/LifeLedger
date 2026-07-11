@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-import type { RecordInput, RecordType } from '../types/record'
+import type { ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 
 export type RecordField =
   | 'subtitle'
@@ -35,6 +35,7 @@ export interface RecordTypeDefinition {
   defaultTitle: string
   tone: 'other' | 'car' | 'finance' | 'home' | 'family' | 'subscriptions' | 'health'
   fields: RecordField[]
+  protectedFields: ProtectedRecordField[]
   labels?: Partial<Record<RecordField, string>>
   placeholders?: Partial<Record<RecordField, string>>
 }
@@ -48,6 +49,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'A flexible safe record for important details.',
     defaultTitle: 'Important record',
     tone: 'other',
+    protectedFields: ['sensitive_notes'],
     fields: [
       'subtitle',
       'owner_name',
@@ -67,6 +69,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track dates and safe reference details without storing a passport number.',
     defaultTitle: 'Passport',
     tone: 'other',
+    protectedFields: ['document_number'],
     fields: ['owner_name', 'provider_or_brand', 'issue_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
     labels: { provider_or_brand: 'Issuing country' },
     placeholders: { provider_or_brand: 'United States' },
@@ -79,6 +82,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track dates and issuing authority without storing a license number.',
     defaultTitle: 'Driver license',
     tone: 'other',
+    protectedFields: ['license_number'],
     fields: ['owner_name', 'provider_or_brand', 'issue_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
     labels: { provider_or_brand: 'Issuing state or authority' },
     placeholders: { provider_or_brand: 'Maryland' },
@@ -91,6 +95,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track a vehicle by name, owner, brand, dates, and safe notes.',
     defaultTitle: 'Vehicle',
     tone: 'car',
+    protectedFields: ['vin'],
     fields: ['subtitle', 'owner_name', 'provider_or_brand', 'purchase_date', 'location_hint', 'notes', 'tags'],
     labels: { provider_or_brand: 'Make or brand' },
     placeholders: { subtitle: 'Daily driver', provider_or_brand: 'Toyota' },
@@ -103,6 +108,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track provider and renewal or expiration dates without policy numbers.',
     defaultTitle: 'Insurance',
     tone: 'finance',
+    protectedFields: ['policy_number', 'member_number'],
     fields: ['subtitle', 'owner_name', 'provider_or_brand', 'start_date', 'renewal_date', 'expiration_date', 'notes', 'tags'],
     labels: { provider_or_brand: 'Provider' },
     placeholders: { provider_or_brand: 'Insurer' },
@@ -115,6 +121,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track brand, purchase date, warranty date, and where it lives.',
     defaultTitle: 'Appliance',
     tone: 'home',
+    protectedFields: ['serial_number'],
     fields: ['subtitle', 'provider_or_brand', 'purchase_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
     labels: { provider_or_brand: 'Brand', expiration_date: 'Warranty expiration' },
     placeholders: { provider_or_brand: 'Bosch' },
@@ -127,6 +134,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track a pet record with safe notes and dates.',
     defaultTitle: 'Pet',
     tone: 'family',
+    protectedFields: [],
     fields: ['subtitle', 'owner_name', 'start_date', 'notes', 'tags'],
     labels: { start_date: 'Adoption or start date' },
   },
@@ -138,6 +146,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track home details without requiring a full sensitive address.',
     defaultTitle: 'Home',
     tone: 'home',
+    protectedFields: [],
     fields: ['subtitle', 'purchase_date', 'start_date', 'location_hint', 'notes', 'tags'],
     labels: { location_hint: 'Location hint' },
     placeholders: { location_hint: 'City, neighborhood, or nickname' },
@@ -150,6 +159,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track provider, start date, and renewal date without payment details.',
     defaultTitle: 'Subscription',
     tone: 'subscriptions',
+    protectedFields: ['account_reference'],
     fields: ['subtitle', 'provider_or_brand', 'start_date', 'renewal_date', 'notes', 'tags'],
     labels: { provider_or_brand: 'Provider' },
     placeholders: { provider_or_brand: 'Streaming service' },
@@ -162,6 +172,7 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     description: 'Track purchase and expiration dates without document uploads.',
     defaultTitle: 'Warranty',
     tone: 'health',
+    protectedFields: ['serial_number'],
     fields: ['subtitle', 'provider_or_brand', 'purchase_date', 'expiration_date', 'notes', 'tags'],
     labels: { provider_or_brand: 'Brand or provider' },
   },
@@ -247,6 +258,40 @@ export function normalizeRecordInput(input: RecordInput): RecordInput {
     notes: normalizeOptionalText(input.notes),
     tags: normalizeTags(input.tags),
   }
+}
+
+export function createProtectedRecordInput(type: RecordType): ProtectedRecordInput {
+  return Object.fromEntries(getRecordTypeDefinition(type).protectedFields.map((field) => [field, null])) as ProtectedRecordInput
+}
+
+export function normalizeProtectedRecordInput(type: RecordType, input: ProtectedRecordInput): ProtectedRecordInput {
+  const normalized: ProtectedRecordInput = {}
+  for (const field of getRecordTypeDefinition(type).protectedFields) {
+    const value = normalizeOptionalText(input[field] ?? null)
+    if (value) {
+      normalized[field] = value
+    }
+  }
+  return normalized
+}
+
+export function hasProtectedRecordInput(input: ProtectedRecordInput) {
+  return Object.values(input).some((value) => typeof value === 'string' && value.trim().length > 0)
+}
+
+export function getProtectedFieldLabel(field: ProtectedRecordField) {
+  const labels: Record<ProtectedRecordField, string> = {
+    document_number: 'Document number',
+    license_number: 'License number',
+    vin: 'VIN',
+    policy_number: 'Policy number',
+    member_number: 'Member number',
+    serial_number: 'Serial number',
+    account_reference: 'Account reference',
+    sensitive_notes: 'Sensitive notes',
+  }
+
+  return labels[field]
 }
 
 export function tagsToText(tags: string[]) {

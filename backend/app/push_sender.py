@@ -4,6 +4,7 @@ from typing import Any, Protocol
 
 from app.config import Settings
 from app.models import PushSubscription
+from app.secret_provider import SecretConfigurationError, get_secret_provider
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,10 @@ class PyWebPushSender:
     def send(self, subscription: PushSubscription, payload: PushPayload) -> None:
         if not self.settings.push_notifications_configured:
             raise PushConfigurationError("Push notifications are not configured")
+        try:
+            vapid_private_key = get_secret_provider(self.settings).vapid_private_key()
+        except SecretConfigurationError as exc:
+            raise PushConfigurationError("Push notifications are not configured") from exc
 
         try:
             from pywebpush import WebPushException, webpush
@@ -69,7 +74,7 @@ class PyWebPushSender:
             webpush(
                 subscription_info=subscription_info,
                 data=payload.to_json(),
-                vapid_private_key=self.settings.vapid_private_key,
+                vapid_private_key=vapid_private_key,
                 vapid_claims={"sub": self.settings.vapid_subject},
             )
         except WebPushException as exc:

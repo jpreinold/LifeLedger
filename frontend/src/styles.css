@@ -2864,6 +2864,13 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.record-card-copy .record-protected-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #075eea;
+}
+
 .record-card-copy .card-chip-row {
   margin-bottom: 2px;
 }
@@ -2935,6 +2942,51 @@ textarea:focus-visible {
   font-size: 0.74rem;
   font-weight: 660;
   line-height: 1.35;
+}
+
+.record-protected-section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgba(7, 94, 234, 0.18);
+  border-radius: var(--radius-md);
+  background: rgba(7, 94, 234, 0.06);
+}
+
+.record-protected-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.record-protected-header h3,
+.record-protected-header p,
+.record-protected-edit-note {
+  margin: 0;
+}
+
+.record-protected-header h3 {
+  color: var(--color-text);
+  font-size: 0.88rem;
+  font-weight: 820;
+}
+
+.record-protected-header p,
+.record-protected-edit-note {
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.record-protected-header svg {
+  color: #075eea;
+  flex: 0 0 auto;
+}
+
+.record-protected-wide-field {
+  grid-column: 1 / -1;
 }
 
 .record-tag-list {
@@ -3968,6 +4020,56 @@ textarea:focus-visible {
   background:
     linear-gradient(90deg, rgba(7, 94, 234, 0.08), transparent 42%),
     rgba(255, 255, 255, 0.9);
+}
+
+.protected-details-section {
+  border-color: rgba(7, 94, 234, 0.2);
+  background:
+    linear-gradient(90deg, rgba(7, 94, 234, 0.08), transparent 48%),
+    rgba(255, 255, 255, 0.92);
+}
+
+.protected-details-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.protected-details-heading p,
+.protected-details-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.protected-details-heading svg {
+  color: #075eea;
+  flex: 0 0 auto;
+}
+
+.protected-detail-list dd {
+  font-family: var(--font-body);
+}
+
+.protected-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.protected-detail-actions .primary-button,
+.protected-detail-actions .secondary-button,
+.protected-detail-actions .text-danger-button {
+  min-height: 38px;
+  padding-inline: var(--space-3);
+  font-size: 0.8rem;
+}
+
+.protected-detail-error {
+  margin: 0;
 }
 
 .detail-schedule-section::before {

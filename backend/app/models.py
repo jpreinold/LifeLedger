@@ -85,6 +85,13 @@ class Record(BaseModel):
     notes: str | None = None
     tags: list[str] = Field(default_factory=list)
     status: RecordStatus = RecordStatus.ACTIVE
+    protected_ciphertext: str | None = None
+    protected_encrypted_data_key: str | None = None
+    protected_nonce: str | None = None
+    protected_encryption_version: int | None = None
+    protected_key_arn: str | None = None
+    protected_updated_at: datetime | None = None
+    protected_field_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -121,8 +128,8 @@ class GoogleCalendarConnection(BaseModel):
     google_account_email: str | None = None
     calendar_id: str = "primary"
     calendar_label: str | None = None
-    access_token: str
-    refresh_token: str
+    access_token: str = ""
+    refresh_token: str = ""
     token_expires_at: datetime
     scopes: str
     connected_at: datetime
@@ -130,6 +137,12 @@ class GoogleCalendarConnection(BaseModel):
     disconnected_at: datetime | None = None
     status: GoogleCalendarConnectionStatus = GoogleCalendarConnectionStatus.CONNECTED
     last_error: str | None = None
+    token_ciphertext: str | None = None
+    token_encrypted_data_key: str | None = None
+    token_nonce: str | None = None
+    token_encryption_version: int | None = None
+    token_key_arn: str | None = None
+    token_updated_at: datetime | None = None
 
 
 class GoogleOAuthState(BaseModel):

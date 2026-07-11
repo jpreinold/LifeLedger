@@ -11,6 +11,14 @@ SUPPORTED_AUTH_MODES = {LOCAL_AUTH_MODE, COGNITO_AUTH_MODE}
 LOCAL_PERSISTENCE = "local"
 DYNAMODB_PERSISTENCE = "dynamodb"
 SUPPORTED_PERSISTENCE_MODES = {LOCAL_PERSISTENCE, DYNAMODB_PERSISTENCE}
+RECORD_ENCRYPTION_DISABLED = "disabled"
+RECORD_ENCRYPTION_LOCAL = "local"
+RECORD_ENCRYPTION_KMS = "kms"
+SUPPORTED_RECORD_ENCRYPTION_MODES = {
+    RECORD_ENCRYPTION_DISABLED,
+    RECORD_ENCRYPTION_LOCAL,
+    RECORD_ENCRYPTION_KMS,
+}
 LAMBDA_LOCAL_DATA_FILE = "/tmp/lifeledger-reminders.json"
 LAMBDA_LOCAL_RECORDS_FILE = "/tmp/lifeledger-records.json"
 LAMBDA_LOCAL_PREFERENCES_FILE = "/tmp/lifeledger-preferences.json"
@@ -65,16 +73,32 @@ class Settings:
     google_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
     google_calendar_scopes: str = DEFAULT_GOOGLE_CALENDAR_SCOPES
+    data_encryption_kms_key_arn: str = ""
+    record_encryption_mode: str = RECORD_ENCRYPTION_DISABLED
+    local_records_encryption_key: str = ""
+    google_oauth_secret_arn: str = ""
+    push_secret_arn: str = ""
+    allow_plaintext_production_secrets: bool = False
+
+    @property
+    def plaintext_secret_fallback_allowed(self) -> bool:
+        return self.app_env != "production" or self.allow_plaintext_production_secrets
 
     @property
     def push_notifications_configured(self) -> bool:
-        return bool(self.vapid_public_key and self.vapid_private_key and self.vapid_subject)
+        private_key_configured = bool(self.push_secret_arn) or (
+            self.plaintext_secret_fallback_allowed and bool(self.vapid_private_key)
+        )
+        return bool(self.vapid_public_key and private_key_configured and self.vapid_subject)
 
     @property
     def google_calendar_configured(self) -> bool:
+        client_secret_configured = bool(self.google_oauth_secret_arn) or (
+            self.plaintext_secret_fallback_allowed and bool(self.google_client_secret)
+        )
         return bool(
             self.google_client_id
-            and self.google_client_secret
+            and client_secret_configured
             and self.google_oauth_redirect_uri
             and self.google_calendar_scopes
         )
@@ -92,6 +116,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if persistence_mode not in SUPPORTED_PERSISTENCE_MODES:
         supported = ", ".join(sorted(SUPPORTED_PERSISTENCE_MODES))
         raise ValueError(f"Unsupported PERSISTENCE_MODE '{persistence_mode}'. Expected one of: {supported}.")
+
+    record_encryption_mode = source.get("RECORD_ENCRYPTION_MODE", RECORD_ENCRYPTION_DISABLED).strip().lower()
+    if record_encryption_mode not in SUPPORTED_RECORD_ENCRYPTION_MODES:
+        supported = ", ".join(sorted(SUPPORTED_RECORD_ENCRYPTION_MODES))
+        raise ValueError(f"Unsupported RECORD_ENCRYPTION_MODE '{record_encryption_mode}'. Expected one of: {supported}.")
 
     return Settings(
         app_env=source.get("APP_ENV", "local").strip() or "local",
@@ -141,6 +170,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         google_oauth_redirect_uri=source.get("GOOGLE_OAUTH_REDIRECT_URI", "").strip(),
         google_calendar_scopes=source.get("GOOGLE_CALENDAR_SCOPES", DEFAULT_GOOGLE_CALENDAR_SCOPES).strip()
         or DEFAULT_GOOGLE_CALENDAR_SCOPES,
+        data_encryption_kms_key_arn=source.get("DATA_ENCRYPTION_KMS_KEY_ARN", "").strip(),
+        record_encryption_mode=record_encryption_mode,
+        local_records_encryption_key=source.get("LOCAL_RECORDS_ENCRYPTION_KEY", "").strip(),
+        google_oauth_secret_arn=source.get("GOOGLE_OAUTH_SECRET_ARN", "").strip(),
+        push_secret_arn=source.get("PUSH_SECRET_ARN", "").strip(),
+        allow_plaintext_production_secrets=parse_bool(
+            source.get("ALLOW_PLAINTEXT_PRODUCTION_SECRETS", "false")
+        ),
     )
 
 
@@ -206,6 +243,10 @@ def default_local_google_oauth_states_file(env: Mapping[str, str] | None = None)
 
 def parse_csv_list(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 @lru_cache(maxsize=1)

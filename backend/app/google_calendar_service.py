@@ -9,6 +9,7 @@ import httpx
 
 from app.config import Settings
 from app.models import GoogleCalendarConnection, Reminder
+from app.secret_provider import SecretConfigurationError, get_secret_provider
 
 GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -79,12 +80,13 @@ class GoogleCalendarService:
 
     def exchange_authorization_code(self, code: str) -> GoogleTokenSet:
         self._require_configured()
+        client_secret = self._client_secret()
         response = self._post_form(
             GOOGLE_TOKEN_URL,
             {
                 "code": code,
                 "client_id": self.settings.google_client_id,
-                "client_secret": self.settings.google_client_secret,
+                "client_secret": client_secret,
                 "redirect_uri": self.settings.google_oauth_redirect_uri,
                 "grant_type": "authorization_code",
             },
@@ -101,11 +103,12 @@ class GoogleCalendarService:
         if not connection.refresh_token:
             raise GoogleCalendarAuthError()
 
+        client_secret = self._client_secret()
         response = self._post_form(
             GOOGLE_TOKEN_URL,
             {
                 "client_id": self.settings.google_client_id,
-                "client_secret": self.settings.google_client_secret,
+                "client_secret": client_secret,
                 "refresh_token": connection.refresh_token,
                 "grant_type": "refresh_token",
             },
@@ -177,6 +180,12 @@ class GoogleCalendarService:
     def _require_configured(self) -> None:
         if not self.settings.google_calendar_configured:
             raise GoogleCalendarConfigurationError()
+
+    def _client_secret(self) -> str:
+        try:
+            return get_secret_provider(self.settings).google_client_secret()
+        except SecretConfigurationError as exc:
+            raise GoogleCalendarConfigurationError() from exc
 
     def _post_form(self, url: str, data: dict[str, str]) -> dict[str, Any]:
         try:
