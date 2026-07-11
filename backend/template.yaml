@@ -27,6 +27,9 @@ Parameters:
   RemindersTableName:
     Type: String
     Default: lifeledger-reminders-auth
+  RecordsTableName:
+    Type: String
+    Default: lifeledger-records-auth
   PreferencesTableName:
     Type: String
     Default: lifeledger-preferences-auth
@@ -152,11 +155,13 @@ Resources:
           LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
+          RECORDS_TABLE_NAME: !Ref RecordsTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
           GOOGLE_OAUTH_STATES_TABLE_NAME: !Ref GoogleOAuthStatesTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
+          LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
@@ -172,6 +177,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RemindersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RecordsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
@@ -217,9 +224,11 @@ Resources:
           LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
+          RECORDS_TABLE_NAME: !Ref RecordsTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
+          LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           VAPID_PUBLIC_KEY: !Ref VapidPublicKey
@@ -245,6 +254,24 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       TableName: !Ref RemindersTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: id
+          KeyType: RANGE
+
+  RecordsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref RecordsTableName
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: user_id
@@ -324,6 +351,9 @@ Outputs:
   RemindersTable:
     Description: DynamoDB reminders table name.
     Value: !Ref RemindersTable
+  RecordsTable:
+    Description: DynamoDB records table name.
+    Value: !Ref RecordsTable
   PreferencesTable:
     Description: DynamoDB user preferences table name.
     Value: !Ref PreferencesTable

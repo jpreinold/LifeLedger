@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from secrets import token_urlsafe
 from uuid import uuid4
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Response, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.alerts import (
@@ -41,7 +41,7 @@ from app.maintenance import (
     get_maintenance_status_label,
     prepare_maintenance_details,
 )
-from app.models import GoogleCalendarConnection, GoogleOAuthState, PushSubscription, Reminder
+from app.models import GoogleCalendarConnection, GoogleOAuthState, PushSubscription, Record, Reminder
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
@@ -59,8 +59,10 @@ from app.repository_factory import (
     create_google_oauth_state_repository,
     create_preferences_repository,
     create_push_subscription_repository,
+    create_record_repository,
     create_repository,
 )
+from app.records_repository import RecordRepository
 from app.schemas import (
     AlertSnoozeRequest,
     CalendarSyncStatus,
@@ -81,6 +83,10 @@ from app.schemas import (
     ReminderCreate,
     ReminderAlertResponse,
     ReminderLeadUnit,
+    RecordCreate,
+    RecordResponse,
+    RecordStatus,
+    RecordUpdate,
     ReminderResponse,
     ReminderType,
     ReminderUpdate,
@@ -119,6 +125,7 @@ app.add_middleware(
 )
 
 repository = create_repository()
+record_repository = create_record_repository()
 preferences_repository = create_preferences_repository()
 push_subscription_repository = create_push_subscription_repository()
 google_calendar_connection_repository = create_google_calendar_connection_repository()
@@ -131,6 +138,10 @@ def get_app_settings() -> Settings:
 
 def get_repository() -> ReminderRepository:
     return repository
+
+
+def get_record_repository() -> RecordRepository:
+    return record_repository
 
 
 def get_preferences_repository() -> PreferencesRepository:
@@ -187,6 +198,104 @@ def list_alerts(
             alert_reminders.append((reminder, eligibility))
 
     return [to_alert_response(reminder, eligibility) for reminder, eligibility in sort_alerts(alert_reminders)]
+
+
+@app.get("/records", response_model=list[RecordResponse])
+def list_records(
+    include_archived: bool = Query(default=False),
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> list[RecordResponse]:
+    records = repo.list_records(current_user.user_id, include_archived=include_archived)
+    sorted_records = sorted(records, key=lambda item: (item.status == RecordStatus.ARCHIVED, item.title.lower(), item.created_at))
+    return [to_record_response(record) for record in sorted_records]
+
+
+@app.post("/records", response_model=RecordResponse, status_code=status.HTTP_201_CREATED)
+def create_record(
+    payload: RecordCreate,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> RecordResponse:
+    now = utc_now()
+    record_fields = payload.model_dump()
+    record_fields["status"] = RecordStatus.ACTIVE
+    record = Record(
+        id=str(uuid4()),
+        user_id=current_user.user_id,
+        **record_fields,
+        created_at=now,
+        updated_at=now,
+    )
+
+    return to_record_response(repo.create_record(record))
+
+
+@app.get("/records/{record_id}", response_model=RecordResponse)
+def get_record(
+    record_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> RecordResponse:
+    return to_record_response(require_record(repo, current_user.user_id, record_id))
+
+
+@app.put("/records/{record_id}", response_model=RecordResponse)
+def update_record(
+    record_id: str,
+    payload: RecordUpdate,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> RecordResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    updates = payload.model_dump(exclude_unset=True)
+    for required_field in ("record_type", "title", "category", "status"):
+        if updates.get(required_field) is None:
+            updates.pop(required_field, None)
+    if "tags" in updates and updates["tags"] is None:
+        updates["tags"] = []
+    updated = Record.model_validate({**record.model_dump(), **updates, "updated_at": utc_now()})
+    return to_record_response(repo.update_record(updated))
+
+
+@app.post("/records/{record_id}/archive", response_model=RecordResponse)
+def archive_record(
+    record_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> RecordResponse:
+    archived = repo.archive_record(current_user.user_id, record_id)
+    if archived is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+
+    return to_record_response(archived)
+
+
+@app.post("/records/{record_id}/restore", response_model=RecordResponse)
+def restore_record(
+    record_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> RecordResponse:
+    restored = repo.unarchive_record(current_user.user_id, record_id)
+    if restored is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+
+    return to_record_response(restored)
+
+
+@app.delete("/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_record(
+    record_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+) -> Response:
+    require_record(repo, current_user.user_id, record_id)
+    deleted = repo.delete_record(current_user.user_id, record_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/preferences/digest", response_model=DigestPreferences)
@@ -1150,6 +1259,18 @@ def require_reminder(repo: ReminderRepository, user_id: str, reminder_id: str) -
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")
 
     return reminder
+
+
+def require_record(repo: RecordRepository, user_id: str, record_id: str) -> Record:
+    record = repo.get_record(user_id, record_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+
+    return record
+
+
+def to_record_response(record: Record) -> RecordResponse:
+    return RecordResponse.model_validate(record)
 
 
 def to_response(reminder: Reminder) -> ReminderResponse:

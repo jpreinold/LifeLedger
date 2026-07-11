@@ -9,9 +9,11 @@ from app.config import (
     DEFAULT_LOCAL_DEV_USER_ID,
     DEFAULT_PREFERENCES_TABLE_NAME,
     DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME,
+    DEFAULT_RECORDS_TABLE_NAME,
     DEFAULT_REMINDERS_TABLE_NAME,
     DYNAMODB_PERSISTENCE,
     LAMBDA_LOCAL_DATA_FILE,
+    LAMBDA_LOCAL_RECORDS_FILE,
     LAMBDA_LOCAL_PREFERENCES_FILE,
     LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE,
     LAMBDA_LOCAL_GOOGLE_OAUTH_STATES_FILE,
@@ -30,6 +32,7 @@ def test_config_defaults_are_local_safe():
     assert settings.local_dev_user_id == DEFAULT_LOCAL_DEV_USER_ID
     assert settings.persistence_mode == LOCAL_PERSISTENCE
     assert settings.reminders_table_name == DEFAULT_REMINDERS_TABLE_NAME
+    assert settings.records_table_name == DEFAULT_RECORDS_TABLE_NAME
     assert settings.preferences_table_name == DEFAULT_PREFERENCES_TABLE_NAME
     assert settings.push_subscriptions_table_name == DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME
     assert settings.google_calendar_connections_table_name == DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME
@@ -37,6 +40,9 @@ def test_config_defaults_are_local_safe():
     assert settings.aws_region == "us-east-1"
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
+    )
+    assert settings.local_records_file.endswith("backend\\data\\records.json") or settings.local_records_file.endswith(
+        "backend/data/records.json"
     )
     assert settings.local_preferences_file.endswith(
         "backend\\data\\preferences.json"
@@ -66,6 +72,7 @@ def test_config_reads_environment_values():
             "LOCAL_DEV_USER_ID": "dev-user",
             "PERSISTENCE_MODE": "dynamodb",
             "REMINDERS_TABLE_NAME": "custom-table",
+            "RECORDS_TABLE_NAME": "custom-records",
             "PREFERENCES_TABLE_NAME": "custom-preferences",
             "PUSH_SUBSCRIPTIONS_TABLE_NAME": "custom-push",
             "GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME": "custom-google-connections",
@@ -87,6 +94,7 @@ def test_config_reads_environment_values():
     assert settings.local_dev_user_id == "dev-user"
     assert settings.persistence_mode == DYNAMODB_PERSISTENCE
     assert settings.reminders_table_name == "custom-table"
+    assert settings.records_table_name == "custom-records"
     assert settings.preferences_table_name == "custom-preferences"
     assert settings.push_subscriptions_table_name == "custom-push"
     assert settings.google_calendar_connections_table_name == "custom-google-connections"
@@ -104,6 +112,12 @@ def test_config_allows_explicit_local_data_file():
     settings = load_settings({"LOCAL_DATA_FILE": "/tmp/custom-reminders.json"})
 
     assert settings.local_data_file == "/tmp/custom-reminders.json"
+
+
+def test_config_allows_explicit_local_records_file():
+    settings = load_settings({"LOCAL_RECORDS_FILE": "/tmp/custom-records.json"})
+
+    assert settings.local_records_file == "/tmp/custom-records.json"
 
 
 def test_config_allows_explicit_local_preferences_file():
@@ -135,6 +149,7 @@ def test_sam_local_defaults_to_writable_tmp_data_file():
 
     assert settings.persistence_mode == LOCAL_PERSISTENCE
     assert settings.local_data_file == LAMBDA_LOCAL_DATA_FILE
+    assert settings.local_records_file == LAMBDA_LOCAL_RECORDS_FILE
     assert settings.local_preferences_file == LAMBDA_LOCAL_PREFERENCES_FILE
     assert settings.local_push_subscriptions_file == LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE
     assert settings.local_google_calendar_connections_file == LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE

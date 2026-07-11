@@ -1,5 +1,5 @@
 from app.config import load_settings
-from app.dynamo_repository import DynamoReminderRepository
+from app.dynamo_repository import DynamoRecordRepository, DynamoReminderRepository
 from app.google_calendar_repository import (
     DynamoGoogleCalendarConnectionRepository,
     DynamoGoogleOAuthStateRepository,
@@ -7,11 +7,13 @@ from app.google_calendar_repository import (
     LocalGoogleOAuthStateRepository,
 )
 from app.push_repository import DynamoPushSubscriptionRepository, LocalPushSubscriptionRepository
+from app.records_repository import LocalRecordRepository
 from app.repository import LocalReminderRepository
 from app.repository_factory import (
     create_google_calendar_connection_repository,
     create_google_oauth_state_repository,
     create_push_subscription_repository,
+    create_record_repository,
     create_repository,
 )
 
@@ -41,6 +43,30 @@ def test_repository_factory_selects_dynamodb_without_real_aws_call():
     repo = create_repository(settings, dynamo_table=fake_table)
 
     assert isinstance(repo, DynamoReminderRepository)
+    assert repo.table is fake_table
+
+
+def test_record_repository_factory_defaults_to_local(tmp_path):
+    repo = create_record_repository(load_settings({}), local_file_path=tmp_path / "records.json")
+
+    assert isinstance(repo, LocalRecordRepository)
+
+
+def test_record_repository_factory_uses_configured_local_records_file(tmp_path):
+    data_file = tmp_path / "configured-records.json"
+    repo = create_record_repository(load_settings({"LOCAL_RECORDS_FILE": str(data_file)}))
+
+    assert isinstance(repo, LocalRecordRepository)
+    assert repo.file_path == data_file
+
+
+def test_record_repository_factory_selects_dynamodb_without_real_aws_call():
+    fake_table = FakeDynamoTable()
+    settings = load_settings({"PERSISTENCE_MODE": "dynamodb"})
+
+    repo = create_record_repository(settings, dynamo_table=fake_table)
+
+    assert isinstance(repo, DynamoRecordRepository)
     assert repo.table is fake_table
 
 

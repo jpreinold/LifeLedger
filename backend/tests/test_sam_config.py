@@ -24,9 +24,11 @@ def test_sam_template_defaults_to_local_persistence():
     assert "AdminCreateUserConfig:" in template
     assert "AllowAdminCreateUserOnly: true" in template
     assert "LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json" in template
+    assert "LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json" in template
     assert "LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json" in template
     assert "LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json" in template
     assert "PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable" in template
+    assert "RECORDS_TABLE_NAME: !Ref RecordsTable" in template
     assert "GoogleClientId:" in template
     assert "GoogleClientSecret:" in template
     assert "NoEcho: true" in template
@@ -53,6 +55,7 @@ def test_sam_template_defaults_to_local_persistence():
     assert "AttributeName: subscription_id" in template
     assert "GoogleCalendarConnectionsTable:" in template
     assert "GoogleOAuthStatesTable:" in template
+    assert "RecordsTable:" in template
     assert "AttributeName: state" in template
 
 
@@ -64,9 +67,11 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["LOCAL_DEV_USER_ID"] == "local-dev-user"
     assert function_env["PERSISTENCE_MODE"] == "local"
     assert function_env["LOCAL_DATA_FILE"] == "/tmp/lifeledger-reminders.json"
+    assert function_env["LOCAL_RECORDS_FILE"] == "/tmp/lifeledger-records.json"
     assert function_env["LOCAL_PREFERENCES_FILE"] == "/tmp/lifeledger-preferences.json"
     assert function_env["LOCAL_PUSH_SUBSCRIPTIONS_FILE"] == "/tmp/lifeledger-push-subscriptions.json"
     assert function_env["PUSH_SUBSCRIPTIONS_TABLE_NAME"] == "lifeledger-push-subscriptions-auth"
+    assert function_env["RECORDS_TABLE_NAME"] == "lifeledger-records-auth"
     assert function_env["GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME"] == "lifeledger-google-calendar-connections-auth"
     assert function_env["GOOGLE_OAUTH_STATES_TABLE_NAME"] == "lifeledger-google-oauth-states-auth"
     assert function_env["LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE"] == "/tmp/lifeledger-google-calendar-connections.json"
@@ -86,4 +91,5 @@ def test_sam_local_env_file_uses_local_persistence():
 
     digest_env = env_file["LifeLedgerDigestPushFunction"]
     assert digest_env["PERSISTENCE_MODE"] == "local"
+    assert digest_env["LOCAL_RECORDS_FILE"] == "/tmp/lifeledger-records.json"
     assert digest_env["LOCAL_PUSH_SUBSCRIPTIONS_FILE"] == "/tmp/lifeledger-push-subscriptions.json"

@@ -25,7 +25,9 @@ interface HomeDashboardProps {
   digest: DailyDigest
   digestPreferences: DigestPreferences
   isLoading: boolean
+  recordsCount: number
   userName?: string | null
+  onAddRecord: () => void
   onAddReminder: () => void
   onBrowseTemplates: () => void
   onViewCalendar: (date?: string | null) => void
@@ -55,13 +57,16 @@ export function HomeDashboard({
   digest,
   digestPreferences,
   isLoading,
+  recordsCount,
   userName,
+  onAddRecord,
   onAddReminder,
   onBrowseTemplates,
   onViewCalendar,
   onViewReminders,
   onViewAlerts,
   onOpenDigest,
+  onViewRecords,
   onViewReminder,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter((reminder) => !reminder.completed)
@@ -105,6 +110,14 @@ export function HomeDashboard({
       tone: 'teal',
       onClick: onViewReminders,
     },
+    {
+      label: 'Records',
+      value: String(recordsCount),
+      sublabel: recordsCount === 0 ? 'Ready to add' : 'Active',
+      icon: FileText,
+      tone: 'green',
+      onClick: onViewRecords,
+    },
   ]
 
   return (
@@ -142,7 +155,7 @@ export function HomeDashboard({
       <section className="quick-actions-card" aria-label="Quick actions">
         <QuickAction label="Add reminder" icon={Plus} tone="blue" onClick={onAddReminder} />
         <QuickAction label="Browse templates" icon={ListChecks} tone="blue-soft" onClick={onBrowseTemplates} />
-        <QuickAction label="Add record" icon={FileText} tone="green" disabled />
+        <QuickAction label="Add record" icon={FileText} tone="green" onClick={onAddRecord} />
         <QuickAction label="Review renewals" icon={RefreshCcw} tone="orange" onClick={onViewReminders} />
       </section>
 
@@ -202,7 +215,7 @@ export function HomeDashboard({
 
       <section className="home-card" aria-labelledby="overview-heading">
         <div className="home-card-header">
-          <h2 id="overview-heading">Smart reminder overview</h2>
+          <h2 id="overview-heading">Life admin overview</h2>
         </div>
 
         <div className="overview-grid overview-grid-smart">

@@ -96,6 +96,13 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
         ("post", "/reminders/example-id/calendar-sync/enable", None),
         ("post", "/reminders/example-id/calendar-sync/disable", None),
         ("post", "/reminders/example-id/complete", None),
+        ("get", "/records", None),
+        ("post", "/records", {"record_type": "general", "title": "Emergency folder"}),
+        ("get", "/records/example-id", None),
+        ("put", "/records/example-id", {"title": "Updated record"}),
+        ("post", "/records/example-id/archive", None),
+        ("post", "/records/example-id/restore", None),
+        ("delete", "/records/example-id", None),
     ],
 )
 def test_cognito_mode_rejects_unauthenticated_reminder_routes(client, monkeypatch, method, path, json_body):

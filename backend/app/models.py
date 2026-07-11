@@ -10,6 +10,8 @@ from app.schemas import (
     PriorityOption,
     ReminderCategory,
     ReminderLeadUnit,
+    RecordStatus,
+    RecordType,
     ReminderType,
     RenewalDetails,
     RepeatOption,
@@ -63,6 +65,28 @@ class ReminderPatch(BaseModel):
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
     maintenance_details: MaintenanceDetails | None = None
+
+
+class Record(BaseModel):
+    id: str
+    user_id: str = "local-dev-user"
+    record_type: RecordType
+    title: str
+    subtitle: str | None = None
+    category: str = "General"
+    owner_name: str | None = None
+    provider_or_brand: str | None = None
+    start_date: date | None = None
+    issue_date: date | None = None
+    expiration_date: date | None = None
+    purchase_date: date | None = None
+    renewal_date: date | None = None
+    location_hint: str | None = None
+    notes: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    status: RecordStatus = RecordStatus.ACTIVE
+    created_at: datetime
+    updated_at: datetime
 
 
 class UserPreferences(BaseModel):

@@ -12,6 +12,7 @@ LOCAL_PERSISTENCE = "local"
 DYNAMODB_PERSISTENCE = "dynamodb"
 SUPPORTED_PERSISTENCE_MODES = {LOCAL_PERSISTENCE, DYNAMODB_PERSISTENCE}
 LAMBDA_LOCAL_DATA_FILE = "/tmp/lifeledger-reminders.json"
+LAMBDA_LOCAL_RECORDS_FILE = "/tmp/lifeledger-records.json"
 LAMBDA_LOCAL_PREFERENCES_FILE = "/tmp/lifeledger-preferences.json"
 LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE = "/tmp/lifeledger-push-subscriptions.json"
 LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE = "/tmp/lifeledger-google-calendar-connections.json"
@@ -26,6 +27,7 @@ DEFAULT_CORS_ALLOWED_ORIGINS = [
     "https://www.lifeledger.jpreinold.com",
 ]
 DEFAULT_REMINDERS_TABLE_NAME = "lifeledger-reminders-auth"
+DEFAULT_RECORDS_TABLE_NAME = "lifeledger-records-auth"
 DEFAULT_PREFERENCES_TABLE_NAME = "lifeledger-preferences-auth"
 DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME = "lifeledger-push-subscriptions-auth"
 DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME = "lifeledger-google-calendar-connections-auth"
@@ -43,12 +45,14 @@ class Settings:
     local_dev_user_id: str = DEFAULT_LOCAL_DEV_USER_ID
     persistence_mode: str = LOCAL_PERSISTENCE
     reminders_table_name: str = DEFAULT_REMINDERS_TABLE_NAME
+    records_table_name: str = DEFAULT_RECORDS_TABLE_NAME
     preferences_table_name: str = DEFAULT_PREFERENCES_TABLE_NAME
     push_subscriptions_table_name: str = DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME
     google_calendar_connections_table_name: str = DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME
     google_oauth_states_table_name: str = DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME
     aws_region: str = "us-east-1"
     local_data_file: str = ""
+    local_records_file: str = ""
     local_preferences_file: str = ""
     local_push_subscriptions_file: str = ""
     local_google_calendar_connections_file: str = ""
@@ -97,6 +101,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         persistence_mode=persistence_mode,
         reminders_table_name=source.get("REMINDERS_TABLE_NAME", DEFAULT_REMINDERS_TABLE_NAME).strip()
         or DEFAULT_REMINDERS_TABLE_NAME,
+        records_table_name=source.get("RECORDS_TABLE_NAME", DEFAULT_RECORDS_TABLE_NAME).strip()
+        or DEFAULT_RECORDS_TABLE_NAME,
         preferences_table_name=source.get("PREFERENCES_TABLE_NAME", DEFAULT_PREFERENCES_TABLE_NAME).strip()
         or DEFAULT_PREFERENCES_TABLE_NAME,
         push_subscriptions_table_name=source.get(
@@ -116,6 +122,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME,
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
+        local_records_file=source.get("LOCAL_RECORDS_FILE", "").strip() or default_local_records_file(source),
         local_preferences_file=source.get("LOCAL_PREFERENCES_FILE", "").strip()
         or default_local_preferences_file(source),
         local_push_subscriptions_file=source.get("LOCAL_PUSH_SUBSCRIPTIONS_FILE", "").strip()
@@ -145,6 +152,16 @@ def default_local_data_file(env: Mapping[str, str] | None = None) -> str:
 
     backend_root = Path(__file__).resolve().parents[1]
     return str(backend_root / "data" / "reminders.json")
+
+
+def default_local_records_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_RECORDS_FILE
+
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "records.json")
 
 
 def default_local_preferences_file(env: Mapping[str, str] | None = None) -> str:

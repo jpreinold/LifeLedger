@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, Cake, Car, ChevronRight, FileText, RefreshCcw, Wrench, X } from 'lucide-react'
+import { Bell, Cake, ChevronRight, FileText, RefreshCcw, Wrench, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -10,6 +10,7 @@ interface AddTypeSelectorProps {
   onChooseReminder: () => void
   onChooseRenewal: () => void
   onChooseMaintenance: () => void
+  onChooseRecord: () => void
 }
 
 interface AddOption {
@@ -30,6 +31,7 @@ export function AddTypeSelector({
   onChooseReminder,
   onChooseRenewal,
   onChooseMaintenance,
+  onChooseRecord,
 }: AddTypeSelectorProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const isClosingRef = useRef(false)
@@ -122,17 +124,10 @@ export function AddTypeSelector({
     },
     {
       title: 'Record',
-      description: 'Coming soon',
+      description: 'Save structured personal details.',
       icon: FileText,
       tone: 'green',
-      disabled: true,
-    },
-    {
-      title: 'Vehicle',
-      description: 'Coming soon',
-      icon: Car,
-      tone: 'orange',
-      disabled: true,
+      onClick: () => closeWithAction(onChooseRecord),
     },
   ]
 

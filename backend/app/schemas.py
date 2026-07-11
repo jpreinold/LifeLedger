@@ -69,6 +69,24 @@ class GoogleCalendarConnectionStatus(str, Enum):
     DISCONNECTED = "disconnected"
     NEEDS_RECONNECT = "needs_reconnect"
 
+
+class RecordType(str, Enum):
+    GENERAL = "general"
+    PASSPORT = "passport"
+    DRIVER_LICENSE = "driver_license"
+    VEHICLE = "vehicle"
+    INSURANCE = "insurance"
+    APPLIANCE = "appliance"
+    PET = "pet"
+    HOME = "home"
+    SUBSCRIPTION = "subscription"
+    WARRANTY = "warranty"
+
+
+class RecordStatus(str, Enum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
 class RenewalKind(str, Enum):
     RENEWAL = "renewal"
     EXPIRATION = "expiration"
@@ -347,6 +365,139 @@ class ReminderResponse(ReminderBase):
 class ReminderAlertResponse(ReminderResponse):
     alert_reason: ReminderAlertReason
     alert_reminder_start_date: date | None = None
+
+
+class RecordBase(BaseModel):
+    record_type: RecordType
+    title: str = Field(..., min_length=1, max_length=120)
+    subtitle: str | None = Field(default=None, max_length=160)
+    category: str = Field(default="General", min_length=1, max_length=80)
+    owner_name: str | None = Field(default=None, max_length=120)
+    provider_or_brand: str | None = Field(default=None, max_length=120)
+    start_date: date | None = None
+    issue_date: date | None = None
+    expiration_date: date | None = None
+    purchase_date: date | None = None
+    renewal_date: date | None = None
+    location_hint: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=1000)
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    status: RecordStatus = RecordStatus.ACTIVE
+
+    @field_validator(
+        "title",
+        "subtitle",
+        "owner_name",
+        "provider_or_brand",
+        "location_hint",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, value: str | None) -> str:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or "General"
+
+        return value or "General"
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, value) -> list[str]:
+        if value is None:
+            return []
+
+        if isinstance(value, str):
+            raw_tags = value.split(",")
+        else:
+            raw_tags = value
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in raw_tags:
+            if not isinstance(item, str):
+                continue
+
+            tag = item.strip()
+            if not tag:
+                continue
+
+            dedupe_key = tag.casefold()
+            if dedupe_key in seen:
+                continue
+
+            seen.add(dedupe_key)
+            normalized.append(tag[:40])
+
+            if len(normalized) >= 12:
+                break
+
+        return normalized
+
+
+class RecordCreate(RecordBase):
+    model_config = ConfigDict(extra="forbid")
+
+    status: RecordStatus = RecordStatus.ACTIVE
+
+
+class RecordUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    record_type: RecordType | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    subtitle: str | None = Field(default=None, max_length=160)
+    category: str | None = Field(default=None, min_length=1, max_length=80)
+    owner_name: str | None = Field(default=None, max_length=120)
+    provider_or_brand: str | None = Field(default=None, max_length=120)
+    start_date: date | None = None
+    issue_date: date | None = None
+    expiration_date: date | None = None
+    purchase_date: date | None = None
+    renewal_date: date | None = None
+    location_hint: str | None = Field(default=None, max_length=240)
+    notes: str | None = Field(default=None, max_length=1000)
+    tags: list[str] | None = Field(default=None, max_length=12)
+    status: RecordStatus | None = None
+
+    @field_validator(
+        "title",
+        "subtitle",
+        "category",
+        "owner_name",
+        "provider_or_brand",
+        "location_hint",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text(cls, value: str | None) -> str | None:
+        return RecordBase.normalize_text(value)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, value) -> list[str] | None:
+        if value is None:
+            return None
+        return RecordBase.normalize_tags(value)
+
+
+class RecordResponse(RecordBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class AlertSnoozeRequest(BaseModel):

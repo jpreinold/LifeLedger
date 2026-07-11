@@ -2729,8 +2729,244 @@ textarea:focus-visible {
   line-height: 1;
 }
 
-.records-panel {
-  min-height: 500px;
+.records-page {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.records-page-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid rgba(223, 231, 242, 0.86);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px rgba(15, 32, 61, 0.07);
+}
+
+.records-page-header h2,
+.records-page-header p {
+  margin: 0;
+}
+
+.records-page-header h2 {
+  font-family: var(--font-brand);
+  color: var(--color-text);
+  font-size: 1.18rem;
+  font-weight: 820;
+  line-height: 1.14;
+}
+
+.records-page-header p {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.records-add-button {
+  width: auto;
+  min-width: 126px;
+}
+
+.records-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.records-summary-strip span {
+  min-height: 58px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(15, 32, 61, 0.05);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.records-summary-strip strong {
+  color: var(--color-text);
+  font-family: var(--font-brand);
+  font-size: 1.2rem;
+  font-weight: 820;
+  line-height: 1;
+}
+
+.record-filter-tabs {
+  margin-bottom: 0;
+}
+
+.records-archive-toggle {
+  justify-self: start;
+}
+
+.records-archive-toggle.active {
+  color: #08764e;
+  border-color: rgba(14, 166, 107, 0.28);
+  background: var(--color-success-soft);
+}
+
+.records-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.record-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 6px 18px rgba(15, 32, 61, 0.07);
+  overflow: hidden;
+}
+
+.record-card-main {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.record-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.record-card-copy strong {
+  color: var(--color-text);
+  font-size: 1rem;
+  font-weight: 780;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.record-card-copy span,
+.record-card-copy small {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+.record-card-copy .card-chip-row {
+  margin-bottom: 2px;
+}
+
+.record-card-chevron {
+  color: var(--color-text-soft);
+}
+
+.records-empty-state {
+  justify-items: center;
+  text-align: center;
+}
+
+.records-empty-state svg {
+  color: var(--color-primary);
+}
+
+.record-type-lockup-label {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
+  font-size: 0.76rem;
+  font-weight: 780;
+}
+
+.record-form {
+  padding-bottom: var(--space-5);
+}
+
+.record-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.record-form-type-row,
+.record-safety-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.record-form-type-row {
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+.record-form-type-row strong {
+  color: var(--color-text);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.record-safety-note {
+  justify-content: flex-start;
+  color: #08764e;
+  border: 1px solid rgba(14, 166, 107, 0.2);
+  background: var(--color-success-soft);
+  font-size: 0.74rem;
+  font-weight: 660;
+  line-height: 1.35;
+}
+
+.record-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.record-tag {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
+  font-size: 0.72rem;
+  font-weight: 730;
+}
+
+@media (max-width: 380px) {
+  .records-page-header {
+    grid-template-columns: 1fr;
+  }
+
+  .records-add-button {
+    width: 100%;
+  }
+
+  .record-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .digest-dialog {

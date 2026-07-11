@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import { calendarApi, type GoogleCalendarOption, type GoogleCalendarStatus } from './api/calendarApi'
+import { recordsApi } from './api/recordsApi'
 import { remindersApi } from './api/remindersApi'
 import { preferencesApi } from './api/preferencesApi'
 import { pushApi, type PushStatus, type PushSubscriptionSummary } from './api/pushApi'
@@ -33,6 +34,10 @@ import { Dashboard } from './components/Dashboard'
 import { EditReminderModal } from './components/EditReminderModal'
 import { HomeDashboard } from './components/HomeDashboard'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
+import { RecordDetailDrawer } from './components/RecordDetailDrawer'
+import { RecordForm } from './components/RecordForm'
+import { RecordsView } from './components/RecordsView'
+import { RecordTypeSelector } from './components/RecordTypeSelector'
 import { ReminderDetailDrawer } from './components/ReminderDetailDrawer'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
@@ -57,6 +62,8 @@ import {
   type DigestPreferencesUpdate,
 } from './types/preferences'
 import type { Reminder, ReminderAlert, ReminderInput } from './types/reminder'
+import type { LifeRecord, RecordInput, RecordType } from './types/record'
+import type { RecordFilter } from './lib/recordTypes'
 
 function App() {
   const {
@@ -130,12 +137,14 @@ type AppPage = 'home' | 'reminders' | 'records' | 'settings' | 'calendar'
 
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
+  const [records, setRecords] = useState<LifeRecord[]>([])
   const [alerts, setAlerts] = useState<ReminderAlert[]>([])
   const [digestPreferences, setDigestPreferences] = useState<DigestPreferences>(() => defaultDigestPreferences())
   const [calendarStatus, setCalendarStatus] = useState<GoogleCalendarStatus | null>(null)
   const [isCalendarStatusLoading, setIsCalendarStatusLoading] = useState(true)
   const [calendarStatusError, setCalendarStatusError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isRecordsLoading, setIsRecordsLoading] = useState(true)
   const [isDigestPreferencesLoading, setIsDigestPreferencesLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isSavingDigestPreferences, setIsSavingDigestPreferences] = useState(false)
@@ -144,16 +153,24 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [notice, setNotice] = useState<string | null>(null)
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
   const [viewingReminder, setViewingReminder] = useState<{ reminder: Reminder; fromAlert: boolean } | null>(null)
+  const [editingRecord, setEditingRecord] = useState<LifeRecord | null>(null)
+  const [viewingRecord, setViewingRecord] = useState<LifeRecord | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
+  const [pendingRecordDelete, setPendingRecordDelete] = useState<LifeRecord | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
   const [activePage, setActivePage] = useState<AppPage>('home')
   const [calendarVisibleMonth, setCalendarVisibleMonth] = useState(() => getMonthStartDateKey(new Date()))
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(() => getDateKey(new Date()))
   const [reminderStatusFilter, setReminderStatusFilter] = useState<ReminderStatusFilter>('active')
   const [reminderTypeFilter, setReminderTypeFilter] = useState<ReminderTypeFilter>('all')
+  const [recordFilter, setRecordFilter] = useState<RecordFilter>('all')
+  const [showArchivedRecords, setShowArchivedRecords] = useState(false)
   const [isReminderFormOpen, setIsReminderFormOpen] = useState(false)
+  const [isRecordFormOpen, setIsRecordFormOpen] = useState(false)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
   const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
+  const [isRecordTypeSelectorOpen, setIsRecordTypeSelectorOpen] = useState(false)
+  const [selectedRecordType, setSelectedRecordType] = useState<RecordType>('general')
   const [addDateContext, setAddDateContext] = useState<string | null>(null)
   const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false)
   const [isDigestOpen, setIsDigestOpen] = useState(false)
@@ -172,6 +189,19 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load reminders.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function loadRecordData() {
+    setIsRecordsLoading(true)
+
+    try {
+      const recordData = await recordsApi.list(true)
+      setRecords(recordData)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load records.')
+    } finally {
+      setIsRecordsLoading(false)
     }
   }
 
@@ -261,6 +291,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   useEffect(() => {
     void loadReminderData()
+    void loadRecordData()
     void loadDigestPreferences()
     void initializeCalendarStatus()
   }, [])
@@ -345,8 +376,50 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
+  async function handleCreateRecord(input: RecordInput) {
+    setIsSaving(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      await recordsApi.create(input)
+      await loadRecordData()
+      setActivePage('records')
+      setNotice('Record added.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to create record.')
+      return false
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleUpdateRecord(id: string, input: RecordInput) {
+    setIsSaving(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const updated = await recordsApi.update(id, input)
+      await loadRecordData()
+      setViewingRecord((current) => (current?.id === id ? updated : current))
+      setNotice('Record updated.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update record.')
+      return false
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   function requestDelete(reminder: Reminder) {
     setPendingDelete(reminder)
+  }
+
+  function requestRecordDelete(record: LifeRecord) {
+    setPendingRecordDelete(record)
   }
 
   async function confirmDelete() {
@@ -473,8 +546,67 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setViewingReminder({ reminder, fromAlert: false })
   }
 
+  function openRecordDetail(record: LifeRecord) {
+    setEditingRecord(null)
+    setViewingRecord(record)
+  }
+
+  async function confirmRecordDelete() {
+    if (!pendingRecordDelete) {
+      return
+    }
+
+    setIsDeleting(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      await recordsApi.remove(pendingRecordDelete.id)
+      await loadRecordData()
+      setNotice('Record deleted.')
+      setEditingRecord((current) => (current?.id === pendingRecordDelete.id ? null : current))
+      setViewingRecord((current) => (current?.id === pendingRecordDelete.id ? null : current))
+      setPendingRecordDelete(null)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to delete record.')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  async function handleArchiveRecord(record: LifeRecord) {
+    setError(null)
+    setNotice(null)
+
+    try {
+      const archived = await recordsApi.archive(record.id)
+      await loadRecordData()
+      setViewingRecord(archived)
+      setNotice('Record archived.')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to archive record.')
+    }
+  }
+
+  async function handleRestoreRecord(record: LifeRecord) {
+    setError(null)
+    setNotice(null)
+
+    try {
+      const restored = await recordsApi.restore(record.id)
+      await loadRecordData()
+      setViewingRecord(restored)
+      setNotice('Record restored.')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to restore record.')
+    }
+  }
+
   function openAddReminder() {
     setAddDateContext(null)
+    setEditingRecord(null)
+    setIsRecordFormOpen(false)
+    setIsRecordTypeSelectorOpen(false)
     setIsTemplateModalOpen(false)
     setIsReminderFormOpen(false)
     setIsAddTypeSelectorOpen(true)
@@ -484,6 +616,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setAddDateContext(date)
     setCalendarSelectedDate(date)
     setCalendarVisibleMonth(getMonthStartDateKey(date))
+    setEditingRecord(null)
+    setIsRecordFormOpen(false)
+    setIsRecordTypeSelectorOpen(false)
     setIsTemplateModalOpen(false)
     setIsReminderFormOpen(false)
     setIsAddTypeSelectorOpen(true)
@@ -492,6 +627,39 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   function closeAddTypeSelector() {
     setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
+  }
+
+  function openRecordTypeSelector() {
+    setAddDateContext(null)
+    setEditingRecord(null)
+    setIsReminderFormOpen(false)
+    setIsTemplateModalOpen(false)
+    setIsAddTypeSelectorOpen(false)
+    setIsRecordFormOpen(false)
+    setIsRecordTypeSelectorOpen(true)
+  }
+
+  function closeRecordTypeSelector() {
+    setIsRecordTypeSelectorOpen(false)
+  }
+
+  function openRecordForm(recordType: RecordType) {
+    setSelectedRecordType(recordType)
+    setEditingRecord(null)
+    setIsRecordTypeSelectorOpen(false)
+    setIsRecordFormOpen(true)
+  }
+
+  function openRecordDetailEdit(record: LifeRecord) {
+    setViewingRecord(null)
+    setSelectedRecordType(record.record_type)
+    setEditingRecord(record)
+    setIsRecordFormOpen(true)
+  }
+
+  function closeRecordForm() {
+    setIsRecordFormOpen(false)
+    setEditingRecord(null)
   }
 
   function closeAddReminder() {
@@ -599,6 +767,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }, [])
   const attentionCount = alerts.length
   const dailyDigest = buildDailyDigest(reminders, alerts, { lookaheadDays: digestPreferences.digest_lookahead_days })
+  const activeRecordsCount = records.filter((record) => record.status !== 'archived').length
   const displayName = getUserDisplayName(userLabel)
   const pageTitle = getPageTitle(activePage)
   const useBrandHeader = activePage === 'home' || activePage === 'calendar'
@@ -668,7 +837,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           digest={dailyDigest}
           digestPreferences={digestPreferences}
           isLoading={isLoading}
+          recordsCount={activeRecordsCount}
           userName={displayName}
+          onAddRecord={openRecordTypeSelector}
           onAddReminder={openAddReminder}
           onBrowseTemplates={openTemplates}
           onViewReminders={() => showPage('reminders')}
@@ -729,7 +900,18 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         </>
       ) : null}
 
-      {activePage === 'records' ? <RecordsView /> : null}
+      {activePage === 'records' ? (
+        <RecordsView
+          activeFilter={recordFilter}
+          isLoading={isRecordsLoading}
+          records={records}
+          showArchived={showArchivedRecords}
+          onAddRecord={openRecordTypeSelector}
+          onFilterChange={setRecordFilter}
+          onShowArchivedChange={setShowArchivedRecords}
+          onViewRecord={openRecordDetail}
+        />
+      ) : null}
 
         {activePage === 'settings' ? (
           <SettingsView
@@ -757,7 +939,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           <Bell size={19} aria-hidden="true" />
           Reminders
         </button>
-        <button type="button" className="bottom-nav-add" onClick={openAddReminder} aria-label="Add reminder">
+        <button type="button" className="bottom-nav-add" onClick={openAddReminder} aria-label="Add item">
           <Plus size={28} aria-hidden="true" />
         </button>
         <button type="button" className={getNavClass('records')} onClick={() => showPage('records')} aria-current={activePage === 'records' ? 'page' : undefined}>
@@ -786,6 +968,23 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onChooseBirthday={() => openBirthdayReminderForm()}
         onChooseRenewal={() => openRenewalReminderForm()}
         onChooseMaintenance={() => openMaintenanceReminderForm()}
+        onChooseRecord={openRecordTypeSelector}
+      />
+
+      <RecordTypeSelector
+        isOpen={isRecordTypeSelectorOpen}
+        onClose={closeRecordTypeSelector}
+        onChoose={openRecordForm}
+      />
+
+      <RecordForm
+        isOpen={isRecordFormOpen}
+        isSaving={isSaving}
+        record={editingRecord}
+        recordType={selectedRecordType}
+        onClose={closeRecordForm}
+        onCreate={handleCreateRecord}
+        onUpdate={handleUpdateRecord}
       />
 
       <LifeAdminTemplates
@@ -831,6 +1030,16 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onSnooze={handleSnoozeAlert}
         />
       ) : null}
+      {viewingRecord ? (
+        <RecordDetailDrawer
+          record={viewingRecord}
+          onArchive={handleArchiveRecord}
+          onClose={() => setViewingRecord(null)}
+          onEdit={openRecordDetailEdit}
+          onRequestDelete={requestRecordDelete}
+          onRestore={handleRestoreRecord}
+        />
+      ) : null}
       {editingReminder ? (
         <EditReminderModal
           reminder={editingReminder}
@@ -849,20 +1058,16 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => void confirmDelete()}
       />
+      <ConfirmDialog
+        body={getRecordDeleteConfirmationBody(pendingRecordDelete)}
+        confirmLabel="Delete record"
+        isBusy={isDeleting}
+        isOpen={pendingRecordDelete !== null}
+        title="Delete record?"
+        onCancel={() => setPendingRecordDelete(null)}
+        onConfirm={() => void confirmRecordDelete()}
+      />
     </>
-  )
-}
-
-function RecordsView() {
-  return (
-    <section className="coming-soon-panel records-panel" aria-labelledby="records-heading">
-      <div className="coming-soon-icon" aria-hidden="true">
-        <FileText size={28} />
-      </div>
-      <h2 id="records-heading">Records</h2>
-      <p>Secure personal records are coming soon.</p>
-      <p>Soon, LifeLedger will help you organize important records, renewals, and reference details in one private place.</p>
-    </section>
   )
 }
 
@@ -1846,6 +2051,16 @@ function getDeleteConfirmationBody(reminder: Reminder | null) {
   }
 
   return 'Are you sure you want to delete this reminder? This cannot be undone.'
+}
+
+function getRecordDeleteConfirmationBody(record: LifeRecord | null) {
+  const name = record?.title.trim()
+
+  if (name) {
+    return `Delete ${name}? This cannot be undone.`
+  }
+
+  return 'Are you sure you want to delete this record? This cannot be undone.'
 }
 
 function getDateOverride(date: string | null): Partial<ReminderInput> {

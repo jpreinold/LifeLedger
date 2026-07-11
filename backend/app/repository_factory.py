@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import DYNAMODB_PERSISTENCE, Settings, get_settings
-from app.dynamo_repository import DynamoReminderRepository
+from app.dynamo_repository import DynamoRecordRepository, DynamoReminderRepository
 from app.google_calendar_repository import (
     DynamoGoogleCalendarConnectionRepository,
     DynamoGoogleOAuthStateRepository,
@@ -13,6 +13,7 @@ from app.google_calendar_repository import (
 )
 from app.preferences_repository import DynamoPreferencesRepository, LocalPreferencesRepository, PreferencesRepository
 from app.push_repository import DynamoPushSubscriptionRepository, LocalPushSubscriptionRepository, PushSubscriptionRepository
+from app.records_repository import LocalRecordRepository, RecordRepository
 from app.repository import LocalReminderRepository, ReminderRepository
 
 
@@ -32,6 +33,24 @@ def create_repository(
         )
 
     return LocalReminderRepository(local_file_path or resolved_settings.local_data_file)
+
+
+def create_record_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> RecordRepository:
+    resolved_settings = settings or get_settings()
+
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoRecordRepository(
+            table_name=resolved_settings.records_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+
+    return LocalRecordRepository(local_file_path or resolved_settings.local_records_file)
 
 
 def create_preferences_repository(
