@@ -260,8 +260,13 @@ class S3DocumentStorageService:
             return self.s3_client
 
         import boto3
+        from botocore.config import Config
 
-        self.s3_client = boto3.client("s3", region_name=self.settings.aws_region)
+        self.s3_client = boto3.client(
+            "s3",
+            region_name=self.settings.aws_region,
+            config=Config(signature_version="s3v4"),
+        )
         return self.s3_client
 
 

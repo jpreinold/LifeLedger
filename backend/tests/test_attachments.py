@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.attachments import AttachmentObjectHead, DisabledDocumentStorageService
+from app.attachments import AttachmentObjectHead, DisabledDocumentStorageService, S3DocumentStorageService
 from app.attachments_repository import LocalRecordAttachmentRepository
 from app.auth import UserContext, get_current_user
 from app.config import load_settings
@@ -147,6 +147,34 @@ def create_upload_intent(client: TestClient, record_id: str, **overrides):
     response = client.post(f"/records/{record_id}/attachments/upload-intent", json=payload)
     assert response.status_code == 201
     return response.json()
+
+
+def test_s3_storage_client_uses_signature_v4_for_kms_presigned_posts(monkeypatch):
+    settings = load_settings(
+        {
+            "AWS_REGION": "us-west-2",
+            "DOCUMENT_STORAGE_MODE": "s3",
+            "DOCUMENTS_QUARANTINE_BUCKET": "quarantine-bucket",
+            "DOCUMENTS_CLEAN_BUCKET": "clean-bucket",
+            "DOCUMENTS_KMS_KEY_ARN": DOCUMENTS_KMS_KEY_ARN,
+        }
+    )
+    captured = {}
+    fake_client = object()
+
+    def fake_boto3_client(service_name, **kwargs):
+        captured["service_name"] = service_name
+        captured.update(kwargs)
+        return fake_client
+
+    monkeypatch.setattr("boto3.client", fake_boto3_client)
+
+    storage = S3DocumentStorageService(settings)
+
+    assert storage._client() is fake_client
+    assert captured["service_name"] == "s3"
+    assert captured["region_name"] == "us-west-2"
+    assert captured["config"].signature_version == "s3v4"
 
 
 def prepare_completed_attachment(client, record_repo, attachment_repo, storage, *, user_id="user-a"):
