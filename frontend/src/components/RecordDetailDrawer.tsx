@@ -1,28 +1,16 @@
-import { type ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AlertCircle,
   Archive,
-  Download,
   Eye,
   EyeOff,
-  FileImage,
-  FileText,
-  FileUp,
   LockKeyhole,
-  Maximize2,
   Pencil,
   RotateCcw,
-  ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react'
 
 import { recordsApi } from '../api/recordsApi'
-import {
-  attachmentMaxPerRecord,
-  formatAttachmentSize,
-  validateAttachmentFile,
-} from '../lib/attachmentFiles'
 import {
   formatRecordDate,
   formatRecordKeyDate,
@@ -32,11 +20,14 @@ import {
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
-import type { LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus, RecordAttachment } from '../types/record'
-import { ConfirmDialog } from './ConfirmDialog'
+import type { LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
+import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
+export type RecordDetailTab = 'details' | 'documents'
+
 interface RecordDetailDrawerProps {
+  initialTab?: RecordDetailTab
   record: LifeRecord
   onArchive: (record: LifeRecord) => Promise<void>
   onClose: () => void
@@ -53,9 +44,9 @@ interface DetailRow {
 
 const drawerCloseMs = 220
 const protectedRevealMs = 60_000
-const attachmentPollMs = 4_000
 
 export function RecordDetailDrawer({
+  initialTab = 'details',
   record,
   onArchive,
   onClose,
@@ -65,37 +56,26 @@ export function RecordDetailDrawer({
   onRestore,
 }: RecordDetailDrawerProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<RecordDetailTab>(initialTab)
   const [isArchiving, setIsArchiving] = useState(false)
   const [isRevealingProtected, setIsRevealingProtected] = useState(false)
   const [isClearingProtected, setIsClearingProtected] = useState(false)
   const [protectedPayload, setProtectedPayload] = useState<ProtectedRecordPayload | null>(null)
   const [protectedError, setProtectedError] = useState<string | null>(null)
-  const [attachments, setAttachments] = useState<RecordAttachment[]>([])
-  const [isAttachmentsLoading, setIsAttachmentsLoading] = useState(false)
-  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
-  const [isDeletingAttachment, setIsDeletingAttachment] = useState(false)
-  const [attachmentError, setAttachmentError] = useState<string | null>(null)
-  const [attachmentMessage, setAttachmentMessage] = useState<string | null>(null)
-  const [pendingAttachmentDelete, setPendingAttachmentDelete] = useState<RecordAttachment | null>(null)
-  const [previewAttachment, setPreviewAttachment] = useState<RecordAttachment | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false)
-  const [previewError, setPreviewError] = useState<string | null>(null)
-  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({})
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
-  const previewRequestRef = useRef(0)
   const revealTimerRef = useRef<number | null>(null)
   const definition = getRecordTypeDefinition(record.record_type)
   const Icon = definition.icon
   const providerLine = getRecordProviderLine(record)
   const keyDate = formatRecordKeyDate(record) ?? 'No expiration date'
   const isArchived = record.status === 'archived'
+
   const resetDetailScroll = useCallback(() => {
     detailBodyRef.current?.scrollTo({ top: 0 })
   }, [])
+
   const clearProtectedState = useCallback(() => {
     setProtectedPayload(null)
     setProtectedError(null)
@@ -105,48 +85,12 @@ export function RecordDetailDrawer({
       revealTimerRef.current = null
     }
   }, [])
-  const clearAttachmentTransientState = useCallback(() => {
-    previewRequestRef.current += 1
-    setAttachmentError(null)
-    setAttachmentMessage(null)
-    setIsUploadingAttachment(false)
-    setIsDeletingAttachment(false)
-    setPendingAttachmentDelete(null)
-    setPreviewAttachment(null)
-    setPreviewUrl(null)
-    setIsPreviewLoading(false)
-    setPreviewError(null)
-    setThumbnailUrls({})
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-  }, [])
-  const loadAttachments = useCallback(
-    async (options: { quiet?: boolean } = {}) => {
-      if (!options.quiet) {
-        setIsAttachmentsLoading(true)
-      }
-      try {
-        const nextAttachments = await recordsApi.listAttachments(record.id)
-        setAttachments(nextAttachments)
-      } catch (requestError) {
-        setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to load attachments.')
-      } finally {
-        if (!options.quiet) {
-          setIsAttachmentsLoading(false)
-        }
-      }
-    },
-    [record.id],
-  )
 
   useEffect(() => {
     clearProtectedState()
-    clearAttachmentTransientState()
-    setAttachments([])
+    setActiveTab(initialTab)
     setIsDrawerOpen(false)
     resetDetailScroll()
-    void loadAttachments()
     openFrameRef.current = window.requestAnimationFrame(() => {
       resetDetailScroll()
       setIsDrawerOpen(true)
@@ -158,7 +102,7 @@ export function RecordDetailDrawer({
         window.cancelAnimationFrame(openFrameRef.current)
       }
     }
-  }, [clearAttachmentTransientState, clearProtectedState, loadAttachments, record.id, resetDetailScroll])
+  }, [clearProtectedState, initialTab, record.id, resetDetailScroll])
 
   useEffect(() => {
     return () => {
@@ -189,7 +133,6 @@ export function RecordDetailDrawer({
     function handleVisibilityChange() {
       if (document.visibilityState === 'hidden') {
         clearProtectedState()
-        clearAttachmentTransientState()
       }
     }
 
@@ -197,60 +140,24 @@ export function RecordDetailDrawer({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [clearAttachmentTransientState, clearProtectedState])
-
-  useEffect(() => {
-    if (!isDrawerOpen || !attachments.some((attachment) => isAttachmentPendingScan(attachment))) {
-      return undefined
-    }
-
-    const pollId = window.setInterval(() => {
-      void loadAttachments({ quiet: true })
-    }, attachmentPollMs)
-
-    return () => window.clearInterval(pollId)
-  }, [attachments, isDrawerOpen, loadAttachments])
-
-  useEffect(() => {
-    if (!isDrawerOpen) {
-      return undefined
-    }
-
-    let isCancelled = false
-    const imageAttachments = attachments.filter(
-      (attachment) => attachment.status === 'available' && attachment.content_type.startsWith('image/') && !thumbnailUrls[attachment.attachment_id],
-    )
-
-    for (const attachment of imageAttachments) {
-      void recordsApi.createAttachmentPreviewUrl(record.id, attachment.attachment_id)
-        .then((preview) => {
-          if (!isCancelled) {
-            setThumbnailUrls((current) => ({ ...current, [attachment.attachment_id]: preview.url }))
-          }
-        })
-        .catch(() => {
-          // A thumbnail is a convenience; the full preview path still reports errors on click.
-        })
-    }
-
-    return () => {
-      isCancelled = true
-    }
-  }, [attachments, isDrawerOpen, record.id, thumbnailUrls])
+  }, [clearProtectedState])
 
   const requestClose = useCallback(() => {
     clearProtectedState()
-    clearAttachmentTransientState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onClose()
     }, drawerCloseMs)
-  }, [clearAttachmentTransientState, clearProtectedState, onClose])
+  }, [clearProtectedState, onClose])
+
+  function selectTab(tab: RecordDetailTab) {
+    setActiveTab(tab)
+    window.requestAnimationFrame(resetDetailScroll)
+  }
 
   function handleEdit() {
     clearProtectedState()
-    clearAttachmentTransientState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
@@ -299,135 +206,19 @@ export function RecordDetailDrawer({
     }
   }
 
-  function handleChooseAttachment() {
-    setAttachmentError(null)
-    setAttachmentMessage(null)
-    fileInputRef.current?.click()
-  }
-
-  async function handleAttachmentFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0] ?? null
-    event.currentTarget.value = ''
-    if (!file) {
-      return
-    }
-
-    const validationError = validateAttachmentFile(file, activeAttachmentCount(attachments))
-    if (validationError) {
-      setAttachmentError(validationError)
-      setAttachmentMessage(null)
-      return
-    }
-
-    setIsUploadingAttachment(true)
-    setAttachmentError(null)
-    setAttachmentMessage(null)
-
-    try {
-      const intent = await recordsApi.createAttachmentUploadIntent(record.id, {
-        filename: file.name,
-        content_type: file.type,
-        size_bytes: file.size,
-      })
-      await recordsApi.uploadAttachmentFile(intent.upload, file)
-      const completed = await recordsApi.completeAttachmentUpload(record.id, intent.attachment_id)
-      setAttachments((current) => upsertAttachment(current, completed))
-      setAttachmentMessage('File uploaded. Security scan in progress.')
-      void loadAttachments({ quiet: true })
-    } catch (requestError) {
-      setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to upload attachment.')
-    } finally {
-      setIsUploadingAttachment(false)
-    }
-  }
-
-  async function handleDownloadAttachment(attachment: RecordAttachment) {
-    if (attachment.status !== 'available') {
-      return
-    }
-
-    setAttachmentError(null)
-    setAttachmentMessage(null)
-    try {
-      const download = await recordsApi.createAttachmentDownloadUrl(record.id, attachment.attachment_id)
-      window.location.assign(download.url)
-    } catch (requestError) {
-      setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to download attachment.')
-    }
-  }
-
-  async function handlePreviewAttachment(attachment: RecordAttachment) {
-    if (attachment.status !== 'available') {
-      return
-    }
-
-    const requestId = previewRequestRef.current + 1
-    previewRequestRef.current = requestId
-    setPreviewAttachment(attachment)
-    setPreviewUrl(null)
-    setPreviewError(null)
-    setIsPreviewLoading(true)
-    setAttachmentError(null)
-    setAttachmentMessage(null)
-
-    try {
-      const preview = await recordsApi.createAttachmentPreviewUrl(record.id, attachment.attachment_id)
-      if (previewRequestRef.current === requestId) {
-        setPreviewUrl(preview.url)
-      }
-    } catch (requestError) {
-      if (previewRequestRef.current === requestId) {
-        setPreviewError(requestError instanceof Error ? requestError.message : 'Unable to preview attachment.')
-      }
-    } finally {
-      if (previewRequestRef.current === requestId) {
-        setIsPreviewLoading(false)
-      }
-    }
-  }
-
-  async function confirmDeleteAttachment() {
-    if (!pendingAttachmentDelete) {
-      return
-    }
-
-    setIsDeletingAttachment(true)
-    setAttachmentError(null)
-    setAttachmentMessage(null)
-    try {
-      await recordsApi.deleteAttachment(record.id, pendingAttachmentDelete.attachment_id)
-      setAttachments((current) => current.filter((attachment) => attachment.attachment_id !== pendingAttachmentDelete.attachment_id))
-      setThumbnailUrls((current) => {
-        const next = { ...current }
-        delete next[pendingAttachmentDelete.attachment_id]
-        return next
-      })
-      if (previewAttachment?.attachment_id === pendingAttachmentDelete.attachment_id) {
-        clearAttachmentTransientState()
-      }
-      setPendingAttachmentDelete(null)
-      setAttachmentMessage('Attachment deleted.')
-    } catch (requestError) {
-      setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to delete attachment.')
-    } finally {
-      setIsDeletingAttachment(false)
-    }
-  }
-
   return (
-    <>
-      <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
-        <div className="sheet-header detail-header">
-          <div>
-            <h2 id="record-detail-heading">Record details</h2>
-            <p>{definition.label}</p>
-          </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
-            <X size={19} aria-hidden="true" />
-          </button>
+    <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
+      <div className="sheet-header detail-header">
+        <div>
+          <h2 id="record-detail-heading">Record details</h2>
+          <p>{definition.label}</p>
         </div>
+        <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
+          <X size={19} aria-hidden="true" />
+        </button>
+      </div>
 
-        <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
+      <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
         <section className={`detail-hero tone-${definition.tone}`} aria-labelledby="record-detail-title">
           <div className={`category-icon category-icon-large tone-${definition.tone}`} aria-hidden="true">
             <Icon size={30} />
@@ -447,311 +238,128 @@ export function RecordDetailDrawer({
           </div>
         </section>
 
-        <DetailSection
-          title="Record"
-          rows={[
-            { label: 'Type', value: definition.label },
-            { label: 'Category', value: definition.category },
-            { label: 'Owner', value: record.owner_name },
-            { label: 'Provider/brand', value: record.provider_or_brand },
-            { label: 'Summary', value: providerLine },
-            { label: 'Location', value: record.location_hint },
-          ]}
-        />
-
-        <DetailSection
-          title="Dates"
-          className="detail-schedule-section"
-          rows={[
-            { label: 'Start date', value: formatRecordDate(record.start_date) },
-            { label: 'Issue date', value: formatRecordDate(record.issue_date) },
-            { label: 'Expiration date', value: formatRecordDate(record.expiration_date) },
-            { label: 'Purchase date', value: formatRecordDate(record.purchase_date) },
-            { label: 'Renewal date', value: formatRecordDate(record.renewal_date) },
-          ]}
-        />
-
-        {record.tags.length > 0 ? (
-          <section className="detail-section" aria-label="Tags">
-            <h3>Tags</h3>
-            <div className="record-tag-list">
-              {record.tags.map((tag) => (
-                <span className="record-tag" key={tag}>{tag}</span>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {record.notes ? (
-          <section className="detail-section" aria-label="Notes">
-            <h3>Notes</h3>
-            <p className="detail-note">{record.notes}</p>
-          </section>
-        ) : null}
-
-        <ProtectedDetailsSection
-          error={protectedError}
-          isClearing={isClearingProtected}
-          isRevealing={isRevealingProtected}
-          payload={protectedPayload}
-          record={record}
-          onClear={() => void handleClearProtected()}
-          onHide={clearProtectedState}
-          onReveal={() => void handleRevealProtected()}
-        />
-
-        <AttachmentsSection
-          attachments={attachments}
-          error={attachmentError}
-          isLoading={isAttachmentsLoading}
-          isUploading={isUploadingAttachment}
-          message={attachmentMessage}
-          thumbnailUrls={thumbnailUrls}
-          onChooseFile={handleChooseAttachment}
-          onDelete={setPendingAttachmentDelete}
-          onDownload={(attachment) => void handleDownloadAttachment(attachment)}
-          onPreview={(attachment) => void handlePreviewAttachment(attachment)}
-        />
-
-        <DetailSection
-          title="History"
-          rows={[
-            { label: 'Created', value: formatRecordTimestamp(record.created_at) },
-            { label: 'Updated', value: formatRecordTimestamp(record.updated_at) },
-          ]}
-        />
-      </div>
-
-      <section className="detail-actions" aria-label="Record actions">
-        <button type="button" className="secondary-button" onClick={handleEdit}>
-          <Pencil size={17} aria-hidden="true" />
-          Edit
-        </button>
-        <button type="button" className="primary-button" onClick={() => void handleArchiveToggle()} disabled={isArchiving}>
-          {isArchived ? <RotateCcw size={17} aria-hidden="true" /> : <Archive size={17} aria-hidden="true" />}
-          {isArchiving ? 'Saving...' : isArchived ? 'Restore' : 'Archive'}
-        </button>
-        <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(record)}>
-          <Trash2 size={16} aria-hidden="true" />
-          Delete
-        </button>
-      </section>
-      <input
-        type="file"
-        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-        className="attachment-file-input"
-        ref={fileInputRef}
-        onChange={(event) => void handleAttachmentFileChange(event)}
-      />
-    </SheetDrawer>
-      <ConfirmDialog
-        body={pendingAttachmentDelete ? `Delete ${pendingAttachmentDelete.display_name}? This removes the stored file.` : ''}
-        confirmLabel="Delete attachment"
-        isBusy={isDeletingAttachment}
-        isOpen={pendingAttachmentDelete !== null}
-        title="Delete attachment?"
-        onCancel={() => setPendingAttachmentDelete(null)}
-        onConfirm={() => void confirmDeleteAttachment()}
-      />
-      <AttachmentPreviewOverlay
-        attachment={previewAttachment}
-        error={previewError}
-        isLoading={isPreviewLoading}
-        url={previewUrl}
-        onClose={clearAttachmentTransientState}
-      />
-    </>
-  )
-}
-
-function AttachmentsSection({
-  attachments,
-  error,
-  isLoading,
-  isUploading,
-  message,
-  thumbnailUrls,
-  onChooseFile,
-  onDelete,
-  onDownload,
-  onPreview,
-}: {
-  attachments: RecordAttachment[]
-  error: string | null
-  isLoading: boolean
-  isUploading: boolean
-  message: string | null
-  thumbnailUrls: Record<string, string>
-  onChooseFile: () => void
-  onDelete: (attachment: RecordAttachment) => void
-  onDownload: (attachment: RecordAttachment) => void
-  onPreview: (attachment: RecordAttachment) => void
-}) {
-  const activeCount = activeAttachmentCount(attachments)
-  const canAddAttachment = activeCount < attachmentMaxPerRecord && !isUploading
-
-  return (
-    <section className="detail-section attachments-section" aria-label="Attachments">
-      <div className="attachments-heading">
-        <div>
-          <h3>Attachments</h3>
-          <p>Files are encrypted in storage and scanned before they become available.</p>
+        <div className="record-detail-tabs" role="tablist" aria-label="Record detail tabs">
+          <button
+            type="button"
+            className={activeTab === 'details' ? 'record-detail-tab active' : 'record-detail-tab'}
+            id="record-details-tab"
+            role="tab"
+            aria-selected={activeTab === 'details'}
+            aria-controls="record-details-panel"
+            onClick={() => selectTab('details')}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'documents' ? 'record-detail-tab active' : 'record-detail-tab'}
+            id="record-documents-tab"
+            role="tab"
+            aria-selected={activeTab === 'documents'}
+            aria-controls="record-documents-panel"
+            onClick={() => selectTab('documents')}
+          >
+            Documents
+          </button>
         </div>
-        <ShieldCheck size={18} aria-hidden="true" />
-      </div>
 
-      <div className="attachments-toolbar">
-        <button type="button" className="secondary-button attachment-add-button" disabled={!canAddAttachment} onClick={onChooseFile}>
-          <FileUp size={16} aria-hidden="true" />
-          {isUploading ? 'Uploading...' : 'Add document'}
-        </button>
-        <span>{activeCount}/{attachmentMaxPerRecord} attached - PDF, JPEG, PNG - 10 MB max</span>
-      </div>
-
-      {error ? (
-        <p className="field-error attachment-message">
-          <AlertCircle size={14} aria-hidden="true" />
-          {error}
-        </p>
-      ) : null}
-      {message ? <p className="attachment-message attachment-message-success">{message}</p> : null}
-
-      {isLoading ? <p className="attachments-empty">Loading attachments...</p> : null}
-      {!isLoading && attachments.length === 0 ? <p className="attachments-empty">No attachments yet.</p> : null}
-
-      {!isLoading && attachments.length > 0 ? (
-        <div className="attachments-list">
-          {attachments.map((attachment) => (
-            <AttachmentRow
-              attachment={attachment}
-              key={attachment.attachment_id}
-              thumbnailUrl={thumbnailUrls[attachment.attachment_id] ?? null}
-              onDelete={() => onDelete(attachment)}
-              onDownload={() => onDownload(attachment)}
-              onPreview={() => onPreview(attachment)}
-              onRetry={onChooseFile}
-            />
-          ))}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-function AttachmentRow({
-  attachment,
-  thumbnailUrl,
-  onDelete,
-  onDownload,
-  onPreview,
-  onRetry,
-}: {
-  attachment: RecordAttachment
-  thumbnailUrl: string | null
-  onDelete: () => void
-  onDownload: () => void
-  onPreview: () => void
-  onRetry: () => void
-}) {
-  const isImage = attachment.content_type.startsWith('image/')
-  const Icon = isImage ? FileImage : FileText
-  const statusLabel = getAttachmentStatusLabel(attachment)
-  const statusClass = getAttachmentStatusClass(attachment)
-  const dateLabel = formatAttachmentDate(attachment.available_at ?? attachment.uploaded_at ?? attachment.created_at)
-  const isAvailable = attachment.status === 'available'
-  const isFailed = attachment.status === 'rejected' || attachment.status === 'scan_failed'
-
-  return (
-    <article className="attachment-row">
-      <div className="attachment-main">
-        <button
-          type="button"
-          className="attachment-thumbnail"
-          disabled={!isAvailable}
-          onClick={onPreview}
-          aria-label={isAvailable ? `Preview ${attachment.display_name}` : `${attachment.display_name} is not available for preview yet`}
+        <div
+          className="record-tab-panel"
+          hidden={activeTab !== 'details'}
+          id="record-details-panel"
+          role="tabpanel"
+          aria-labelledby="record-details-tab"
         >
-          {thumbnailUrl && isImage ? (
-            <img src={thumbnailUrl} alt="" referrerPolicy="no-referrer" />
-          ) : (
-            <Icon size={18} />
-          )}
-          {isAvailable ? <Maximize2 size={13} aria-hidden="true" /> : null}
-        </button>
-        <div className="attachment-copy">
-          <strong>{attachment.display_name}</strong>
-          <span>{formatAttachmentSize(attachment.size_bytes)} - {dateLabel}</span>
-          <small className={statusClass}>{statusLabel}</small>
+          <DetailSection
+            title="Record"
+            rows={[
+              { label: 'Type', value: definition.label },
+              { label: 'Category', value: definition.category },
+              { label: 'Owner', value: record.owner_name },
+              { label: 'Provider/brand', value: record.provider_or_brand },
+              { label: 'Summary', value: providerLine },
+              { label: 'Location', value: record.location_hint },
+            ]}
+          />
+
+          <DetailSection
+            title="Dates"
+            className="detail-schedule-section"
+            rows={[
+              { label: 'Start date', value: formatRecordDate(record.start_date) },
+              { label: 'Issue date', value: formatRecordDate(record.issue_date) },
+              { label: 'Expiration date', value: formatRecordDate(record.expiration_date) },
+              { label: 'Purchase date', value: formatRecordDate(record.purchase_date) },
+              { label: 'Renewal date', value: formatRecordDate(record.renewal_date) },
+            ]}
+          />
+
+          {record.tags.length > 0 ? (
+            <section className="detail-section" aria-label="Tags">
+              <h3>Tags</h3>
+              <div className="record-tag-list">
+                {record.tags.map((tag) => (
+                  <span className="record-tag" key={tag}>{tag}</span>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {record.notes ? (
+            <section className="detail-section" aria-label="Notes">
+              <h3>Notes</h3>
+              <p className="detail-note">{record.notes}</p>
+            </section>
+          ) : null}
+
+          <ProtectedDetailsSection
+            error={protectedError}
+            isClearing={isClearingProtected}
+            isRevealing={isRevealingProtected}
+            payload={protectedPayload}
+            record={record}
+            onClear={() => void handleClearProtected()}
+            onHide={clearProtectedState}
+            onReveal={() => void handleRevealProtected()}
+          />
+
+          <DetailSection
+            title="History"
+            rows={[
+              { label: 'Created', value: formatRecordTimestamp(record.created_at) },
+              { label: 'Updated', value: formatRecordTimestamp(record.updated_at) },
+            ]}
+          />
+        </div>
+
+        <div
+          className="record-tab-panel"
+          hidden={activeTab !== 'documents'}
+          id="record-documents-panel"
+          role="tabpanel"
+          aria-labelledby="record-documents-tab"
+        >
+          <RecordDocumentsPanel isActive={isDrawerOpen && activeTab === 'documents'} recordId={record.id} />
         </div>
       </div>
-      <div className="attachment-actions">
-        {isAvailable ? (
-          <>
-            <button type="button" className="secondary-button attachment-preview-button" onClick={onPreview}>
-              <Eye size={15} aria-hidden="true" />
-              Preview
-            </button>
-            <button type="button" className="icon-button attachment-action-button" onClick={onDownload} aria-label={`Download ${attachment.display_name}`}>
-              <Download size={16} aria-hidden="true" />
-            </button>
-          </>
-        ) : null}
-        {isFailed ? (
-          <button type="button" className="icon-button attachment-action-button" onClick={onRetry} aria-label="Retry with another file">
-            <FileUp size={16} aria-hidden="true" />
+
+      {activeTab === 'details' ? (
+        <section className="detail-actions" aria-label="Record actions">
+          <button type="button" className="secondary-button" onClick={handleEdit}>
+            <Pencil size={17} aria-hidden="true" />
+            Edit
           </button>
-        ) : null}
-        <button type="button" className="icon-button attachment-action-button attachment-delete-action" onClick={onDelete} aria-label={`Delete ${attachment.display_name}`}>
-          <Trash2 size={15} aria-hidden="true" />
-        </button>
-      </div>
-    </article>
-  )
-}
-
-function AttachmentPreviewOverlay({
-  attachment,
-  error,
-  isLoading,
-  onClose,
-  url,
-}: {
-  attachment: RecordAttachment | null
-  error: string | null
-  isLoading: boolean
-  onClose: () => void
-  url: string | null
-}) {
-  if (!attachment) {
-    return null
-  }
-
-  const isImage = attachment.content_type.startsWith('image/')
-
-  return (
-    <div className="attachment-preview-backdrop" role="dialog" aria-modal="true" aria-label={`Preview ${attachment.display_name}`}>
-      <div className="attachment-preview-shell">
-        <header className="attachment-preview-header">
-          <div>
-            <h3>{attachment.display_name}</h3>
-            <p>{formatAttachmentSize(attachment.size_bytes)}</p>
-          </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close attachment preview">
-            <X size={20} aria-hidden="true" />
+          <button type="button" className="primary-button" onClick={() => void handleArchiveToggle()} disabled={isArchiving}>
+            {isArchived ? <RotateCcw size={17} aria-hidden="true" /> : <Archive size={17} aria-hidden="true" />}
+            {isArchiving ? 'Saving...' : isArchived ? 'Restore' : 'Archive'}
           </button>
-        </header>
-        <div className="attachment-preview-stage">
-          {isLoading ? <p className="attachment-preview-state">Loading preview...</p> : null}
-          {!isLoading && error ? <p className="field-error attachment-preview-state">{error}</p> : null}
-          {!isLoading && !error && url && isImage ? (
-            <img className="attachment-preview-image" src={url} alt="" referrerPolicy="no-referrer" />
-          ) : null}
-          {!isLoading && !error && url && !isImage ? (
-            <iframe className="attachment-preview-frame" src={url} title={attachment.display_name} referrerPolicy="no-referrer" />
-          ) : null}
-        </div>
-      </div>
-    </div>
+          <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(record)}>
+            <Trash2 size={16} aria-hidden="true" />
+            Delete
+          </button>
+        </section>
+      ) : null}
+    </SheetDrawer>
   )
 }
 
@@ -862,56 +470,4 @@ function ProtectedDetailsSection({
 
 function hasValue(value: string | null | undefined) {
   return value !== null && value !== undefined && value.trim().length > 0
-}
-
-function activeAttachmentCount(attachments: RecordAttachment[]) {
-  return attachments.filter((attachment) => ['pending_upload', 'uploaded', 'scanning', 'available'].includes(attachment.status)).length
-}
-
-function upsertAttachment(attachments: RecordAttachment[], nextAttachment: RecordAttachment) {
-  const exists = attachments.some((attachment) => attachment.attachment_id === nextAttachment.attachment_id)
-  if (exists) {
-    return attachments.map((attachment) => (attachment.attachment_id === nextAttachment.attachment_id ? nextAttachment : attachment))
-  }
-  return [...attachments, nextAttachment]
-}
-
-function isAttachmentPendingScan(attachment: RecordAttachment) {
-  return attachment.status === 'uploaded' || attachment.status === 'scanning'
-}
-
-function getAttachmentStatusLabel(attachment: RecordAttachment) {
-  if (attachment.status === 'available') {
-    return 'Available - security scanned'
-  }
-  if (attachment.status === 'rejected') {
-    return attachment.scan_result === 'threats_found' ? 'File failed security scan.' : 'File could not be accepted.'
-  }
-  if (attachment.status === 'scan_failed') {
-    return 'Scan failed. Delete and retry with a supported file.'
-  }
-  if (attachment.status === 'pending_upload') {
-    return 'Waiting for upload'
-  }
-  if (attachment.status === 'deleting') {
-    return 'Deleting'
-  }
-  return 'Scanning before download'
-}
-
-function getAttachmentStatusClass(attachment: RecordAttachment) {
-  if (attachment.status === 'available') {
-    return 'attachment-status attachment-status-available'
-  }
-  if (attachment.status === 'rejected' || attachment.status === 'scan_failed') {
-    return 'attachment-status attachment-status-failed'
-  }
-  return 'attachment-status attachment-status-scanning'
-}
-
-function formatAttachmentDate(value: string | null) {
-  if (!value) {
-    return 'Date unknown'
-  }
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 }

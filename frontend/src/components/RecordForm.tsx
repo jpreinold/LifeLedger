@@ -1,6 +1,6 @@
-import { type ChangeEvent, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { FileImage, FileText, FileUp, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
+import { FileUp, Plus, Save, ShieldCheck, X } from 'lucide-react'
 
 import {
   createRecordInput,
@@ -14,8 +14,8 @@ import {
   tagsToText,
   type RecordField,
 } from '../lib/recordTypes'
-import { attachmentAccept, attachmentMaxPerRecord, formatAttachmentSize, validateAttachmentFile } from '../lib/attachmentFiles'
 import type { LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
+import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
 interface RecordFormProps {
@@ -24,11 +24,12 @@ interface RecordFormProps {
   record: LifeRecord | null
   recordType: RecordType
   onClose: () => void
-  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[]) => Promise<boolean>
-  onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[]) => Promise<boolean>
+  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
+  onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
 }
 
 const dateFields: RecordField[] = ['start_date', 'issue_date', 'expiration_date', 'purchase_date', 'renewal_date']
+type RecordFormTab = 'record' | 'documents'
 
 export function RecordForm({
   isOpen,
@@ -41,27 +42,27 @@ export function RecordForm({
 }: RecordFormProps) {
   const [form, setForm] = useState<RecordInput>(() => createRecordInput(recordType))
   const [protectedForm, setProtectedForm] = useState<ProtectedRecordInput>(() => createProtectedRecordInput(recordType))
-  const [queuedAttachments, setQueuedAttachments] = useState<File[]>([])
+  const [activeTab, setActiveTab] = useState<RecordFormTab>('record')
   const [tagsText, setTagsText] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
-  const attachmentInputRef = useRef<HTMLInputElement | null>(null)
+  const formBodyRef = useRef<HTMLFormElement | null>(null)
   const definition = getRecordTypeDefinition(form.record_type)
   const Icon = definition.icon
   const isEditing = record !== null
 
   useEffect(() => {
     if (!isOpen) {
-      setQueuedAttachments([])
       setValidationError(null)
+      setActiveTab('record')
       return
     }
 
     const nextForm = record ? recordToInput(record) : createRecordInput(recordType)
     setForm(nextForm)
     setProtectedForm(createProtectedRecordInput(nextForm.record_type))
-    setQueuedAttachments([])
     setTagsText(tagsToText(nextForm.tags))
     setValidationError(null)
+    setActiveTab('record')
   }, [isOpen, record, recordType])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -69,16 +70,16 @@ export function RecordForm({
 
     const input = normalizeRecordInput({ ...form, tags: tagsFromText(tagsText) })
     if (!input.title) {
+      setActiveTab('record')
       setValidationError('Title is required.')
       return
     }
 
     setValidationError(null)
     const protectedInput = normalizeProtectedRecordInput(input.record_type, protectedForm)
-    const wasSaved = record ? await onUpdate(record.id, input, protectedInput, queuedAttachments) : await onCreate(input, protectedInput, queuedAttachments)
+    const wasSaved = record ? await onUpdate(record.id, input, protectedInput) : await onCreate(input, protectedInput)
 
     if (wasSaved) {
-      setQueuedAttachments([])
       onClose()
     }
   }
@@ -91,34 +92,9 @@ export function RecordForm({
     setProtectedForm((current) => ({ ...current, [field]: value }))
   }
 
-  function handleChooseAttachment() {
-    setValidationError(null)
-    attachmentInputRef.current?.click()
-  }
-
-  function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.currentTarget.files ?? [])
-    event.currentTarget.value = ''
-    if (files.length === 0) {
-      return
-    }
-
-    let nextAttachments = queuedAttachments
-    for (const file of files) {
-      const validationMessage = validateAttachmentFile(file, nextAttachments.length)
-      if (validationMessage) {
-        setValidationError(validationMessage)
-        return
-      }
-      nextAttachments = [...nextAttachments, file]
-    }
-
-    setQueuedAttachments(nextAttachments)
-    setValidationError(null)
-  }
-
-  function removeQueuedAttachment(index: number) {
-    setQueuedAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))
+  function selectTab(tab: RecordFormTab) {
+    setActiveTab(tab)
+    formBodyRef.current?.scrollTo({ top: 0 })
   }
 
   return (
@@ -145,161 +121,123 @@ export function RecordForm({
         <span className="record-type-lockup-label">{definition.category}</span>
       </div>
 
-      <form className="reminder-form sheet-body record-form" onSubmit={handleSubmit}>
-        <section className="record-safety-note" aria-label="Record privacy guardrails">
-          <ShieldCheck size={16} aria-hidden="true" />
-          <span>Do not store SSNs, card or bank data, passwords, recovery codes, keys, or medical documents.</span>
-        </section>
-
-        <label>
-          <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
-          <input
-            required
-            maxLength={120}
-            value={form.title}
-            onChange={(event) => updateField('title', event.target.value)}
-            placeholder={definition.defaultTitle}
-          />
-        </label>
-
-        <div className="record-form-type-row">
-          <span>Record type</span>
-          <strong>{definition.label}</strong>
+      <form className="reminder-form sheet-body record-form" ref={formBodyRef} onSubmit={handleSubmit}>
+        <div className="record-form-tabs" role="tablist" aria-label="Edit record sections">
+          <button
+            type="button"
+            className={activeTab === 'record' ? 'record-form-tab active' : 'record-form-tab'}
+            id="record-form-record-tab"
+            role="tab"
+            aria-selected={activeTab === 'record'}
+            aria-controls="record-form-record-panel"
+            onClick={() => selectTab('record')}
+          >
+            Record
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'documents' ? 'record-form-tab active' : 'record-form-tab'}
+            id="record-form-documents-tab"
+            role="tab"
+            aria-selected={activeTab === 'documents'}
+            aria-controls="record-form-documents-panel"
+            onClick={() => selectTab('documents')}
+          >
+            Documents
+          </button>
         </div>
 
-        {definition.fields.includes('subtitle') ? (
-          <RecordTextField
-            field="subtitle"
-            form={form}
-            definitionType={form.record_type}
-            onChange={updateField}
-          />
-        ) : null}
+        <div
+          className="record-form-tab-panel"
+          hidden={activeTab !== 'record'}
+          id="record-form-record-panel"
+          role="tabpanel"
+          aria-labelledby="record-form-record-tab"
+        >
+          <section className="record-safety-note" aria-label="Record privacy guardrails">
+            <ShieldCheck size={16} aria-hidden="true" />
+            <span>Do not store SSNs, card or bank data, passwords, recovery codes, keys, or medical documents.</span>
+          </section>
 
-        <RecordFieldGrid fields={definition.fields.filter((field) => field !== 'subtitle' && field !== 'notes' && field !== 'tags')} form={form} onChange={updateField} />
-
-        {definition.fields.includes('notes') ? (
-          <RecordTextArea field="notes" form={form} definitionType={form.record_type} onChange={updateField} />
-        ) : null}
-
-        {definition.fields.includes('tags') ? (
           <label>
-            <span>Tags</span>
+            <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
             <input
-              maxLength={240}
-              value={tagsText}
-              onChange={(event) => setTagsText(event.target.value)}
-              placeholder="travel, home, renewal"
+              required
+              maxLength={120}
+              value={form.title}
+              onChange={(event) => updateField('title', event.target.value)}
+              placeholder={definition.defaultTitle}
             />
           </label>
-        ) : null}
 
-        <ProtectedRecordFields
-          input={protectedForm}
-          isEditing={isEditing}
-          recordType={form.record_type}
-          onChange={updateProtectedField}
-        />
+          <div className="record-form-type-row">
+            <span>Record type</span>
+            <strong>{definition.label}</strong>
+          </div>
 
-        <QueuedAttachmentsSection
-          attachments={queuedAttachments}
-          isSaving={isSaving}
-          onChooseAttachment={handleChooseAttachment}
-          onRemoveAttachment={removeQueuedAttachment}
-        />
+          {definition.fields.includes('subtitle') ? (
+            <RecordTextField
+              field="subtitle"
+              form={form}
+              definitionType={form.record_type}
+              onChange={updateField}
+            />
+          ) : null}
 
-        {validationError ? <p className="field-error">{validationError}</p> : null}
+          <RecordFieldGrid fields={definition.fields.filter((field) => field !== 'subtitle' && field !== 'notes' && field !== 'tags')} form={form} onChange={updateField} />
 
-        <button className="primary-button" type="submit" disabled={isSaving}>
-          {isEditing ? <Save size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
-          {isSaving ? 'Saving' : isEditing ? 'Save record' : 'Add record'}
-        </button>
+          {definition.fields.includes('notes') ? (
+            <RecordTextArea field="notes" form={form} definitionType={form.record_type} onChange={updateField} />
+          ) : null}
 
-        <input
-          ref={attachmentInputRef}
-          className="attachment-file-input"
-          type="file"
-          accept={attachmentAccept}
-          multiple
-          onChange={handleAttachmentChange}
-        />
+          {definition.fields.includes('tags') ? (
+            <label>
+              <span>Tags</span>
+              <input
+                maxLength={240}
+                value={tagsText}
+                onChange={(event) => setTagsText(event.target.value)}
+                placeholder="travel, home, renewal"
+              />
+            </label>
+          ) : null}
+
+          <ProtectedRecordFields
+            input={protectedForm}
+            isEditing={isEditing}
+            recordType={form.record_type}
+            onChange={updateProtectedField}
+          />
+
+          {validationError ? <p className="field-error">{validationError}</p> : null}
+
+          <button className="primary-button" type="submit" disabled={isSaving}>
+            {isEditing ? <Save size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
+            {isSaving ? 'Saving' : isEditing ? 'Save record' : 'Add record'}
+          </button>
+        </div>
+
+        <div
+          className="record-form-tab-panel"
+          hidden={activeTab !== 'documents'}
+          id="record-form-documents-panel"
+          role="tabpanel"
+          aria-labelledby="record-form-documents-tab"
+        >
+          {record ? (
+            <RecordDocumentsPanel isActive={isOpen && activeTab === 'documents'} mode="edit" recordId={record.id} />
+          ) : (
+            <section className="record-documents-unavailable" aria-label="Documents unavailable until saved">
+              <FileUp size={28} aria-hidden="true" />
+              <div>
+                <h3>Save the record first</h3>
+                <p>Documents can be added after LifeLedger creates the record and can verify ownership.</p>
+              </div>
+            </section>
+          )}
+        </div>
       </form>
     </SheetDrawer>
-  )
-}
-
-function QueuedAttachmentsSection({
-  attachments,
-  isSaving,
-  onChooseAttachment,
-  onRemoveAttachment,
-}: {
-  attachments: File[]
-  isSaving: boolean
-  onChooseAttachment: () => void
-  onRemoveAttachment: (index: number) => void
-}) {
-  const canAddAttachment = attachments.length < attachmentMaxPerRecord && !isSaving
-
-  return (
-    <section className="record-attachment-queue" aria-label="Attachments">
-      <div className="record-attachment-queue-heading">
-        <h3>Attachments</h3>
-        <span>{attachments.length}/{attachmentMaxPerRecord}</span>
-      </div>
-
-      <button type="button" className="secondary-button record-attachment-add-button" disabled={!canAddAttachment} onClick={onChooseAttachment}>
-        <FileUp size={17} aria-hidden="true" />
-        Add document
-      </button>
-
-      {attachments.length > 0 ? (
-        <>
-          <p className="record-attachment-queue-note">
-            Attachments will upload after the record is saved. Files are encrypted in storage and scanned before they become available.
-          </p>
-          <div className="record-attachment-queue-list">
-            {attachments.map((attachment, index) => (
-              <QueuedAttachmentRow
-                attachment={attachment}
-                index={index}
-                key={`${attachment.name}-${attachment.size}-${attachment.lastModified}-${index}`}
-                onRemove={() => onRemoveAttachment(index)}
-              />
-            ))}
-          </div>
-        </>
-      ) : null}
-    </section>
-  )
-}
-
-function QueuedAttachmentRow({
-  attachment,
-  index,
-  onRemove,
-}: {
-  attachment: File
-  index: number
-  onRemove: () => void
-}) {
-  const Icon = attachment.type.startsWith('image/') ? FileImage : FileText
-
-  return (
-    <article className="record-attachment-queue-row">
-      <div className="attachment-main">
-        <span className="attachment-icon" aria-hidden="true">
-          <Icon size={18} />
-        </span>
-        <div className="attachment-copy">
-          <strong>{attachment.name}</strong>
-          <span>{formatAttachmentSize(attachment.size)} - queued</span>
-        </div>
-      </div>
-      <button type="button" className="icon-button attachment-action-button attachment-delete-action" onClick={onRemove} aria-label={`Remove attachment ${index + 1}`}>
-        <Trash2 size={16} aria-hidden="true" />
-      </button>
-    </article>
   )
 }
 

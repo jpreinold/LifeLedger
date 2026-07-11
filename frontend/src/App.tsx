@@ -34,7 +34,7 @@ import { Dashboard } from './components/Dashboard'
 import { EditReminderModal } from './components/EditReminderModal'
 import { HomeDashboard } from './components/HomeDashboard'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
-import { RecordDetailDrawer } from './components/RecordDetailDrawer'
+import { RecordDetailDrawer, type RecordDetailTab } from './components/RecordDetailDrawer'
 import { RecordForm } from './components/RecordForm'
 import { RecordsView } from './components/RecordsView'
 import { RecordTypeSelector } from './components/RecordTypeSelector'
@@ -135,6 +135,7 @@ interface ReminderAppProps {
 }
 
 type AppPage = 'home' | 'reminders' | 'records' | 'settings' | 'calendar'
+type ViewingRecordState = { initialTab: RecordDetailTab; record: LifeRecord }
 
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -155,7 +156,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
   const [viewingReminder, setViewingReminder] = useState<{ reminder: Reminder; fromAlert: boolean } | null>(null)
   const [editingRecord, setEditingRecord] = useState<LifeRecord | null>(null)
-  const [viewingRecord, setViewingRecord] = useState<LifeRecord | null>(null)
+  const [viewingRecord, setViewingRecord] = useState<ViewingRecordState | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
   const [pendingRecordDelete, setPendingRecordDelete] = useState<LifeRecord | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
@@ -377,44 +378,30 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[] = []) {
+  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
 
     try {
       const created = await recordsApi.create(input)
+      let nextRecord = created
       let protectedSaved = true
-      let uploadedAttachmentCount = 0
-      let attachmentUploadFailed = false
       if (hasProtectedRecordInput(protectedInput)) {
         try {
-          await recordsApi.setProtected(created.id, protectedInput)
+          const protectedStatus = await recordsApi.setProtected(created.id, protectedInput)
+          nextRecord = withProtectedStatus(created, protectedStatus)
         } catch {
           protectedSaved = false
         }
       }
-      for (const attachment of attachments) {
-        try {
-          await uploadRecordAttachment(created.id, attachment)
-          uploadedAttachmentCount += 1
-        } catch {
-          attachmentUploadFailed = true
-        }
-      }
       await loadRecordData()
       setActivePage('records')
-      if (!protectedSaved && attachmentUploadFailed) {
-        setError('Record added, but protected details were not saved and one or more attachments could not be uploaded.')
-      } else if (!protectedSaved) {
+      setViewingRecord({ record: nextRecord, initialTab: 'documents' })
+      if (!protectedSaved) {
         setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
-      } else if (attachmentUploadFailed) {
-        const failedCount = attachments.length - uploadedAttachmentCount
-        setError(`Record added, but ${formatAttachmentFailureCount(failedCount)} could not be uploaded. Open the record to retry.`)
-      } else if (attachments.length > 0) {
-        setNotice(`Record added. ${attachments.length === 1 ? 'Attachment uploaded and scanning.' : 'Attachments uploaded and scanning.'}`)
       } else {
-        setNotice('Record added.')
+        setNotice('Record added. Add a document when ready.')
       }
       return true
     } catch (requestError) {
@@ -424,8 +411,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setIsSaving(false)
     }
   }
-
-  async function handleUpdateRecord(id: string, input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[] = []) {
+  async function handleUpdateRecord(id: string, input: RecordInput, protectedInput: ProtectedRecordInput) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
@@ -434,8 +420,6 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       const updated = await recordsApi.update(id, input)
       let nextRecord = updated
       let protectedSaved = true
-      let uploadedAttachmentCount = 0
-      let attachmentUploadFailed = false
       if (hasProtectedRecordInput(protectedInput)) {
         try {
           const protectedStatus = await recordsApi.setProtected(id, protectedInput)
@@ -444,25 +428,10 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           protectedSaved = false
         }
       }
-      for (const attachment of attachments) {
-        try {
-          await uploadRecordAttachment(id, attachment)
-          uploadedAttachmentCount += 1
-        } catch {
-          attachmentUploadFailed = true
-        }
-      }
       await loadRecordData()
-      setViewingRecord((current) => (current?.id === id ? nextRecord : current))
-      if (!protectedSaved && attachmentUploadFailed) {
-        setError('Record updated, but protected details were not saved and one or more attachments could not be uploaded.')
-      } else if (!protectedSaved) {
+      setViewingRecord((current) => (current?.record.id === id ? { ...current, record: nextRecord } : current))
+      if (!protectedSaved) {
         setError('Record updated, but protected details were not saved. Protected record storage may not be configured.')
-      } else if (attachmentUploadFailed) {
-        const failedCount = attachments.length - uploadedAttachmentCount
-        setError(`Record updated, but ${formatAttachmentFailureCount(failedCount)} could not be uploaded. Open the record to retry.`)
-      } else if (attachments.length > 0) {
-        setNotice(`Record updated. ${attachments.length === 1 ? 'Attachment uploaded and scanning.' : 'Attachments uploaded and scanning.'}`)
       } else {
         setNotice('Record updated.')
       }
@@ -474,7 +443,6 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setIsSaving(false)
     }
   }
-
   function requestDelete(reminder: Reminder) {
     setPendingDelete(reminder)
   }
@@ -609,7 +577,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function openRecordDetail(record: LifeRecord) {
     setEditingRecord(null)
-    setViewingRecord(record)
+    setViewingRecord({ record, initialTab: 'details' })
   }
 
   async function confirmRecordDelete() {
@@ -626,7 +594,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       await loadRecordData()
       setNotice('Record deleted.')
       setEditingRecord((current) => (current?.id === pendingRecordDelete.id ? null : current))
-      setViewingRecord((current) => (current?.id === pendingRecordDelete.id ? null : current))
+      setViewingRecord((current) => (current?.record.id === pendingRecordDelete.id ? null : current))
       setPendingRecordDelete(null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to delete record.')
@@ -642,7 +610,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     try {
       const archived = await recordsApi.archive(record.id)
       await loadRecordData()
-      setViewingRecord(archived)
+      setViewingRecord({ record: archived, initialTab: 'details' })
       setNotice('Record archived.')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to archive record.')
@@ -656,7 +624,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     try {
       const restored = await recordsApi.restore(record.id)
       await loadRecordData()
-      setViewingRecord(restored)
+      setViewingRecord({ record: restored, initialTab: 'details' })
       setNotice('Record restored.')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to restore record.')
@@ -665,7 +633,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function handleProtectedRecordStatusChange(id: string, protectedStatus: ProtectedRecordStatus) {
     setRecords((current) => current.map((record) => (record.id === id ? withProtectedStatus(record, protectedStatus) : record)))
-    setViewingRecord((current) => (current?.id === id ? withProtectedStatus(current, protectedStatus) : current))
+    setViewingRecord((current) => (current?.record.id === id ? { ...current, record: withProtectedStatus(current.record, protectedStatus) } : current))
     setEditingRecord((current) => (current?.id === id ? withProtectedStatus(current, protectedStatus) : current))
   }
 
@@ -1102,7 +1070,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       ) : null}
       {viewingRecord ? (
         <RecordDetailDrawer
-          record={viewingRecord}
+          record={viewingRecord.record}
+          initialTab={viewingRecord.initialTab}
           onArchive={handleArchiveRecord}
           onClose={() => setViewingRecord(null)}
           onEdit={openRecordDetailEdit}
@@ -2142,20 +2111,6 @@ function withProtectedStatus(record: LifeRecord, protectedStatus: ProtectedRecor
   }
 }
 
-async function uploadRecordAttachment(recordId: string, attachment: File) {
-  const intent = await recordsApi.createAttachmentUploadIntent(recordId, {
-    filename: attachment.name,
-    content_type: attachment.type,
-    size_bytes: attachment.size,
-  })
-  await recordsApi.uploadAttachmentFile(intent.upload, attachment)
-  await recordsApi.completeAttachmentUpload(recordId, intent.attachment_id)
-}
-
-function formatAttachmentFailureCount(count: number) {
-  return count === 1 ? '1 attachment' : `${count} attachments`
-}
-
 function getDateOverride(date: string | null): Partial<ReminderInput> {
   return date ? { due_date: date } : {}
 }
@@ -2246,3 +2201,4 @@ function getPageTitle(page: AppPage) {
 }
 
 export default App
+
