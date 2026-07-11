@@ -2901,6 +2901,8 @@ textarea:focus-visible {
 }
 
 .record-form {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   padding-bottom: var(--space-5);
 }
 
@@ -5050,8 +5052,12 @@ textarea:focus-visible {
   text-align: left;
 }
 
-.document-card-open:not(:disabled):hover {
+.document-card-open:not(:disabled):not(.document-card-static):hover {
   background: #f8fbff;
+}
+
+.document-card-static {
+  cursor: default;
 }
 
 .document-card-open:disabled {

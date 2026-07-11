@@ -311,7 +311,7 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
               <ShieldCheck size={18} />
             </span>
             <div>
-              <h3>Documents</h3>
+              <h3>Attachments</h3>
               <p>Files are encrypted in storage and scanned before they become available.</p>
             </div>
           </div>

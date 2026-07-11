@@ -225,6 +225,20 @@ Resources:
               SSEAlgorithm: aws:kms
               KMSMasterKeyID: !GetAtt LifeLedgerDocumentsKey.Arn
             BucketKeyEnabled: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: !Split [",", !Ref CorsAllowedOrigins]
+            AllowedMethods:
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - Content-Length
+              - Content-Type
+              - Content-Disposition
+              - ETag
+            MaxAge: 300
 
   DocumentsQuarantineBucketPolicy:
     Type: AWS::S3::BucketPolicy

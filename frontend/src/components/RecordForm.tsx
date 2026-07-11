@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
-import { FileUp, Plus, Save, ShieldCheck, X } from 'lucide-react'
+import type { ChangeEvent, FormEvent } from 'react'
+import { AlertCircle, Clock3, FileText, FileUp, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
 
+import {
+  attachmentAccept,
+  attachmentMaxPerRecord,
+  formatAttachmentSize,
+  validateAttachmentFile,
+} from '../lib/attachmentFiles'
 import {
   createRecordInput,
   createProtectedRecordInput,
@@ -24,8 +30,14 @@ interface RecordFormProps {
   record: LifeRecord | null
   recordType: RecordType
   onClose: () => void
-  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
+  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[]) => Promise<boolean>
   onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
+}
+
+interface StagedAttachment {
+  id: string
+  file: File
+  previewUrl: string | null
 }
 
 const dateFields: RecordField[] = ['start_date', 'issue_date', 'expiration_date', 'purchase_date', 'renewal_date']
@@ -45,15 +57,34 @@ export function RecordForm({
   const [activeTab, setActiveTab] = useState<RecordFormTab>('record')
   const [tagsText, setTagsText] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
+  const [stagedError, setStagedError] = useState<string | null>(null)
   const formBodyRef = useRef<HTMLFormElement | null>(null)
+  const stagedFileInputRef = useRef<HTMLInputElement | null>(null)
   const definition = getRecordTypeDefinition(form.record_type)
   const Icon = definition.icon
   const isEditing = record !== null
+
+  function clearStagedAttachments() {
+    setStagedAttachments((current) => {
+      for (const item of current) {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl)
+        }
+      }
+      return []
+    })
+    setStagedError(null)
+    if (stagedFileInputRef.current) {
+      stagedFileInputRef.current.value = ''
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) {
       setValidationError(null)
       setActiveTab('record')
+      clearStagedAttachments()
       return
     }
 
@@ -63,7 +94,21 @@ export function RecordForm({
     setTagsText(tagsToText(nextForm.tags))
     setValidationError(null)
     setActiveTab('record')
+    clearStagedAttachments()
   }, [isOpen, record, recordType])
+
+  useEffect(() => {
+    return () => {
+      setStagedAttachments((current) => {
+        for (const item of current) {
+          if (item.previewUrl) {
+            URL.revokeObjectURL(item.previewUrl)
+          }
+        }
+        return current
+      })
+    }
+  }, [])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -77,11 +122,60 @@ export function RecordForm({
 
     setValidationError(null)
     const protectedInput = normalizeProtectedRecordInput(input.record_type, protectedForm)
-    const wasSaved = record ? await onUpdate(record.id, input, protectedInput) : await onCreate(input, protectedInput)
+    const wasSaved = record
+      ? await onUpdate(record.id, input, protectedInput)
+      : await onCreate(input, protectedInput, stagedAttachments.map((item) => item.file))
 
     if (wasSaved) {
       onClose()
     }
+  }
+
+  function handleChooseStagedAttachment() {
+    setStagedError(null)
+    stagedFileInputRef.current?.click()
+  }
+
+  function handleStagedFilesSelected(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.currentTarget.files ?? [])
+    event.currentTarget.value = ''
+    if (selectedFiles.length === 0) {
+      return
+    }
+
+    const accepted: StagedAttachment[] = []
+    let count = stagedAttachments.length
+    let nextError: string | null = null
+
+    for (const file of selectedFiles) {
+      const fileValidationError = validateAttachmentFile(file, count)
+      if (fileValidationError) {
+        nextError = fileValidationError
+        break
+      }
+      accepted.push({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+      })
+      count += 1
+    }
+
+    if (accepted.length > 0) {
+      setStagedAttachments((current) => [...current, ...accepted])
+    }
+    setStagedError(nextError)
+  }
+
+  function handleRemoveStagedAttachment(id: string) {
+    setStagedAttachments((current) => {
+      const target = current.find((item) => item.id === id)
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl)
+      }
+      return current.filter((item) => item.id !== id)
+    })
+    setStagedError(null)
   }
 
   function updateField(field: keyof RecordInput, value: string | null) {
@@ -143,7 +237,7 @@ export function RecordForm({
             aria-controls="record-form-documents-panel"
             onClick={() => selectTab('documents')}
           >
-            Documents
+            Attachments
           </button>
         </div>
 
@@ -154,11 +248,6 @@ export function RecordForm({
           role="tabpanel"
           aria-labelledby="record-form-record-tab"
         >
-          <section className="record-safety-note" aria-label="Record privacy guardrails">
-            <ShieldCheck size={16} aria-hidden="true" />
-            <span>Do not store SSNs, card or bank data, passwords, recovery codes, keys, or medical documents.</span>
-          </section>
-
           <label>
             <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
             <input
@@ -227,17 +316,144 @@ export function RecordForm({
           {record ? (
             <RecordDocumentsPanel isActive={isOpen && activeTab === 'documents'} mode="edit" recordId={record.id} />
           ) : (
-            <section className="record-documents-unavailable" aria-label="Documents unavailable until saved">
-              <FileUp size={28} aria-hidden="true" />
-              <div>
-                <h3>Save the record first</h3>
-                <p>Documents can be added after LifeLedger creates the record and can verify ownership.</p>
-              </div>
-            </section>
+            <StagedAttachmentsPanel
+              attachments={stagedAttachments}
+              error={stagedError}
+              onChoose={handleChooseStagedAttachment}
+              onRemove={handleRemoveStagedAttachment}
+            />
           )}
         </div>
       </form>
+
+      <input
+        type="file"
+        multiple
+        accept={attachmentAccept}
+        className="attachment-file-input"
+        ref={stagedFileInputRef}
+        onChange={handleStagedFilesSelected}
+      />
     </SheetDrawer>
+  )
+}
+
+function StagedAttachmentsPanel({
+  attachments,
+  error,
+  onChoose,
+  onRemove,
+}: {
+  attachments: StagedAttachment[]
+  error: string | null
+  onChoose: () => void
+  onRemove: (id: string) => void
+}) {
+  const canAddAttachment = attachments.length < attachmentMaxPerRecord
+
+  return (
+    <section className="documents-panel documents-panel-create" aria-label="Attachments">
+      <div className="documents-panel-header">
+        <div className="documents-title-lockup">
+          <span className="documents-title-icon" aria-hidden="true">
+            <ShieldCheck size={18} />
+          </span>
+          <div>
+            <h3>Attachments</h3>
+            <p>Files upload automatically and are scanned right after LifeLedger saves this record.</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="primary-button documents-add-button"
+          disabled={!canAddAttachment}
+          onClick={onChoose}
+        >
+          <FileUp size={16} aria-hidden="true" />
+          Add attachment
+        </button>
+      </div>
+
+      <div className="documents-meta-strip" aria-label="Attachment limits">
+        <span>{attachments.length} of {attachmentMaxPerRecord}</span>
+        <span>PDF, JPEG, PNG</span>
+        <span>10 MB max</span>
+      </div>
+
+      {error ? (
+        <p className="field-error document-inline-message" role="alert">
+          <AlertCircle size={14} aria-hidden="true" />
+          {error}
+        </p>
+      ) : null}
+
+      {attachments.length === 0 ? (
+        <div className="documents-empty-state">
+          <FileUp size={28} aria-hidden="true" />
+          <div>
+            <strong>No attachments yet</strong>
+            <p>Add a scanned PDF, JPEG, or PNG. They upload as soon as the record is created.</p>
+          </div>
+          <button type="button" className="secondary-button" disabled={!canAddAttachment} onClick={onChoose}>
+            <FileUp size={16} aria-hidden="true" />
+            Add attachment
+          </button>
+        </div>
+      ) : (
+        <div className="documents-grid" aria-label="Attachments ready to upload">
+          {attachments.map((attachment) => (
+            <StagedAttachmentCard attachment={attachment} key={attachment.id} onRemove={() => onRemove(attachment.id)} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function StagedAttachmentCard({
+  attachment,
+  onRemove,
+}: {
+  attachment: StagedAttachment
+  onRemove: () => void
+}) {
+  const isImage = attachment.file.type.startsWith('image/')
+  const isPdf = attachment.file.type === 'application/pdf'
+
+  return (
+    <article className="document-card">
+      <div className="document-card-open document-card-static">
+        {isImage && attachment.previewUrl ? (
+          <span className="document-thumbnail document-thumbnail-image">
+            <img src={attachment.previewUrl} alt="" />
+          </span>
+        ) : (
+          <span className="document-thumbnail document-thumbnail-muted" aria-hidden="true">
+            <FileText size={22} />
+            {isPdf ? <span className="document-file-type-pill">PDF</span> : null}
+          </span>
+        )}
+        <span className="document-card-copy">
+          <strong>{attachment.file.name}</strong>
+          <span>{formatAttachmentSize(attachment.file.size)}</span>
+          <small className="document-status document-status-scanning">
+            <Clock3 size={13} aria-hidden="true" />
+            Ready to upload
+          </small>
+        </span>
+      </div>
+
+      <div className="document-card-actions" aria-label={`Actions for ${attachment.file.name}`}>
+        <button
+          type="button"
+          className="icon-button document-action-button document-delete-button"
+          onClick={onRemove}
+          aria-label={`Remove ${attachment.file.name}`}
+        >
+          <Trash2 size={16} aria-hidden="true" />
+        </button>
+      </div>
+    </article>
   )
 }
 

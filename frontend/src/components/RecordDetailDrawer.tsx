@@ -259,7 +259,7 @@ export function RecordDetailDrawer({
             aria-controls="record-documents-panel"
             onClick={() => selectTab('documents')}
           >
-            Documents
+            Attachments
           </button>
         </div>
 

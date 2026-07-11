@@ -141,6 +141,16 @@ export const recordsApi = {
     }
   },
 
+  uploadRecordAttachment: async (id: string, file: File) => {
+    const intent = await recordsApi.createAttachmentUploadIntent(id, {
+      filename: file.name,
+      content_type: file.type,
+      size_bytes: file.size,
+    })
+    await recordsApi.uploadAttachmentFile(intent.upload, file)
+    return recordsApi.completeAttachmentUpload(id, intent.attachment_id)
+  },
+
   create: (input: RecordInput) =>
     request<LifeRecord>('/records', {
       method: 'POST',

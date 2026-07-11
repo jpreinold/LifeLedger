@@ -378,7 +378,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput) {
+  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput, files: File[] = []) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
@@ -395,11 +395,27 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           protectedSaved = false
         }
       }
+
+      let attachmentFailures = 0
+      for (const file of files) {
+        try {
+          await recordsApi.uploadRecordAttachment(created.id, file)
+        } catch {
+          attachmentFailures += 1
+        }
+      }
+
       await loadRecordData()
       setActivePage('records')
       setViewingRecord({ record: nextRecord, initialTab: 'documents' })
       if (!protectedSaved) {
         setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
+      } else if (attachmentFailures > 0) {
+        setError(
+          `Record added, but ${attachmentFailures} attachment${attachmentFailures === 1 ? '' : 's'} could not be uploaded. Open the record to try again.`,
+        )
+      } else if (files.length > 0) {
+        setNotice('Record added. Attachments are uploading and will be scanned shortly.')
       } else {
         setNotice('Record added. Add a document when ready.')
       }
