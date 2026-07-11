@@ -2989,6 +2989,75 @@ textarea:focus-visible {
   grid-column: 1 / -1;
 }
 
+.record-attachment-queue {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgba(14, 166, 107, 0.22);
+  border-radius: var(--radius-md);
+  background: rgba(14, 166, 107, 0.06);
+}
+
+.record-attachment-queue-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.record-attachment-queue-heading h3,
+.record-attachment-queue-note {
+  margin: 0;
+}
+
+.record-attachment-queue-heading h3 {
+  color: var(--color-text);
+  font-size: 0.88rem;
+  font-weight: 820;
+}
+
+.record-attachment-queue-heading span {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  color: #08764e;
+  background: var(--color-success-soft);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.record-attachment-add-button {
+  width: 100%;
+  min-height: 40px;
+}
+
+.record-attachment-add-button svg {
+  flex: 0 0 auto;
+}
+
+.record-attachment-queue-note {
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.record-attachment-queue-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.record-attachment-queue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid rgba(223, 231, 242, 0.9);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+}
+
 .record-tag-list {
   display: flex;
   flex-wrap: wrap;

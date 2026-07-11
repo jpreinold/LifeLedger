@@ -18,6 +18,11 @@ import {
 
 import { recordsApi } from '../api/recordsApi'
 import {
+  attachmentMaxPerRecord,
+  formatAttachmentSize,
+  validateAttachmentFile,
+} from '../lib/attachmentFiles'
+import {
   formatRecordDate,
   formatRecordKeyDate,
   formatRecordTimestamp,
@@ -48,10 +53,6 @@ interface DetailRow {
 const drawerCloseMs = 220
 const protectedRevealMs = 60_000
 const attachmentPollMs = 4_000
-const attachmentMaxSizeBytes = 10 * 1024 * 1024
-const attachmentMaxPerRecord = 5
-const allowedAttachmentTypes = new Set(['application/pdf', 'image/jpeg', 'image/png'])
-const allowedAttachmentExtensions = new Set(['.pdf', '.jpg', '.jpeg', '.png'])
 
 export function RecordDetailDrawer({
   record,
@@ -271,7 +272,7 @@ export function RecordDetailDrawer({
       return
     }
 
-    const validationError = validateAttachmentFile(file, attachments)
+    const validationError = validateAttachmentFile(file, activeAttachmentCount(attachments))
     if (validationError) {
       setAttachmentError(validationError)
       setAttachmentMessage(null)
@@ -702,35 +703,6 @@ function hasValue(value: string | null | undefined) {
   return value !== null && value !== undefined && value.trim().length > 0
 }
 
-function validateAttachmentFile(file: File, attachments: RecordAttachment[]) {
-  if (activeAttachmentCount(attachments) >= attachmentMaxPerRecord) {
-    return 'Records can have up to 5 active attachments.'
-  }
-  if (file.size <= 0) {
-    return 'File must not be empty.'
-  }
-  if (file.size > attachmentMaxSizeBytes) {
-    return 'File is larger than the 10 MB limit.'
-  }
-  if (!allowedAttachmentTypes.has(file.type)) {
-    return 'Only PDF, JPEG, and PNG files are supported.'
-  }
-  const extension = getFileExtension(file.name)
-  if (!allowedAttachmentExtensions.has(extension)) {
-    return 'Only PDF, JPEG, and PNG files are supported.'
-  }
-  if (file.type === 'application/pdf' && extension !== '.pdf') {
-    return 'Filename extension does not match the selected file type.'
-  }
-  if (file.type === 'image/png' && extension !== '.png') {
-    return 'Filename extension does not match the selected file type.'
-  }
-  if (file.type === 'image/jpeg' && extension !== '.jpg' && extension !== '.jpeg') {
-    return 'Filename extension does not match the selected file type.'
-  }
-  return null
-}
-
 function activeAttachmentCount(attachments: RecordAttachment[]) {
   return attachments.filter((attachment) => ['pending_upload', 'uploaded', 'scanning', 'available'].includes(attachment.status)).length
 }
@@ -745,11 +717,6 @@ function upsertAttachment(attachments: RecordAttachment[], nextAttachment: Recor
 
 function isAttachmentPendingScan(attachment: RecordAttachment) {
   return attachment.status === 'uploaded' || attachment.status === 'scanning'
-}
-
-function getFileExtension(filename: string) {
-  const dotIndex = filename.lastIndexOf('.')
-  return dotIndex === -1 ? '' : filename.slice(dotIndex).toLowerCase()
 }
 
 function getAttachmentStatusLabel(attachment: RecordAttachment) {
@@ -779,13 +746,6 @@ function getAttachmentStatusClass(attachment: RecordAttachment) {
     return 'attachment-status attachment-status-failed'
   }
   return 'attachment-status attachment-status-scanning'
-}
-
-function formatAttachmentSize(sizeBytes: number) {
-  if (sizeBytes >= 1024 * 1024) {
-    return `${(sizeBytes / (1024 * 1024)).toFixed(sizeBytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`
-  }
-  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`
 }
 
 function formatAttachmentDate(value: string | null) {

@@ -377,7 +377,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput) {
+  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[] = []) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
@@ -385,6 +385,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     try {
       const created = await recordsApi.create(input)
       let protectedSaved = true
+      let uploadedAttachmentCount = 0
+      let attachmentUploadFailed = false
       if (hasProtectedRecordInput(protectedInput)) {
         try {
           await recordsApi.setProtected(created.id, protectedInput)
@@ -392,12 +394,27 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           protectedSaved = false
         }
       }
+      for (const attachment of attachments) {
+        try {
+          await uploadRecordAttachment(created.id, attachment)
+          uploadedAttachmentCount += 1
+        } catch {
+          attachmentUploadFailed = true
+        }
+      }
       await loadRecordData()
       setActivePage('records')
-      if (protectedSaved) {
-        setNotice('Record added.')
-      } else {
+      if (!protectedSaved && attachmentUploadFailed) {
+        setError('Record added, but protected details were not saved and one or more attachments could not be uploaded.')
+      } else if (!protectedSaved) {
         setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
+      } else if (attachmentUploadFailed) {
+        const failedCount = attachments.length - uploadedAttachmentCount
+        setError(`Record added, but ${formatAttachmentFailureCount(failedCount)} could not be uploaded. Open the record to retry.`)
+      } else if (attachments.length > 0) {
+        setNotice(`Record added. ${attachments.length === 1 ? 'Attachment uploaded and scanning.' : 'Attachments uploaded and scanning.'}`)
+      } else {
+        setNotice('Record added.')
       }
       return true
     } catch (requestError) {
@@ -2106,6 +2123,20 @@ function withProtectedStatus(record: LifeRecord, protectedStatus: ProtectedRecor
     has_protected_data: protectedStatus.has_protected_data,
     protected_field_names: protectedStatus.protected_field_names,
   }
+}
+
+async function uploadRecordAttachment(recordId: string, attachment: File) {
+  const intent = await recordsApi.createAttachmentUploadIntent(recordId, {
+    filename: attachment.name,
+    content_type: attachment.type,
+    size_bytes: attachment.size,
+  })
+  await recordsApi.uploadAttachmentFile(intent.upload, attachment)
+  await recordsApi.completeAttachmentUpload(recordId, intent.attachment_id)
+}
+
+function formatAttachmentFailureCount(count: number) {
+  return count === 1 ? '1 attachment' : `${count} attachments`
 }
 
 function getDateOverride(date: string | null): Partial<ReminderInput> {

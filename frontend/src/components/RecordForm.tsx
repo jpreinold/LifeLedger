@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { type ChangeEvent, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Plus, Save, ShieldCheck, X } from 'lucide-react'
+import { FileImage, FileText, FileUp, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
 
 import {
   createRecordInput,
@@ -14,6 +14,7 @@ import {
   tagsToText,
   type RecordField,
 } from '../lib/recordTypes'
+import { attachmentAccept, attachmentMaxPerRecord, formatAttachmentSize, validateAttachmentFile } from '../lib/attachmentFiles'
 import type { LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -23,7 +24,7 @@ interface RecordFormProps {
   record: LifeRecord | null
   recordType: RecordType
   onClose: () => void
-  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
+  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, attachments: File[]) => Promise<boolean>
   onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
 }
 
@@ -40,20 +41,25 @@ export function RecordForm({
 }: RecordFormProps) {
   const [form, setForm] = useState<RecordInput>(() => createRecordInput(recordType))
   const [protectedForm, setProtectedForm] = useState<ProtectedRecordInput>(() => createProtectedRecordInput(recordType))
+  const [queuedAttachments, setQueuedAttachments] = useState<File[]>([])
   const [tagsText, setTagsText] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null)
   const definition = getRecordTypeDefinition(form.record_type)
   const Icon = definition.icon
   const isEditing = record !== null
 
   useEffect(() => {
     if (!isOpen) {
+      setQueuedAttachments([])
+      setValidationError(null)
       return
     }
 
     const nextForm = record ? recordToInput(record) : createRecordInput(recordType)
     setForm(nextForm)
     setProtectedForm(createProtectedRecordInput(nextForm.record_type))
+    setQueuedAttachments([])
     setTagsText(tagsToText(nextForm.tags))
     setValidationError(null)
   }, [isOpen, record, recordType])
@@ -69,9 +75,10 @@ export function RecordForm({
 
     setValidationError(null)
     const protectedInput = normalizeProtectedRecordInput(input.record_type, protectedForm)
-    const wasSaved = record ? await onUpdate(record.id, input, protectedInput) : await onCreate(input, protectedInput)
+    const wasSaved = record ? await onUpdate(record.id, input, protectedInput) : await onCreate(input, protectedInput, queuedAttachments)
 
     if (wasSaved) {
+      setQueuedAttachments([])
       onClose()
     }
   }
@@ -82,6 +89,36 @@ export function RecordForm({
 
   function updateProtectedField(field: ProtectedRecordField, value: string | null) {
     setProtectedForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function handleChooseAttachment() {
+    setValidationError(null)
+    attachmentInputRef.current?.click()
+  }
+
+  function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? [])
+    event.currentTarget.value = ''
+    if (files.length === 0) {
+      return
+    }
+
+    let nextAttachments = queuedAttachments
+    for (const file of files) {
+      const validationMessage = validateAttachmentFile(file, nextAttachments.length)
+      if (validationMessage) {
+        setValidationError(validationMessage)
+        return
+      }
+      nextAttachments = [...nextAttachments, file]
+    }
+
+    setQueuedAttachments(nextAttachments)
+    setValidationError(null)
+  }
+
+  function removeQueuedAttachment(index: number) {
+    setQueuedAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))
   }
 
   return (
@@ -164,14 +201,107 @@ export function RecordForm({
           onChange={updateProtectedField}
         />
 
+        {!isEditing ? (
+          <QueuedAttachmentsSection
+            attachments={queuedAttachments}
+            isSaving={isSaving}
+            onChooseAttachment={handleChooseAttachment}
+            onRemoveAttachment={removeQueuedAttachment}
+          />
+        ) : null}
+
         {validationError ? <p className="field-error">{validationError}</p> : null}
 
         <button className="primary-button" type="submit" disabled={isSaving}>
           {isEditing ? <Save size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
           {isSaving ? 'Saving' : isEditing ? 'Save record' : 'Add record'}
         </button>
+
+        <input
+          ref={attachmentInputRef}
+          className="attachment-file-input"
+          type="file"
+          accept={attachmentAccept}
+          multiple
+          onChange={handleAttachmentChange}
+        />
       </form>
     </SheetDrawer>
+  )
+}
+
+function QueuedAttachmentsSection({
+  attachments,
+  isSaving,
+  onChooseAttachment,
+  onRemoveAttachment,
+}: {
+  attachments: File[]
+  isSaving: boolean
+  onChooseAttachment: () => void
+  onRemoveAttachment: (index: number) => void
+}) {
+  const canAddAttachment = attachments.length < attachmentMaxPerRecord && !isSaving
+
+  return (
+    <section className="record-attachment-queue" aria-label="Attachments">
+      <div className="record-attachment-queue-heading">
+        <h3>Attachments</h3>
+        <span>{attachments.length}/{attachmentMaxPerRecord}</span>
+      </div>
+
+      <button type="button" className="secondary-button record-attachment-add-button" disabled={!canAddAttachment} onClick={onChooseAttachment}>
+        <FileUp size={17} aria-hidden="true" />
+        Add document
+      </button>
+
+      {attachments.length > 0 ? (
+        <>
+          <p className="record-attachment-queue-note">
+            Attachments will upload after the record is saved. Files are encrypted in storage and scanned before they become available.
+          </p>
+          <div className="record-attachment-queue-list">
+            {attachments.map((attachment, index) => (
+              <QueuedAttachmentRow
+                attachment={attachment}
+                index={index}
+                key={`${attachment.name}-${attachment.size}-${attachment.lastModified}-${index}`}
+                onRemove={() => onRemoveAttachment(index)}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+    </section>
+  )
+}
+
+function QueuedAttachmentRow({
+  attachment,
+  index,
+  onRemove,
+}: {
+  attachment: File
+  index: number
+  onRemove: () => void
+}) {
+  const Icon = attachment.type.startsWith('image/') ? FileImage : FileText
+
+  return (
+    <article className="record-attachment-queue-row">
+      <div className="attachment-main">
+        <span className="attachment-icon" aria-hidden="true">
+          <Icon size={18} />
+        </span>
+        <div className="attachment-copy">
+          <strong>{attachment.name}</strong>
+          <span>{formatAttachmentSize(attachment.size)} - queued</span>
+        </div>
+      </div>
+      <button type="button" className="icon-button attachment-action-button attachment-delete-action" onClick={onRemove} aria-label={`Remove attachment ${index + 1}`}>
+        <Trash2 size={16} aria-hidden="true" />
+      </button>
+    </article>
   )
 }
 
