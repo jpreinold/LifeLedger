@@ -239,6 +239,8 @@ Deployed frontend flow:
 - DynamoDB stores reminders under the authenticated user's `user_id`.
 - DynamoDB stores records under the authenticated user's `user_id` in a separate records table.
 
+Frontend security headers are deployed through `frontend/public/_headers`, which Vite copies to `dist/_headers` for Cloudflare Pages. The CSP is intentionally `Content-Security-Policy-Report-Only` during this phase and allows only the LifeLedger origin, the production API Gateway origin, and the Cognito User Pool endpoint for browser connections. If a Cloudflare dashboard Transform Rule, Pages configuration, or Worker is also setting CSP, edit or remove that rule before relying on this policy; multiple CSP headers are combined by browsers, so an older policy such as `connect-src 'none'` can continue to report or enforce blocks even after this repository policy is added.
+
 ## API Routes
 
 - `GET /health` is public.
