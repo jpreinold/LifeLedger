@@ -247,7 +247,7 @@ Resources:
             Effect: Deny
             Principal: "*"
             Action: "s3:PutObject"
-            Resource: !Sub "${DocumentsQuarantineBucket.Arn}/*"
+            Resource: !Sub "${DocumentsQuarantineBucket.Arn}/quarantine/*"
             Condition:
               StringNotEquals:
                 s3:x-amz-server-side-encryption: aws:kms
@@ -255,7 +255,7 @@ Resources:
             Effect: Deny
             Principal: "*"
             Action: "s3:PutObject"
-            Resource: !Sub "${DocumentsQuarantineBucket.Arn}/*"
+            Resource: !Sub "${DocumentsQuarantineBucket.Arn}/quarantine/*"
             Condition:
               StringNotEquals:
                 s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt LifeLedgerDocumentsKey.Arn
