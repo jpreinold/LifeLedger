@@ -582,6 +582,51 @@ def create_record_attachment_download_url(
     )
 
 
+@app.post("/records/{record_id}/attachments/{attachment_id}/preview-url", response_model=RecordAttachmentDownloadUrlResponse)
+def create_record_attachment_preview_url(
+    record_id: str,
+    attachment_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    document_storage=Depends(get_document_storage_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> RecordAttachmentDownloadUrlResponse:
+    set_attachment_no_store(response)
+    require_record(record_repo, current_user.user_id, record_id)
+    require_document_storage_configured(document_storage)
+    attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
+    attachment = maybe_reconcile_attachment(attachment, attachment_repo, document_storage, app_settings)
+
+    if attachment.status != AttachmentStatus.AVAILABLE or not attachment.clean_object_key:
+        raise attachment_http_exception(status.HTTP_409_CONFLICT, ATTACHMENT_NOT_AVAILABLE)
+
+    try:
+        document_storage.head_clean_object(attachment.clean_object_key)
+        url = document_storage.create_presigned_download(
+            attachment,
+            content_disposition=attachment_content_disposition(attachment, "inline"),
+            expires_in_seconds=DOWNLOAD_URL_EXPIRATION_SECONDS,
+        )
+    except (DocumentStorageConfigurationError, DocumentStorageOperationError) as exc:
+        raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
+
+    log_security_event(
+        "attachment_preview_url_issued",
+        user_id=current_user.user_id,
+        record_id=record_id,
+        attachment_id=attachment_id,
+        content_type=attachment.content_type,
+        size=attachment.size_bytes,
+        result="issued",
+    )
+    return RecordAttachmentDownloadUrlResponse(
+        url=url,
+        expires_at=utc_now() + timedelta(seconds=DOWNLOAD_URL_EXPIRATION_SECONDS),
+    )
+
+
 @app.delete("/records/{record_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_record_attachment(
     record_id: str,

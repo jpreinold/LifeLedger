@@ -9,6 +9,7 @@ import {
   FileText,
   FileUp,
   LockKeyhole,
+  Maximize2,
   Pencil,
   RotateCcw,
   ShieldCheck,
@@ -76,10 +77,16 @@ export function RecordDetailDrawer({
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [attachmentMessage, setAttachmentMessage] = useState<string | null>(null)
   const [pendingAttachmentDelete, setPendingAttachmentDelete] = useState<RecordAttachment | null>(null)
+  const [previewAttachment, setPreviewAttachment] = useState<RecordAttachment | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({})
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
+  const previewRequestRef = useRef(0)
   const revealTimerRef = useRef<number | null>(null)
   const definition = getRecordTypeDefinition(record.record_type)
   const Icon = definition.icon
@@ -99,11 +106,17 @@ export function RecordDetailDrawer({
     }
   }, [])
   const clearAttachmentTransientState = useCallback(() => {
+    previewRequestRef.current += 1
     setAttachmentError(null)
     setAttachmentMessage(null)
     setIsUploadingAttachment(false)
     setIsDeletingAttachment(false)
     setPendingAttachmentDelete(null)
+    setPreviewAttachment(null)
+    setPreviewUrl(null)
+    setIsPreviewLoading(false)
+    setPreviewError(null)
+    setThumbnailUrls({})
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -197,6 +210,33 @@ export function RecordDetailDrawer({
 
     return () => window.clearInterval(pollId)
   }, [attachments, isDrawerOpen, loadAttachments])
+
+  useEffect(() => {
+    if (!isDrawerOpen) {
+      return undefined
+    }
+
+    let isCancelled = false
+    const imageAttachments = attachments.filter(
+      (attachment) => attachment.status === 'available' && attachment.content_type.startsWith('image/') && !thumbnailUrls[attachment.attachment_id],
+    )
+
+    for (const attachment of imageAttachments) {
+      void recordsApi.createAttachmentPreviewUrl(record.id, attachment.attachment_id)
+        .then((preview) => {
+          if (!isCancelled) {
+            setThumbnailUrls((current) => ({ ...current, [attachment.attachment_id]: preview.url }))
+          }
+        })
+        .catch(() => {
+          // A thumbnail is a convenience; the full preview path still reports errors on click.
+        })
+    }
+
+    return () => {
+      isCancelled = true
+    }
+  }, [attachments, isDrawerOpen, record.id, thumbnailUrls])
 
   const requestClose = useCallback(() => {
     clearProtectedState()
@@ -316,6 +356,36 @@ export function RecordDetailDrawer({
     }
   }
 
+  async function handlePreviewAttachment(attachment: RecordAttachment) {
+    if (attachment.status !== 'available') {
+      return
+    }
+
+    const requestId = previewRequestRef.current + 1
+    previewRequestRef.current = requestId
+    setPreviewAttachment(attachment)
+    setPreviewUrl(null)
+    setPreviewError(null)
+    setIsPreviewLoading(true)
+    setAttachmentError(null)
+    setAttachmentMessage(null)
+
+    try {
+      const preview = await recordsApi.createAttachmentPreviewUrl(record.id, attachment.attachment_id)
+      if (previewRequestRef.current === requestId) {
+        setPreviewUrl(preview.url)
+      }
+    } catch (requestError) {
+      if (previewRequestRef.current === requestId) {
+        setPreviewError(requestError instanceof Error ? requestError.message : 'Unable to preview attachment.')
+      }
+    } finally {
+      if (previewRequestRef.current === requestId) {
+        setIsPreviewLoading(false)
+      }
+    }
+  }
+
   async function confirmDeleteAttachment() {
     if (!pendingAttachmentDelete) {
       return
@@ -327,6 +397,14 @@ export function RecordDetailDrawer({
     try {
       await recordsApi.deleteAttachment(record.id, pendingAttachmentDelete.attachment_id)
       setAttachments((current) => current.filter((attachment) => attachment.attachment_id !== pendingAttachmentDelete.attachment_id))
+      setThumbnailUrls((current) => {
+        const next = { ...current }
+        delete next[pendingAttachmentDelete.attachment_id]
+        return next
+      })
+      if (previewAttachment?.attachment_id === pendingAttachmentDelete.attachment_id) {
+        clearAttachmentTransientState()
+      }
       setPendingAttachmentDelete(null)
       setAttachmentMessage('Attachment deleted.')
     } catch (requestError) {
@@ -428,9 +506,11 @@ export function RecordDetailDrawer({
           isLoading={isAttachmentsLoading}
           isUploading={isUploadingAttachment}
           message={attachmentMessage}
+          thumbnailUrls={thumbnailUrls}
           onChooseFile={handleChooseAttachment}
           onDelete={setPendingAttachmentDelete}
           onDownload={(attachment) => void handleDownloadAttachment(attachment)}
+          onPreview={(attachment) => void handlePreviewAttachment(attachment)}
         />
 
         <DetailSection
@@ -473,6 +553,13 @@ export function RecordDetailDrawer({
         onCancel={() => setPendingAttachmentDelete(null)}
         onConfirm={() => void confirmDeleteAttachment()}
       />
+      <AttachmentPreviewOverlay
+        attachment={previewAttachment}
+        error={previewError}
+        isLoading={isPreviewLoading}
+        url={previewUrl}
+        onClose={clearAttachmentTransientState}
+      />
     </>
   )
 }
@@ -483,18 +570,22 @@ function AttachmentsSection({
   isLoading,
   isUploading,
   message,
+  thumbnailUrls,
   onChooseFile,
   onDelete,
   onDownload,
+  onPreview,
 }: {
   attachments: RecordAttachment[]
   error: string | null
   isLoading: boolean
   isUploading: boolean
   message: string | null
+  thumbnailUrls: Record<string, string>
   onChooseFile: () => void
   onDelete: (attachment: RecordAttachment) => void
   onDownload: (attachment: RecordAttachment) => void
+  onPreview: (attachment: RecordAttachment) => void
 }) {
   const activeCount = activeAttachmentCount(attachments)
   const canAddAttachment = activeCount < attachmentMaxPerRecord && !isUploading
@@ -534,8 +625,10 @@ function AttachmentsSection({
             <AttachmentRow
               attachment={attachment}
               key={attachment.attachment_id}
+              thumbnailUrl={thumbnailUrls[attachment.attachment_id] ?? null}
               onDelete={() => onDelete(attachment)}
               onDownload={() => onDownload(attachment)}
+              onPreview={() => onPreview(attachment)}
               onRetry={onChooseFile}
             />
           ))}
@@ -547,16 +640,21 @@ function AttachmentsSection({
 
 function AttachmentRow({
   attachment,
+  thumbnailUrl,
   onDelete,
   onDownload,
+  onPreview,
   onRetry,
 }: {
   attachment: RecordAttachment
+  thumbnailUrl: string | null
   onDelete: () => void
   onDownload: () => void
+  onPreview: () => void
   onRetry: () => void
 }) {
-  const Icon = attachment.content_type.startsWith('image/') ? FileImage : FileText
+  const isImage = attachment.content_type.startsWith('image/')
+  const Icon = isImage ? FileImage : FileText
   const statusLabel = getAttachmentStatusLabel(attachment)
   const statusClass = getAttachmentStatusClass(attachment)
   const dateLabel = formatAttachmentDate(attachment.available_at ?? attachment.uploaded_at ?? attachment.created_at)
@@ -566,9 +664,20 @@ function AttachmentRow({
   return (
     <article className="attachment-row">
       <div className="attachment-main">
-        <span className="attachment-icon" aria-hidden="true">
-          <Icon size={18} />
-        </span>
+        <button
+          type="button"
+          className="attachment-thumbnail"
+          disabled={!isAvailable}
+          onClick={onPreview}
+          aria-label={isAvailable ? `Preview ${attachment.display_name}` : `${attachment.display_name} is not available for preview yet`}
+        >
+          {thumbnailUrl && isImage ? (
+            <img src={thumbnailUrl} alt="" referrerPolicy="no-referrer" />
+          ) : (
+            <Icon size={18} />
+          )}
+          {isAvailable ? <Maximize2 size={13} aria-hidden="true" /> : null}
+        </button>
         <div className="attachment-copy">
           <strong>{attachment.display_name}</strong>
           <span>{formatAttachmentSize(attachment.size_bytes)} - {dateLabel}</span>
@@ -591,6 +700,52 @@ function AttachmentRow({
         </button>
       </div>
     </article>
+  )
+}
+
+function AttachmentPreviewOverlay({
+  attachment,
+  error,
+  isLoading,
+  onClose,
+  url,
+}: {
+  attachment: RecordAttachment | null
+  error: string | null
+  isLoading: boolean
+  onClose: () => void
+  url: string | null
+}) {
+  if (!attachment) {
+    return null
+  }
+
+  const isImage = attachment.content_type.startsWith('image/')
+
+  return (
+    <div className="attachment-preview-backdrop" role="dialog" aria-modal="true" aria-label={`Preview ${attachment.display_name}`}>
+      <div className="attachment-preview-shell">
+        <header className="attachment-preview-header">
+          <div>
+            <h3>{attachment.display_name}</h3>
+            <p>{formatAttachmentSize(attachment.size_bytes)}</p>
+          </div>
+          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close attachment preview">
+            <X size={20} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="attachment-preview-stage">
+          {isLoading ? <p className="attachment-preview-state">Loading preview...</p> : null}
+          {!isLoading && error ? <p className="field-error attachment-preview-state">{error}</p> : null}
+          {!isLoading && !error && url && isImage ? (
+            <img className="attachment-preview-image" src={url} alt="" referrerPolicy="no-referrer" />
+          ) : null}
+          {!isLoading && !error && url && !isImage ? (
+            <iframe className="attachment-preview-frame" src={url} title={attachment.display_name} referrerPolicy="no-referrer" />
+          ) : null}
+        </div>
+      </div>
+    </div>
   )
 }
 

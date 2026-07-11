@@ -111,6 +111,12 @@ export const recordsApi = {
       cache: 'no-store',
     }),
 
+  createAttachmentPreviewUrl: (id: string, attachmentId: string) =>
+    request<RecordAttachmentDownloadUrl>(`/records/${id}/attachments/${attachmentId}/preview-url`, {
+      method: 'POST',
+      cache: 'no-store',
+    }),
+
   deleteAttachment: (id: string, attachmentId: string) =>
     request<void>(`/records/${id}/attachments/${attachmentId}`, {
       method: 'DELETE',

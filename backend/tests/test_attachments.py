@@ -63,6 +63,7 @@ class FakeDocumentStorage:
         self.deleted_quarantine = []
         self.deleted_clean = []
         self.promoted = []
+        self.presigned_gets = []
 
     def create_presigned_upload(self, attachment, *, max_size_bytes, expires_in_seconds):
         self.uploads.append(
@@ -113,9 +114,16 @@ class FakeDocumentStorage:
         )
 
     def create_presigned_download(self, attachment, *, content_disposition, expires_in_seconds):
-        assert content_disposition.startswith("attachment; filename=")
         assert expires_in_seconds == 60
-        return f"https://clean-bucket.s3.us-east-1.amazonaws.com/download/{attachment.attachment_id}?X-Amz-Expires=60"
+        self.presigned_gets.append(
+            {
+                "attachment_id": attachment.attachment_id,
+                "content_disposition": content_disposition,
+                "expires_in_seconds": expires_in_seconds,
+            }
+        )
+        mode = "preview" if content_disposition.startswith("inline;") else "download"
+        return f"https://clean-bucket.s3.us-east-1.amazonaws.com/{mode}/{attachment.attachment_id}?X-Amz-Expires=60"
 
 
 def set_auth_user(user_id: str):
@@ -285,6 +293,8 @@ def test_scanning_attachment_is_not_downloadable_until_clean_tag_promotes_it(att
 
     blocked = client.post(f"/records/{record.id}/attachments/{attachment.attachment_id}/download-url")
     assert blocked.status_code == 409
+    preview_blocked = client.post(f"/records/{record.id}/attachments/{attachment.attachment_id}/preview-url")
+    assert preview_blocked.status_code == 409
 
     storage.tags[attachment.quarantine_object_key] = AttachmentScanResult.NO_THREATS_FOUND
     storage.magic[attachment.quarantine_object_key] = b"%PDF-1.7"
@@ -306,7 +316,14 @@ def test_scanning_attachment_is_not_downloadable_until_clean_tag_promotes_it(att
     download = client.post(f"/records/{record.id}/attachments/{attachment.attachment_id}/download-url")
     assert download.status_code == 200
     assert download.headers["cache-control"] == "no-store, private"
-    assert download.json()["url"].startswith("https://clean-bucket.s3.us-east-1.amazonaws.com/")
+    assert download.json()["url"].startswith("https://clean-bucket.s3.us-east-1.amazonaws.com/download/")
+    assert storage.presigned_gets[-1]["content_disposition"].startswith("attachment; filename=")
+
+    preview = client.post(f"/records/{record.id}/attachments/{attachment.attachment_id}/preview-url")
+    assert preview.status_code == 200
+    assert preview.headers["cache-control"] == "no-store, private"
+    assert preview.json()["url"].startswith("https://clean-bucket.s3.us-east-1.amazonaws.com/preview/")
+    assert storage.presigned_gets[-1]["content_disposition"].startswith("inline; filename=")
 
 
 @pytest.mark.parametrize(
@@ -355,6 +372,7 @@ def test_user_cannot_access_another_users_attachments(attachment_context):
     assert client.get(f"/records/{record.id}/attachments").status_code == 404
     assert client.get(f"/records/{record.id}/attachments/{attachment.attachment_id}").status_code == 404
     assert client.post(f"/records/{record.id}/attachments/{attachment.attachment_id}/download-url").status_code == 404
+    assert client.post(f"/records/{record.id}/attachments/{attachment.attachment_id}/preview-url").status_code == 404
     assert client.delete(f"/records/{record.id}/attachments/{attachment.attachment_id}").status_code == 404
 
 

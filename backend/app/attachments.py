@@ -415,9 +415,10 @@ def guardduty_value_from_scan_result(scan_result: AttachmentScanResult | None) -
     return scan_result.value.upper()
 
 
-def attachment_content_disposition(attachment: RecordAttachment) -> str:
+def attachment_content_disposition(attachment: RecordAttachment, disposition_type: str = "attachment") -> str:
     safe_name = re.sub(r'[^A-Za-z0-9._ -]', "_", attachment.display_name).strip() or "document"
-    return f'attachment; filename="{safe_name[:120]}"'
+    disposition = "inline" if disposition_type == "inline" else "attachment"
+    return f'{disposition}; filename="{safe_name[:120]}"'
 
 
 def complete_attachment_upload(
