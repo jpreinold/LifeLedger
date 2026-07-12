@@ -162,18 +162,18 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
               <span>Field name</span>
               <input ref={firstInputRef as RefObject<HTMLInputElement>} maxLength={80} value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} />
             </label>
-            <div className="form-row">
-              <label>
-                <span>Type</span>
-                <select value={customType} onChange={(event) => setCustomType(event.target.value as DynamicFieldType)}>
-                  {dynamicFieldTypes.map((type) => <option value={type} key={type}>{getDynamicFieldTypeLabel(type)}</option>)}
-                </select>
-              </label>
-              <label className="field-toggle-label">
-                <span>Sensitive</span>
-                <input checked={customSensitive} type="checkbox" onChange={(event) => setCustomSensitive(event.target.checked)} />
-              </label>
-            </div>
+            <label>
+              <span>Type</span>
+              <select value={customType} onChange={(event) => setCustomType(event.target.value as DynamicFieldType)}>
+                {dynamicFieldTypes.map((type) => <option value={type} key={type}>{getDynamicFieldTypeLabel(type)}</option>)}
+              </select>
+            </label>
+            <SwitchRow
+              checked={customSensitive}
+              description="Useful for identification numbers or private information."
+              label="Hide value by default"
+              onChange={setCustomSensitive}
+            />
             {customType === 'select' ? (
               <label>
                 <span>Select options</span>
@@ -202,10 +202,12 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
         {error ? <p className="field-error" role="alert">{error}</p> : null}
 
         {canSave ? (
-          <button type="button" className="primary-button add-field-save-button" disabled={isSaving} onClick={() => void saveField()}>
-            <Check size={17} aria-hidden="true" />
-            {isSaving ? 'Saving...' : 'Save field'}
-          </button>
+          <div className="compact-action-bar">
+            <button type="button" className="primary-button add-field-save-button" disabled={isSaving} onClick={() => void saveField()}>
+              <Check size={17} aria-hidden="true" />
+              {isSaving ? 'Saving...' : 'Save field'}
+            </button>
+          </div>
         ) : null}
       </div>
     </SheetDrawer>
@@ -224,12 +226,7 @@ function DynamicValueControl({
   onChange: (value: DynamicFieldValue) => void
 }) {
   if (field.field_type === 'boolean') {
-    return (
-      <label className="field-toggle-label add-field-boolean">
-        <span>Value</span>
-        <input checked={value === true} type="checkbox" onChange={(event) => onChange(event.target.checked)} />
-      </label>
-    )
+    return <SwitchRow checked={value === true} label="Value" onChange={onChange} />
   }
 
   if (field.field_type === 'long_text') {
@@ -264,6 +261,36 @@ function DynamicValueControl({
         onChange={(event) => onChange(field.field_type === 'number' || field.field_type === 'money' ? event.target.value === '' ? null : Number(event.target.value) : event.target.value || null)}
       />
     </label>
+  )
+}
+
+function SwitchRow({
+  checked,
+  description,
+  label,
+  onChange,
+}: {
+  checked: boolean
+  description?: string
+  label: string
+  onChange: (value: boolean) => void
+}) {
+  return (
+    <div className="field-toggle-label">
+      <span>
+        <strong>{label}</strong>
+        {description ? <small>{description}</small> : null}
+      </span>
+      <button
+        type="button"
+        className={checked ? 'privacy-toggle active' : 'privacy-toggle'}
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+      >
+        <span aria-hidden="true" />
+      </button>
+    </div>
   )
 }
 

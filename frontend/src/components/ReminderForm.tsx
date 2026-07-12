@@ -52,7 +52,6 @@ import {
   reminderLeadOptions,
   type ReminderLeadPreset,
 } from '../lib/reminderSchedule'
-import { getCategoryVisual } from './categoryVisuals'
 import { SheetDrawer } from './SheetDrawer'
 
 interface ReminderFormProps {
@@ -113,7 +112,6 @@ export function ReminderForm({
   templateDraft,
 }: ReminderFormProps) {
   const [form, setForm] = useState<ReminderInput>(initialForm)
-  const { Icon, tone } = getCategoryVisual(form.category)
 
   useEffect(() => {
     if (isOpen && !templateDraft) {
@@ -150,7 +148,7 @@ export function ReminderForm({
   }
 
   return (
-    <SheetDrawer className="add-dialog" isOpen={isOpen} labelledBy="add-reminder-heading" onClose={onClose}>
+    <SheetDrawer className="add-dialog reminder-form-dialog" isOpen={isOpen} labelledBy="add-reminder-heading" onClose={onClose}>
         <div className="sheet-header">
           <div>
             <h2 id="add-reminder-heading">{getAddFormHeading(form.reminder_type)}</h2>
@@ -161,22 +159,17 @@ export function ReminderForm({
           </button>
         </div>
 
-        <div className="sheet-icon-lockup">
-          <div className={`category-icon category-icon-large tone-${tone}`} aria-hidden="true">
-            <Icon size={30} />
-          </div>
-          <button type="button" className="small-outline-button" onClick={onBrowseTemplates}>
-            <LayoutTemplate size={15} aria-hidden="true" />
-            Browse templates
-          </button>
-        </div>
-
         <form className="reminder-form sheet-body" onSubmit={handleSubmit}>
           <ReminderFields form={form} setForm={setForm} />
 
           <button className="primary-button" type="submit" disabled={isSaving || !isReminderReady(form)}>
             <Plus size={18} aria-hidden="true" />
             {isSaving ? 'Saving' : 'Add reminder'}
+          </button>
+
+          <button type="button" className="text-link-button reminder-template-action" onClick={onBrowseTemplates}>
+            <LayoutTemplate size={15} aria-hidden="true" />
+            Browse templates
           </button>
         </form>
     </SheetDrawer>
@@ -229,31 +222,21 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
           />
         </label>
 
-        <div className="form-row">
+        {form.reminder_type === 'generic' ? (
           <label>
-            <span>Type</span>
-            <input value={getReminderTypeLabelForForm(form.reminder_type)} readOnly />
+            <span>Due date</span>
+            <input
+              required
+              type="date"
+              value={form.due_date}
+              onChange={(event) => setForm((current) => ({ ...current, due_date: event.target.value }))}
+            />
           </label>
-          <label>
-            <span>Category</span>
-            <select
-              value={form.category}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, category: event.target.value as ReminderInput['category'] }))
-              }
-            >
-              {reminderCategories.map((category) => (
-                <option value={category} key={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        ) : null}
       </section>
 
       {form.reminder_type !== 'generic' ? (
-        <details className="reminder-progressive-section reminder-collapsible-section" open>
+        <details className="reminder-progressive-section reminder-collapsible-section reminder-smart-details-section" open>
           <summary>Smart details</summary>
           {form.reminder_type === 'birthday' ? <BirthdayFields form={form} setForm={setForm} /> : null}
           {form.reminder_type === 'renewal' ? <RenewalFields form={form} setForm={setForm} /> : null}
@@ -261,9 +244,9 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
         </details>
       ) : null}
 
-      <details className="reminder-progressive-section reminder-collapsible-section" open={form.reminder_type === 'generic'}>
+      <details className="reminder-progressive-section reminder-collapsible-section">
         <summary>Schedule</summary>
-        {form.reminder_type !== 'renewal' && form.reminder_type !== 'maintenance' ? (
+        {form.reminder_type !== 'generic' && form.reminder_type !== 'renewal' && form.reminder_type !== 'maintenance' ? (
           <label>
             <span>{getDueDateFieldLabel(form.reminder_type)}</span>
             <input
@@ -361,6 +344,22 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
 
       <details className="reminder-progressive-section reminder-collapsible-section">
         <summary>More options</summary>
+        <label>
+          <span>Category</span>
+          <select
+            value={form.category}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, category: event.target.value as ReminderInput['category'] }))
+            }
+          >
+            {reminderCategories.map((category) => (
+              <option value={category} key={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label>
           <span>Priority</span>
           <select
@@ -720,18 +719,6 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
   )
 }
 
-function getReminderTypeLabelForForm(type: ReminderInput['reminder_type']) {
-  if (type === 'birthday') {
-    return 'Birthday'
-  }
-  if (type === 'renewal') {
-    return 'Renewal'
-  }
-  if (type === 'maintenance') {
-    return 'Maintenance'
-  }
-  return 'Reminder'
-}
 function getAddFormHeading(reminderType: ReminderInput['reminder_type']) {
   if (reminderType === 'birthday') {
     return 'Add Birthday'

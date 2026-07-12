@@ -65,7 +65,6 @@ export function RecordForm({
   const stagedFileInputRef = useRef<HTMLInputElement | null>(null)
   const [visibleOptionalFields, setVisibleOptionalFields] = useState<Set<RecordField>>(() => new Set())
   const definition = getRecordTypeDefinition(form.record_type)
-  const Icon = definition.icon
   const isEditing = record !== null
 
   function clearStagedAttachments() {
@@ -224,19 +223,12 @@ export function RecordForm({
     >
       <div className="sheet-header">
         <div>
-          <h2 id="record-form-heading">{isEditing ? 'Edit Record' : 'Add Record'}</h2>
-          <p>{definition.label}</p>
+          <h2 id="record-form-heading">{isEditing ? `Edit ${record.title}` : `Add ${definition.label}`}</h2>
+          <p>{definition.category}</p>
         </div>
         <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close record form">
           <X size={19} aria-hidden="true" />
         </button>
-      </div>
-
-      <div className="sheet-icon-lockup">
-        <div className={`category-icon category-icon-large tone-${definition.tone}`} aria-hidden="true">
-          <Icon size={30} />
-        </div>
-        <span className="record-type-lockup-label">{definition.category}</span>
       </div>
 
       <form className="reminder-form sheet-body record-form" ref={formBodyRef} onSubmit={handleSubmit}>
@@ -261,7 +253,7 @@ export function RecordForm({
             aria-controls="record-form-documents-panel"
             onClick={() => selectTab('documents')}
           >
-            Attachments
+            Documents
           </button>
           {record ? (
             <button
@@ -273,7 +265,7 @@ export function RecordForm({
               aria-controls="record-form-links-panel"
               onClick={() => selectTab('links')}
             >
-              Linked Items
+              Linked items
             </button>
           ) : null}
         </div>

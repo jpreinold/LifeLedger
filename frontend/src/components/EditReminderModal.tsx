@@ -5,7 +5,6 @@ import { Save, Trash2, X } from 'lucide-react'
 import type { Reminder, ReminderInput } from '../types/reminder'
 import { buildReminderSubmitInput, isReminderReady } from '../lib/reminderInput'
 import { buildReminderInputWithDefaultTiming } from '../lib/reminderSchedule'
-import { getCategoryVisual } from './categoryVisuals'
 import { ReminderFields } from './ReminderForm'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -24,7 +23,6 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
   const [isDrawerOpen, setIsDrawerOpen] = useState(true)
   const isClosingRef = useRef(false)
   const closeTimerRef = useRef<number | null>(null)
-  const { Icon, tone } = getCategoryVisual(form.category)
 
   useEffect(() => {
     isClosingRef.current = false
@@ -64,7 +62,7 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
   }
 
   return (
-    <SheetDrawer className="edit-dialog" isOpen={isDrawerOpen} labelledBy="edit-reminder-heading" onClose={requestCancel}>
+    <SheetDrawer className="edit-dialog reminder-form-dialog" isOpen={isDrawerOpen} labelledBy="edit-reminder-heading" onClose={requestCancel}>
         <div className="sheet-header">
           <div>
             <h2 id="edit-reminder-heading">{getEditHeading(form.reminder_type)}</h2>
@@ -73,12 +71,6 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
           <button type="button" className="icon-button ghost-icon-button" onClick={requestCancel} aria-label="Close edit reminder">
             <X size={19} aria-hidden="true" />
           </button>
-        </div>
-
-        <div className="sheet-icon-lockup">
-          <div className={`category-icon category-icon-large tone-${tone}`} aria-hidden="true">
-            <Icon size={30} />
-          </div>
         </div>
 
         <form className="reminder-form sheet-body" onSubmit={handleSubmit}>
@@ -179,4 +171,3 @@ function toReminderInput(reminder: Reminder): ReminderInput {
       : null,
   })
 }
-
