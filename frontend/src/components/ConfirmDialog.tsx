@@ -4,6 +4,7 @@ import { Trash2, X } from 'lucide-react'
 interface ConfirmDialogProps {
   body: string
   confirmLabel: string
+  busyLabel?: string
   isBusy?: boolean
   isOpen: boolean
   title: string
@@ -14,6 +15,7 @@ interface ConfirmDialogProps {
 export function ConfirmDialog({
   body,
   confirmLabel,
+  busyLabel = 'Deleting',
   isBusy = false,
   isOpen,
   title,
@@ -84,7 +86,7 @@ export function ConfirmDialog({
             Cancel
           </button>
           <button type="button" className="danger-button" onClick={onConfirm} disabled={isBusy}>
-            {isBusy ? 'Deleting' : confirmLabel}
+            {isBusy ? busyLabel : confirmLabel}
           </button>
         </div>
       </section>

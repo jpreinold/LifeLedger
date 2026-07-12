@@ -6,6 +6,7 @@ from app.config import (
     DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME,
     DEFAULT_GOOGLE_CALENDAR_SCOPES,
     DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME,
+    DEFAULT_LINKED_ITEMS_TABLE_NAME,
     DEFAULT_LOCAL_DEV_USER_ID,
     DEFAULT_PREFERENCES_TABLE_NAME,
     DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME,
@@ -16,6 +17,7 @@ from app.config import (
     DOCUMENT_STORAGE_S3,
     DYNAMODB_PERSISTENCE,
     LAMBDA_LOCAL_DATA_FILE,
+    LAMBDA_LOCAL_LINKED_ITEMS_FILE,
     LAMBDA_LOCAL_RECORD_ATTACHMENTS_FILE,
     LAMBDA_LOCAL_RECORDS_FILE,
     LAMBDA_LOCAL_PREFERENCES_FILE,
@@ -45,6 +47,7 @@ def test_config_defaults_are_local_safe():
     assert settings.google_calendar_connections_table_name == DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME
     assert settings.google_oauth_states_table_name == DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME
     assert settings.record_attachments_table_name == DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME
+    assert settings.linked_items_table_name == DEFAULT_LINKED_ITEMS_TABLE_NAME
     assert settings.aws_region == "us-east-1"
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
@@ -55,6 +58,9 @@ def test_config_defaults_are_local_safe():
     assert settings.local_record_attachments_file.endswith(
         "backend\\data\\record-attachments.json"
     ) or settings.local_record_attachments_file.endswith("backend/data/record-attachments.json")
+    assert settings.local_linked_items_file.endswith(
+        "backend\\data\\linked-items.json"
+    ) or settings.local_linked_items_file.endswith("backend/data/linked-items.json")
     assert settings.local_preferences_file.endswith(
         "backend\\data\\preferences.json"
     ) or settings.local_preferences_file.endswith("backend/data/preferences.json")
@@ -101,6 +107,7 @@ def test_config_reads_environment_values():
             "GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME": "custom-google-connections",
             "GOOGLE_OAUTH_STATES_TABLE_NAME": "custom-google-states",
             "RECORD_ATTACHMENTS_TABLE_NAME": "custom-attachments",
+            "LINKED_ITEMS_TABLE_NAME": "custom-linked-items",
             "VAPID_PUBLIC_KEY": "public",
             "VAPID_PRIVATE_KEY": "private",
             "VAPID_SUBJECT": "mailto:test@example.com",
@@ -136,6 +143,7 @@ def test_config_reads_environment_values():
     assert settings.google_calendar_connections_table_name == "custom-google-connections"
     assert settings.google_oauth_states_table_name == "custom-google-states"
     assert settings.record_attachments_table_name == "custom-attachments"
+    assert settings.linked_items_table_name == "custom-linked-items"
     assert settings.push_notifications_configured is True
     assert settings.google_calendar_configured is True
     assert settings.record_encryption_mode == RECORD_ENCRYPTION_KMS
@@ -176,6 +184,12 @@ def test_config_allows_explicit_local_record_attachments_file():
     assert settings.local_record_attachments_file == "/tmp/custom-attachments.json"
 
 
+def test_config_allows_explicit_local_linked_items_file():
+    settings = load_settings({"LOCAL_LINKED_ITEMS_FILE": "/tmp/custom-linked-items.json"})
+
+    assert settings.local_linked_items_file == "/tmp/custom-linked-items.json"
+
+
 def test_config_allows_explicit_local_preferences_file():
     settings = load_settings({"LOCAL_PREFERENCES_FILE": "/tmp/custom-preferences.json"})
 
@@ -207,6 +221,7 @@ def test_sam_local_defaults_to_writable_tmp_data_file():
     assert settings.local_data_file == LAMBDA_LOCAL_DATA_FILE
     assert settings.local_records_file == LAMBDA_LOCAL_RECORDS_FILE
     assert settings.local_record_attachments_file == LAMBDA_LOCAL_RECORD_ATTACHMENTS_FILE
+    assert settings.local_linked_items_file == LAMBDA_LOCAL_LINKED_ITEMS_FILE
     assert settings.local_preferences_file == LAMBDA_LOCAL_PREFERENCES_FILE
     assert settings.local_push_subscriptions_file == LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE
     assert settings.local_google_calendar_connections_file == LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE

@@ -57,6 +57,7 @@ from app.google_calendar_service import (
     WRITABLE_CALENDAR_ACCESS_ROLES,
     build_google_calendar_event,
 )
+from app.linked_items_repository import LinkedItemRepository
 from app.maintenance import (
     advance_maintenance_details,
     get_maintenance_computed_label,
@@ -81,6 +82,7 @@ from app.repository_factory import (
     create_google_calendar_connection_repository,
     create_google_oauth_state_repository,
     create_encryption_service,
+    create_linked_item_repository,
     create_preferences_repository,
     create_push_subscription_repository,
     create_record_attachment_repository,
@@ -88,6 +90,12 @@ from app.repository_factory import (
     create_repository,
 )
 from app.records_repository import RecordRepository
+from app.relationship_service import (
+    assert_supported_record_link,
+    create_record_link,
+    get_entity_neighborhood,
+    require_link_for_entity,
+)
 from app.schemas import (
     AlertSnoozeRequest,
     AttachmentScanResult,
@@ -101,6 +109,10 @@ from app.schemas import (
     GoogleCalendarOptionResponse,
     GoogleCalendarSelectRequest,
     GoogleCalendarStatusResponse,
+    LinkCreateRequest,
+    LinkedEntityType,
+    LinkedItemResponse,
+    LinkedItemsResponse,
     MaintenanceDetails,
     PushConfigurationResponse,
     PushStatusResponse,
@@ -187,6 +199,7 @@ push_subscription_repository = create_push_subscription_repository()
 google_calendar_connection_repository = create_google_calendar_connection_repository()
 google_oauth_state_repository = create_google_oauth_state_repository()
 record_attachment_repository = create_record_attachment_repository()
+linked_item_repository = create_linked_item_repository()
 
 
 def get_app_settings() -> Settings:
@@ -203,6 +216,10 @@ def get_record_repository() -> RecordRepository:
 
 def get_record_attachment_repository() -> RecordAttachmentRepository:
     return record_attachment_repository
+
+
+def get_linked_item_repository() -> LinkedItemRepository:
+    return linked_item_repository
 
 
 def get_preferences_repository() -> PreferencesRepository:
@@ -359,6 +376,7 @@ def delete_record(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
     document_storage=Depends(get_document_storage_service),
 ) -> Response:
     require_record(repo, current_user.user_id, record_id)
@@ -368,10 +386,87 @@ def delete_record(
         attachment_repo,
         document_storage,
     )
+    linked_repo.delete_links_for_entity(current_user.user_id, LinkedEntityType.RECORD, record_id)
     deleted = repo.delete_record(current_user.user_id, record_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/records/{record_id}/links", response_model=LinkedItemsResponse)
+def list_record_links(
+    record_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> LinkedItemsResponse:
+    require_record(record_repo, current_user.user_id, record_id)
+    return get_entity_neighborhood(
+        current_user.user_id,
+        LinkedEntityType.RECORD,
+        record_id,
+        linked_repo,
+        record_repo,
+        reminder_repo,
+    )
+
+
+@app.post("/records/{record_id}/links", response_model=LinkedItemResponse, status_code=status.HTTP_201_CREATED)
+def add_record_link(
+    record_id: str,
+    payload: LinkCreateRequest,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> LinkedItemResponse:
+    source_record = require_record(record_repo, current_user.user_id, record_id)
+    assert_supported_record_link(payload)
+    response = create_record_link(
+        current_user.user_id,
+        source_record,
+        payload,
+        linked_repo,
+        record_repo,
+        reminder_repo,
+        utc_now(),
+    )
+    log_security_event(
+        "linked_item_created",
+        user_id=current_user.user_id,
+        source_type=LinkedEntityType.RECORD.value,
+        source_id=record_id,
+        target_type=payload.target_type.value,
+        target_id=payload.target_id,
+        relationship_type=payload.relationship_type.value,
+        result="created",
+    )
+    return response
+
+
+@app.delete("/records/{record_id}/links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_record_link(
+    record_id: str,
+    link_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> Response:
+    require_record(record_repo, current_user.user_id, record_id)
+    link = require_link_for_entity(current_user.user_id, link_id, LinkedEntityType.RECORD, record_id, linked_repo)
+    linked_repo.delete_link(current_user.user_id, link_id)
+    log_security_event(
+        "linked_item_removed",
+        user_id=current_user.user_id,
+        source_type=link.source_type.value,
+        source_id=link.source_id,
+        target_type=link.target_type.value,
+        target_id=link.target_id,
+        relationship_type=link.relationship_type.value,
+        result="removed",
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1230,6 +1325,50 @@ def get_reminder(
     return to_response(require_reminder(repo, current_user.user_id, reminder_id))
 
 
+@app.get("/reminders/{reminder_id}/links", response_model=LinkedItemsResponse)
+def list_reminder_links(
+    reminder_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> LinkedItemsResponse:
+    require_reminder(reminder_repo, current_user.user_id, reminder_id)
+    return get_entity_neighborhood(
+        current_user.user_id,
+        LinkedEntityType.REMINDER,
+        reminder_id,
+        linked_repo,
+        record_repo,
+        reminder_repo,
+        include_reminders=False,
+    )
+
+
+@app.delete("/reminders/{reminder_id}/links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_reminder_link(
+    reminder_id: str,
+    link_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> Response:
+    require_reminder(reminder_repo, current_user.user_id, reminder_id)
+    link = require_link_for_entity(current_user.user_id, link_id, LinkedEntityType.REMINDER, reminder_id, linked_repo)
+    linked_repo.delete_link(current_user.user_id, link_id)
+    log_security_event(
+        "linked_item_removed",
+        user_id=current_user.user_id,
+        source_type=link.source_type.value,
+        source_id=link.source_id,
+        target_type=link.target_type.value,
+        target_id=link.target_id,
+        relationship_type=link.relationship_type.value,
+        result="removed",
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.put("/reminders/{reminder_id}", response_model=ReminderResponse)
 def update_reminder(
     reminder_id: str,
@@ -1263,6 +1402,7 @@ def delete_reminder(
     reminder_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
     connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
     app_settings: Settings = Depends(get_app_settings),
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
@@ -1276,6 +1416,7 @@ def delete_reminder(
         reminder,
         utc_now(),
     )
+    linked_repo.delete_links_for_entity(current_user.user_id, LinkedEntityType.REMINDER, reminder_id)
     deleted = repo.delete_reminder(current_user.user_id, reminder_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")

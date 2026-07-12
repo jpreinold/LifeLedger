@@ -9,7 +9,8 @@ from app.auth import UserContext, get_current_user
 from app.config import load_settings
 from app.dynamo_repository import DynamoRecordRepository
 from app.encryption_service import EncryptionService
-from app.main import app, get_encryption_service, get_record_repository
+from app.main import app, get_encryption_service, get_linked_item_repository, get_record_repository
+from app.linked_items_repository import LocalLinkedItemRepository
 from app.models import Record
 from app.records_repository import LocalRecordRepository
 from app.schemas import RecordCreate, RecordResponse, RecordStatus, RecordUpdate
@@ -21,8 +22,14 @@ def record_repo(tmp_path):
 
 
 @pytest.fixture()
-def client(record_repo):
+def linked_repo(tmp_path):
+    return LocalLinkedItemRepository(tmp_path / "linked-items.json")
+
+
+@pytest.fixture()
+def client(record_repo, linked_repo):
     app.dependency_overrides[get_record_repository] = lambda: record_repo
+    app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
 
     with TestClient(app) as test_client:
         yield test_client
@@ -31,7 +38,7 @@ def client(record_repo):
 
 
 @pytest.fixture()
-def encrypted_client(record_repo):
+def encrypted_client(record_repo, linked_repo):
     encryption_service = EncryptionService(
         load_settings(
             {
@@ -41,6 +48,7 @@ def encrypted_client(record_repo):
         )
     )
     app.dependency_overrides[get_record_repository] = lambda: record_repo
+    app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
     app.dependency_overrides[get_encryption_service] = lambda: encryption_service
 
     with TestClient(app) as test_client:

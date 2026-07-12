@@ -88,6 +88,29 @@ class RecordStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class LinkedEntityType(str, Enum):
+    RECORD = "record"
+    REMINDER = "reminder"
+
+
+class RelationshipType(str, Enum):
+    RELATED = "related"
+    BELONGS_TO = "belongs_to"
+    COVERS = "covers"
+    RENEWS = "renews"
+    MAINTAINS = "maintains"
+    INSURES = "insures"
+    WARRANTY_FOR = "warranty_for"
+    DOCUMENT_FOR = "document_for"
+    APPOINTMENT_FOR = "appointment_for"
+    CUSTOM = "custom"
+
+
+class LinkDirection(str, Enum):
+    OUTBOUND = "outbound"
+    INBOUND = "inbound"
+
+
 class AttachmentStatus(str, Enum):
     PENDING_UPLOAD = "pending_upload"
     UPLOADED = "uploaded"
@@ -568,6 +591,64 @@ class RecordResponse(RecordBase):
     protected_field_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class LinkCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: LinkedEntityType
+    target_id: str = Field(..., min_length=1, max_length=120)
+    relationship_type: RelationshipType = RelationshipType.RELATED
+    label: str | None = Field(default=None, max_length=40)
+
+    @field_validator("target_id", mode="before")
+    @classmethod
+    def normalize_target_id(cls, value: str) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str | None) -> str | None:
+        if value is not None and any(character in value for character in "\r\n\t"):
+            raise ValueError("Link label can only be a short single-line label")
+        return value
+
+
+class LinkedEntitySummary(BaseModel):
+    entity_type: LinkedEntityType
+    id: str
+    title: str
+    subtitle: str | None = None
+    record_type: RecordType | None = None
+    reminder_type: ReminderType | None = None
+    status: str | None = None
+    due_date: date | None = None
+
+
+class LinkedItemResponse(BaseModel):
+    link_id: str
+    relationship_type: RelationshipType
+    label: str | None = None
+    direction: LinkDirection
+    linked_entity: LinkedEntitySummary
+    created_at: datetime
+
+
+class LinkedItemsResponse(BaseModel):
+    records: list[LinkedItemResponse] = Field(default_factory=list)
+    reminders: list[LinkedItemResponse] = Field(default_factory=list)
 
 
 class RecordAttachmentUploadIntentRequest(BaseModel):

@@ -157,6 +157,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [viewingReminder, setViewingReminder] = useState<{ reminder: Reminder; fromAlert: boolean } | null>(null)
   const [editingRecord, setEditingRecord] = useState<LifeRecord | null>(null)
   const [viewingRecord, setViewingRecord] = useState<ViewingRecordState | null>(null)
+  const [recordBackStack, setRecordBackStack] = useState<ViewingRecordState[]>([])
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
   const [pendingRecordDelete, setPendingRecordDelete] = useState<LifeRecord | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
@@ -407,6 +408,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       await loadRecordData()
       setActivePage('records')
+      setRecordBackStack([])
       setViewingRecord({ record: nextRecord, initialTab: 'documents' })
       if (!protectedSaved) {
         setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
@@ -593,7 +595,48 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function openRecordDetail(record: LifeRecord) {
     setEditingRecord(null)
+    setRecordBackStack([])
     setViewingRecord({ record, initialTab: 'details' })
+  }
+
+  function openLinkedRecord(recordId: string) {
+    const record = records.find((item) => item.id === recordId)
+    if (!record) {
+      setError('Unable to open linked record. Refresh and try again.')
+      return
+    }
+
+    setEditingRecord(null)
+    setViewingReminder(null)
+    if (viewingRecord) {
+      setRecordBackStack((current) => [...current, viewingRecord])
+    } else {
+      setRecordBackStack([])
+    }
+    setViewingRecord({ record, initialTab: 'details' })
+  }
+
+  function openLinkedReminder(reminderId: string) {
+    const reminder = reminders.find((item) => item.id === reminderId)
+    if (!reminder) {
+      setError('Unable to open linked reminder. Refresh and try again.')
+      return
+    }
+
+    setViewingRecord(null)
+    setRecordBackStack([])
+    setEditingReminder(null)
+    setViewingReminder({ reminder, fromAlert: false })
+  }
+
+  function goBackRecordDetail() {
+    const previous = recordBackStack[recordBackStack.length - 1]
+    if (!previous) {
+      return
+    }
+
+    setRecordBackStack((current) => current.slice(0, -1))
+    setViewingRecord(previous)
   }
 
   async function confirmRecordDelete() {
@@ -703,6 +746,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function openRecordDetailEdit(record: LifeRecord) {
     setViewingRecord(null)
+    setRecordBackStack([])
     setSelectedRecordType(record.record_type)
     setEditingRecord(record)
     setIsRecordFormOpen(true)
@@ -1035,7 +1079,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         isOpen={isRecordFormOpen}
         isSaving={isSaving}
         record={editingRecord}
+        records={records}
         recordType={selectedRecordType}
+        reminders={reminders}
         onClose={closeRecordForm}
         onCreate={handleCreateRecord}
         onUpdate={handleUpdateRecord}
@@ -1071,6 +1117,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       {viewingReminder ? (
         <ReminderDetailDrawer
           reminder={viewingReminder.reminder}
+          records={records}
           calendarStatus={calendarStatus}
           isCalendarStatusLoading={isCalendarStatusLoading}
           isAlertEligible={viewingReminder.fromAlert || alerts.some((alert) => alert.id === viewingReminder.reminder.id)}
@@ -1080,6 +1127,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onEnableCalendarSync={handleEnableCalendarSync}
           onDismiss={handleDismissAlert}
           onEdit={openDetailEdit}
+          onOpenLinkedRecord={openLinkedRecord}
           onRequestDelete={requestDelete}
           onSnooze={handleSnoozeAlert}
         />
@@ -1087,10 +1135,19 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       {viewingRecord ? (
         <RecordDetailDrawer
           record={viewingRecord.record}
+          records={records}
+          reminders={reminders}
+          canGoBack={recordBackStack.length > 0}
           initialTab={viewingRecord.initialTab}
           onArchive={handleArchiveRecord}
-          onClose={() => setViewingRecord(null)}
+          onBack={goBackRecordDetail}
+          onClose={() => {
+            setViewingRecord(null)
+            setRecordBackStack([])
+          }}
           onEdit={openRecordDetailEdit}
+          onOpenLinkedRecord={openLinkedRecord}
+          onOpenLinkedReminder={openLinkedReminder}
           onProtectedStatusChange={handleProtectedRecordStatusChange}
           onRequestDelete={requestRecordDelete}
           onRestore={handleRestoreRecord}

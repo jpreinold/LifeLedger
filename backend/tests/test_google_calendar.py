@@ -27,9 +27,11 @@ from app.main import (
     get_app_settings,
     get_google_calendar_connection_repository,
     get_google_calendar_service,
+    get_linked_item_repository,
     get_google_oauth_state_repository,
     get_repository,
 )
+from app.linked_items_repository import LocalLinkedItemRepository
 from app.models import GoogleCalendarConnection, GoogleOAuthState
 from app.repository import LocalReminderRepository
 from app.schemas import GoogleCalendarConnectionStatus
@@ -110,6 +112,7 @@ def calendar_context(tmp_path):
     reminder_repo = LocalReminderRepository(tmp_path / "reminders.json")
     connection_repo = LocalGoogleCalendarConnectionRepository(tmp_path / "connections.json")
     state_repo = LocalGoogleOAuthStateRepository(tmp_path / "states.json")
+    linked_repo = LocalLinkedItemRepository(tmp_path / "linked-items.json")
     calendar_service = FakeGoogleCalendarService()
     settings = load_settings(
         {
@@ -123,6 +126,7 @@ def calendar_context(tmp_path):
     app.dependency_overrides[get_repository] = lambda: reminder_repo
     app.dependency_overrides[get_google_calendar_connection_repository] = lambda: connection_repo
     app.dependency_overrides[get_google_oauth_state_repository] = lambda: state_repo
+    app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
     app.dependency_overrides[get_google_calendar_service] = lambda: calendar_service
     app.dependency_overrides[get_app_settings] = lambda: settings
 

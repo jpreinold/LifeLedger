@@ -21,6 +21,8 @@ import {
   type RecordField,
 } from '../lib/recordTypes'
 import type { LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
+import type { Reminder } from '../types/reminder'
+import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -28,7 +30,9 @@ interface RecordFormProps {
   isOpen: boolean
   isSaving: boolean
   record: LifeRecord | null
+  records: LifeRecord[]
   recordType: RecordType
+  reminders: Reminder[]
   onClose: () => void
   onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[]) => Promise<boolean>
   onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
@@ -41,13 +45,15 @@ interface StagedAttachment {
 }
 
 const dateFields: RecordField[] = ['start_date', 'issue_date', 'expiration_date', 'purchase_date', 'renewal_date']
-type RecordFormTab = 'record' | 'documents'
+type RecordFormTab = 'record' | 'documents' | 'links'
 
 export function RecordForm({
   isOpen,
   isSaving,
   record,
+  records,
   recordType,
+  reminders,
   onClose,
   onCreate,
   onUpdate,
@@ -216,7 +222,7 @@ export function RecordForm({
       </div>
 
       <form className="reminder-form sheet-body record-form" ref={formBodyRef} onSubmit={handleSubmit}>
-        <div className="record-form-tabs" role="tablist" aria-label="Edit record sections">
+        <div className={record ? 'record-form-tabs record-form-tabs-three' : 'record-form-tabs'} role="tablist" aria-label="Edit record sections">
           <button
             type="button"
             className={activeTab === 'record' ? 'record-form-tab active' : 'record-form-tab'}
@@ -239,6 +245,19 @@ export function RecordForm({
           >
             Attachments
           </button>
+          {record ? (
+            <button
+              type="button"
+              className={activeTab === 'links' ? 'record-form-tab active' : 'record-form-tab'}
+              id="record-form-links-tab"
+              role="tab"
+              aria-selected={activeTab === 'links'}
+              aria-controls="record-form-links-panel"
+              onClick={() => selectTab('links')}
+            >
+              Links
+            </button>
+          ) : null}
         </div>
 
         <div
@@ -324,6 +343,24 @@ export function RecordForm({
             />
           )}
         </div>
+
+        {record ? (
+          <div
+            className="record-form-tab-panel"
+            hidden={activeTab !== 'links'}
+            id="record-form-links-panel"
+            role="tabpanel"
+            aria-labelledby="record-form-links-tab"
+          >
+            <LinkedItemsPanel
+              records={records}
+              reminders={reminders}
+              showAdd
+              sourceId={record.id}
+              sourceType="record"
+            />
+          </div>
+        ) : null}
       </form>
 
       <input

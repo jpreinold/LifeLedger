@@ -1,6 +1,6 @@
 # LifeLedger Backend
 
-FastAPI backend for LifeLedger reminders and records. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and remain separate from reminders. Records can also have secure PDF/JPEG/PNG attachments stored in private S3 quarantine/clean buckets after malware scanning and file validation. Optional protected record details and Google OAuth token bundles are application-encrypted before persistence when encryption is configured.
+FastAPI backend for LifeLedger reminders and records. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and can link to related records and reminders through explicit user-created linked item edges. Records can also have secure PDF/JPEG/PNG attachments stored in private S3 quarantine/clean buckets after malware scanning and file validation. Optional protected record details and Google OAuth token bundles are application-encrypted before persistence when encryption is configured.
 
 ## Run Locally
 
@@ -36,6 +36,8 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `POST /reminders/{id}/complete` requires authentication in Cognito mode.
 - `GET /preferences/digest` and `PUT /preferences/digest` require authentication in Cognito mode.
 - `GET /records`, `POST /records`, `GET /records/{id}`, `PUT /records/{id}`, `POST /records/{id}/archive`, `POST /records/{id}/restore`, and `DELETE /records/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
+- `GET /records/{id}/links`, `POST /records/{id}/links`, and `DELETE /records/{id}/links/{link_id}` require authentication, verify record ownership, and manage only explicit relationship rows.
+- `GET /reminders/{id}/links` and `DELETE /reminders/{id}/links/{link_id}` require authentication, verify reminder ownership, and return/remove only one-hop linked record relationships.
 - `GET /records/{id}/protected/status`, `PUT /records/{id}/protected`, `GET /records/{id}/protected`, and `DELETE /records/{id}/protected` require authentication, verify record ownership, keep protected values out of standard record responses, and reveal plaintext only through the explicit no-store reveal route.
 - `GET /records/{id}/attachments`, `POST /records/{id}/attachments/upload-intent`, `POST /records/{id}/attachments/{attachment_id}/complete`, `GET /records/{id}/attachments/{attachment_id}`, `POST /records/{id}/attachments/{attachment_id}/refresh-status`, `POST /records/{id}/attachments/{attachment_id}/download-url`, `POST /records/{id}/attachments/{attachment_id}/preview-url`, and `DELETE /records/{id}/attachments/{attachment_id}` require authentication, verify record ownership, return no-store responses, and never expose permanent S3 object paths.
 - `GET /push/config`, `GET /push/status`, `GET /push/subscriptions`, `POST /push/subscriptions`, `POST /push/test`, and `DELETE /push/subscriptions/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
@@ -52,6 +54,8 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `app/recurrence.py` owns status calculation, recurrence, and `next_due_date`.
 - `app/repository.py` defines the repository protocol and local JSON repository.
 - `app/records_repository.py` defines the record repository protocol and local JSON repository.
+- `app/linked_items_repository.py` defines linked item local JSON and DynamoDB repositories with user-scoped source/target indexes.
+- `app/relationship_service.py` verifies ownership, creates explicit record links, removes link rows, and builds safe one-hop neighborhoods.
 - `app/dynamo_repository.py` implements DynamoDB repositories with `user_id` plus `id` keys.
 - `app/config.py` reads environment configuration with local-safe defaults.
 - `app/encryption_service.py` provides AES-256-GCM envelope encryption for protected record fields and Google token bundles, with local and KMS modes.
@@ -65,9 +69,11 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `lambda_handler.py` wraps FastAPI with Mangum for AWS Lambda.
 - `template.yaml` defines the AWS SAM deployment shape.
 
-The route layer stays unaware of whether reminders or records are stored in JSON files or DynamoDB. It only receives a current user context and passes `user_id` into the repository layer. The frontend never sends or controls `user_id`.
+The route layer stays unaware of whether reminders, records, or linked items are stored in JSON files or DynamoDB. It only receives a current user context and passes `user_id` into the repository layer. The frontend never sends or controls `user_id`.
 
-Normal record schemas are safe-by-default. They support `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty` types, plus safe text/date/tag fields. Protected fields are handled by dedicated write/reveal schemas and encrypted before storage. Attachments are not zero-knowledge storage: authorized backend services, S3, KMS, and GuardDuty can access decrypted file contents for storage, scanning, validation, preview, download, and deletion. Do not store SSNs, payment card data, banking data, passwords, PINs, recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, secret/recovery documents, OCR, or AI/RAG data.
+Normal record schemas are safe-by-default. They support `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty` types, plus safe text/date/tag fields. Linked item responses use safe summaries only and never include protected values, attachment objects, or `user_id`. Protected fields are handled by dedicated write/reveal schemas and encrypted before storage. Attachments are not zero-knowledge storage: authorized backend services, S3, KMS, and GuardDuty can access decrypted file contents for storage, scanning, validation, preview, download, and deletion. Do not store SSNs, payment card data, banking data, passwords, PINs, recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, secret/recovery documents, OCR, or AI/RAG data.
+
+Linked Items are a virtual knowledge graph, not a graph database. The backend persists explicit record-to-record and record-to-reminder edges in DynamoDB, queries the source and target GSIs for one-hop neighborhoods, and returns grouped safe summaries to the UI. Deleting a link deletes only that edge; deleting a record or reminder also removes its edge rows so no orphaned relationships remain. No AI inference, protected-field matching, multi-hop traversal, or automatic record-to-reminder generation happens in this phase.
 
 ## Environment Variables
 
@@ -82,10 +88,12 @@ Local development does not require environment variables.
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name. |
 | `RECORDS_TABLE_NAME` | `lifeledger-records-auth` | DynamoDB records table name. |
 | `RECORD_ATTACHMENTS_TABLE_NAME` | `lifeledger-record-attachments-auth` | DynamoDB record attachments metadata table name. |
+| `LINKED_ITEMS_TABLE_NAME` | `lifeledger-linked-items-auth` | DynamoDB linked item edge table name. |
 | `AWS_REGION` | `us-east-1` | DynamoDB region. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
 | `LOCAL_RECORDS_FILE` | `backend/data/records.json` locally, `/tmp/lifeledger-records.json` in Lambda/SAM local | JSON file used for records when `PERSISTENCE_MODE=local`. |
 | `LOCAL_RECORD_ATTACHMENTS_FILE` | `backend/data/record-attachments.json` locally, `/tmp/lifeledger-record-attachments.json` in Lambda/SAM local | JSON file used for attachment metadata in local persistence. |
+| `LOCAL_LINKED_ITEMS_FILE` | `backend/data/linked-items.json` locally, `/tmp/lifeledger-linked-items.json` in Lambda/SAM local | JSON file used for linked item persistence. |
 | `PREFERENCES_TABLE_NAME` | `lifeledger-preferences-auth` | DynamoDB preferences table name. |
 | `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name. |
 | `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences in local persistence. |
@@ -158,6 +166,7 @@ Local mode is the default:
 $env:PERSISTENCE_MODE = "local"
 $env:LOCAL_DATA_FILE = "data/reminders.json"
 $env:LOCAL_RECORDS_FILE = "data/records.json"
+$env:LOCAL_LINKED_ITEMS_FILE = "data/linked-items.json"
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
@@ -167,13 +176,14 @@ DynamoDB mode is only used when explicitly enabled:
 $env:PERSISTENCE_MODE = "dynamodb"
 $env:REMINDERS_TABLE_NAME = "lifeledger-reminders-auth"
 $env:RECORDS_TABLE_NAME = "lifeledger-records-auth"
+$env:LINKED_ITEMS_TABLE_NAME = "lifeledger-linked-items-auth"
 $env:AWS_REGION = "us-east-1"
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
 Do not use DynamoDB mode locally unless AWS credentials and the auth-scoped table are configured.
 
-Reminder and record items are scoped by `user_id`. The deployed DynamoDB tables use `user_id` as the partition key and item `id` as the sort key. The records table is separate from reminders and retained for future document, search, AI, and record-linked reminder work.
+Reminder, record, and linked item rows are scoped by `user_id`. The deployed reminder and record tables use `user_id` as the partition key and item `id` as the sort key. The linked items table uses `user_id` plus `link_id`, with `SourceLinksIndex` and `TargetLinksIndex` for one-hop traversal without scans. The records and linked items tables are separate from reminders and retained for future document, search, dashboard, and AI retrieval work.
 
 ## Serverless Deployment Shape
 
@@ -183,7 +193,7 @@ Reminder and record items are scoped by `user_id`. The deployed DynamoDB tables 
 handler = Mangum(app)
 ```
 
-SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, a retained customer-managed data KMS key and alias, a separate retained document KMS key and alias, retained DynamoDB tables for reminders, records, record attachments, preferences, push subscriptions, Google Calendar connections, and OAuth states, retained private S3 quarantine/clean document buckets, a GuardDuty Malware Protection plan with managed tagging, an EventBridge scan-result finalizer Lambda, a scheduled Daily Digest push Lambda, and scoped CRUD/KMS/S3/Secrets Manager permissions for the Lambda functions. The API Lambda can use the data KMS key with encryption context `app=lifeledger`; the Digest push Lambda can read only the push secret and cannot decrypt protected records or access document buckets.
+SAM uses that handler and routes HTTP API requests into the same FastAPI app. The template also creates Cognito resources, an HTTP API JWT authorizer, an unauthenticated `OPTIONS /{proxy+}` route for browser preflight, a retained customer-managed data KMS key and alias, a separate retained document KMS key and alias, retained DynamoDB tables for reminders, records, linked items, record attachments, preferences, push subscriptions, Google Calendar connections, and OAuth states, retained private S3 quarantine/clean document buckets, a GuardDuty Malware Protection plan with managed tagging, an EventBridge scan-result finalizer Lambda, a scheduled Daily Digest push Lambda, and scoped CRUD/KMS/S3/Secrets Manager permissions for the Lambda functions. The API Lambda can use the linked items table and the data KMS key with encryption context `app=lifeledger`; the Digest push Lambda can read only the push secret and cannot decrypt protected records or access linked items/document buckets.
 
 SAM local uses `backend/env.local.json`, which sets local auth and local persistence:
 
@@ -199,9 +209,10 @@ Then open:
 http://127.0.0.1:3000/health
 http://127.0.0.1:3000/reminders
 http://127.0.0.1:3000/records
+http://127.0.0.1:3000/records/{record_id}/links
 ```
 
-When local persistence runs inside Lambda or SAM local, JSON data writes to `/tmp/lifeledger-reminders.json`, `/tmp/lifeledger-records.json`, and the other `/tmp/lifeledger-*.json` persistence files because the function task directory may be read-only.
+When local persistence runs inside Lambda or SAM local, JSON data writes to `/tmp/lifeledger-reminders.json`, `/tmp/lifeledger-records.json`, `/tmp/lifeledger-linked-items.json`, and the other `/tmp/lifeledger-*.json` persistence files because the function task directory may be read-only.
 
 Run the scheduled Daily Digest push logic manually in local/dev without exposing a route:
 
@@ -230,6 +241,7 @@ MalwareProtectionEnabled=true
 RemindersTableName=lifeledger-reminders-auth
 RecordsTableName=lifeledger-records-auth
 RecordAttachmentsTableName=lifeledger-record-attachments-auth
+LinkedItemsTableName=lifeledger-linked-items-auth
 CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 VapidPublicKey=<public-vapid-key>
 PushSecretArn=<secrets-manager-arn-with-vapid_private_key>
