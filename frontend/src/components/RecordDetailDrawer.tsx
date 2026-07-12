@@ -381,6 +381,17 @@ export function RecordDetailDrawer({
             onReveal={() => void handleRevealProtected()}
           />
 
+          <LinkedItemsPanel
+            documentsCount={documentsCount}
+            records={records}
+            reminders={reminders}
+            showAdd
+            sourceId={record.id}
+            sourceType="record"
+            onOpenRecord={onOpenLinkedRecord}
+            onOpenReminder={onOpenLinkedReminder}
+          />
+
           <DetailSection
             title="History"
             rows={[
