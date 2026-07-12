@@ -8,8 +8,10 @@ from app.schemas import (
     BirthdayDetails,
     CalendarSyncStatus,
     GoogleCalendarConnectionStatus,
+    LinkedEntityType,
     MaintenanceDetails,
     PriorityOption,
+    RelationshipType,
     ReminderCategory,
     ReminderLeadUnit,
     RecordStatus,
@@ -96,6 +98,22 @@ class Record(BaseModel):
     protected_field_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class LinkedItem(BaseModel):
+    user_id: str
+    link_id: str
+    source_type: LinkedEntityType
+    source_id: str
+    target_type: LinkedEntityType
+    target_id: str
+    relationship_type: RelationshipType = RelationshipType.RELATED
+    label: str | None = None
+    source_link_key: str
+    target_link_key: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: str = "user"
 
 
 class RecordAttachment(BaseModel):

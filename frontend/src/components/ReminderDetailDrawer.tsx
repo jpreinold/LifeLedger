@@ -20,13 +20,16 @@ import {
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { GoogleCalendarStatus } from '../api/calendarApi'
 import type { Reminder } from '../types/reminder'
+import type { LifeRecord } from '../types/record'
 import { getCategoryVisual } from './categoryVisuals'
+import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
 const drawerCloseMs = 220
 
 interface ReminderDetailDrawerProps {
   reminder: Reminder
+  records: LifeRecord[]
   calendarStatus: GoogleCalendarStatus | null
   isCalendarStatusLoading: boolean
   isAlertEligible: boolean
@@ -36,6 +39,7 @@ interface ReminderDetailDrawerProps {
   onEnableCalendarSync: (id: string) => Promise<boolean>
   onDismiss: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
+  onOpenLinkedRecord: (recordId: string) => void
   onRequestDelete: (reminder: Reminder) => void
   onSnooze: (id: string) => Promise<void>
 }
@@ -47,6 +51,7 @@ interface DetailRow {
 
 export function ReminderDetailDrawer({
   reminder,
+  records,
   calendarStatus,
   isCalendarStatusLoading,
   isAlertEligible,
@@ -56,6 +61,7 @@ export function ReminderDetailDrawer({
   onEnableCalendarSync,
   onDismiss,
   onEdit,
+  onOpenLinkedRecord,
   onRequestDelete,
   onSnooze,
 }: ReminderDetailDrawerProps) {
@@ -225,6 +231,15 @@ export function ReminderDetailDrawer({
           isCalendarStatusLoading={isCalendarStatusLoading}
           isSaving={isCalendarSyncSaving}
           onToggle={() => void handleCalendarSyncToggle()}
+        />
+
+        <LinkedItemsPanel
+          records={records}
+          reminders={[]}
+          sourceId={reminder.id}
+          sourceType="reminder"
+          title="Linked records"
+          onOpenRecord={onOpenLinkedRecord}
         />
 
         {note ? (

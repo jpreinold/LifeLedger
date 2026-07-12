@@ -2,7 +2,7 @@
 
 LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
-LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Google Calendar sync is available as a one-way, per-reminder integration from LifeLedger to the user's selected Google Calendar. Records are now first-class, structured personal entities that users can create, view, edit, archive, restore, delete, preview, and attach scanned PDF/JPEG/PNG files to after malware scanning. Optional protected details are encrypted at the application layer before persistence. Google OAuth token bundles are also application-encrypted when encryption is enabled. Email, SMS, public sign-up, OCR, AI/RAG, file sharing, and automatic record-to-reminder generation are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, records, record attachments, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
+LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Google Calendar sync is available as a one-way, per-reminder integration from LifeLedger to the user's selected Google Calendar. Records are now first-class, structured personal entities that users can create, view, edit, archive, restore, delete, preview, attach scanned PDF/JPEG/PNG files to after malware scanning, and link to related records and reminders. Optional protected details are encrypted at the application layer before persistence. Google OAuth token bundles are also application-encrypted when encryption is enabled. Email, SMS, public sign-up, OCR, AI/RAG, file sharing, and automatic record-to-reminder generation are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, records, linked items, record attachments, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
 
 ## Common Dev Commands
 
@@ -96,6 +96,18 @@ Records are source-of-truth personal details, separate from reminders. Users can
 Supported record types are `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty`. The shared safe model stores `record_type`, `title`, optional `subtitle`, `category`, optional owner/provider or brand, safe dates, `location_hint`, `notes`, normalized `tags`, `status`, and backend-owned timestamps.
 
 Privacy guardrails are intentional. Normal record metadata stays safe and searchable: type, title, subtitle, category, owner display name, provider/brand, dates, broad location hint, non-sensitive notes, tags, and status. The frontend must not send `user_id`; the backend derives ownership from Cognito or local auth.
+
+## Linked Items Virtual Knowledge Graph
+
+Linked Items make a record or reminder a small private hub for related LifeLedger items without adding a graph database or new AI service. The backend stores explicit user-created edges in the retained `lifeledger-linked-items-auth` DynamoDB table and resolves one-hop neighborhoods in the application layer with indexed DynamoDB queries. This keeps the feature low cost, simple to operate, and aligned with the existing user-scoped storage model.
+
+Supported links are record-to-record and record-to-reminder. Record detail and edit views show linked records and reminders; reminder detail views show the records linked to that reminder. The mobile UI follows the same compact drawer patterns as records and reminders: choose Record or Reminder, search/filter items the user already owns, choose a relationship, optionally add a short label, and see the linked item appear immediately.
+
+Relationships are explicit user choices such as insurance for, warranty for, renews, maintains, belongs to, covers, and related. LifeLedger does not infer links, create reminders from records, read protected fields for matching, or run AI/RAG over the graph in this phase. Linked item responses expose safe summaries only, never protected record values, attachment objects, or `user_id`.
+
+Deleting a link removes only the connection. The source record, target record, or target reminder remains intact. Deleting a record or reminder cleans up its associated link rows so future one-hop queries do not return orphaned relationships.
+
+The DynamoDB table is keyed by authenticated `user_id` plus `link_id`, with `SourceLinksIndex` and `TargetLinksIndex` for fast source/target lookups. The frontend never sends ownership fields; the API derives the user from Cognito/local auth, verifies both linked entities belong to that user, rejects self-links and duplicates, and stores only the relationship metadata. This virtual knowledge graph can support future search, dashboards, and AI retrieval, but those retrieval and inference features are intentionally not included yet.
 
 ## Encrypted Records And Security Boundary
 
@@ -312,6 +324,7 @@ Deployed frontend flow:
 - Lambda runs FastAPI through Mangum.
 - DynamoDB stores reminders under the authenticated user's `user_id`.
 - DynamoDB stores records under the authenticated user's `user_id` in a separate records table.
+- DynamoDB stores linked item edges under the authenticated user's `user_id` in a separate linked items table.
 
 Frontend security headers are deployed through `frontend/public/_headers`, which Vite copies to `dist/_headers` for Cloudflare Pages. The CSP is intentionally `Content-Security-Policy-Report-Only` during this phase and allows only the LifeLedger origin, the production API Gateway origin, and the Cognito User Pool endpoint for browser connections. CSP reports are accepted by the Cloudflare Pages Function at `frontend/functions/__csp-report.ts`. The service worker does not precache `index.html`, so document security headers are fetched from the network instead of being retained in an older Workbox cache. If a Cloudflare dashboard Transform Rule, Pages configuration, or Worker is also setting CSP, edit or remove that rule before relying on this policy; multiple CSP headers are combined by browsers, so an older policy such as `connect-src 'none'` can continue to report or enforce blocks even after this repository policy is added. If Cloudflare JavaScript Detections, Bot Fight Mode, or challenge injection is enabled, Cloudflare may inject inline `/cdn-cgi/challenge-platform/` scripts that conflict with strict `script-src 'self'`; disable that injection for LifeLedger or use a nonce-capable Worker before moving CSP from Report-Only to enforced mode.
 
@@ -346,6 +359,11 @@ Frontend security headers are deployed through `frontend/public/_headers`, which
 - `POST /records/{id}/archive` requires authentication in Cognito mode and archives only an owned record.
 - `POST /records/{id}/restore` requires authentication in Cognito mode and restores only an owned record.
 - `DELETE /records/{id}` requires authentication in Cognito mode and deletes only an owned record.
+- `GET /records/{id}/links` requires authentication and returns one-hop linked records and reminders for an owned record.
+- `POST /records/{id}/links` requires authentication, verifies both entities are owned by the current user, rejects duplicates/self-links, and creates a record-to-record or record-to-reminder link.
+- `DELETE /records/{id}/links/{link_id}` requires authentication and removes only the relationship row for an owned record; linked records and reminders are not deleted.
+- `GET /reminders/{id}/links` requires authentication and returns one-hop linked records for an owned reminder.
+- `DELETE /reminders/{id}/links/{link_id}` requires authentication and removes only the relationship row for an owned reminder.
 - `GET /preferences/digest` requires authentication in Cognito mode.
 - `PUT /preferences/digest` requires authentication in Cognito mode.
 - `GET /push/config` requires authentication in Cognito mode.
@@ -370,11 +388,13 @@ Frontend security headers are deployed through `frontend/public/_headers`, which
 - Birthday reminder date, age, and label helpers live in `backend/app/birthdays.py`.
 - Maintenance reminder interval, due-date, completion, and label helpers live in `backend/app/maintenance.py`.
 - Route handlers depend on a repository abstraction, not a concrete storage backend.
-- Local mode uses JSON-file persistence at `backend/data/reminders.json` and `backend/data/records.json`.
-- DynamoDB mode uses `DynamoReminderRepository` and `DynamoRecordRepository` for AWS deployment.
-- Config in `backend/app/config.py` chooses auth mode, persistence mode, CORS origins, table names, local data paths, and backend-only Google OAuth settings.
+- Local mode uses JSON-file persistence at `backend/data/reminders.json`, `backend/data/records.json`, and `backend/data/linked-items.json`.
+- DynamoDB mode uses `DynamoReminderRepository`, `DynamoRecordRepository`, and `DynamoLinkedItemRepository` for AWS deployment.
+- `backend/app/relationship_service.py` verifies ownership, creates explicit links, removes only links, and builds one-hop neighborhoods from safe entity summaries.
+- Config in `backend/app/config.py` chooses auth mode, persistence mode, CORS origins, table names, local data paths, linked item storage, and backend-only Google OAuth settings.
 - Application encryption lives in `backend/app/encryption_service.py`; Secrets Manager retrieval and process-level secret caching live in `backend/app/secret_provider.py`.
 - Records use `RecordRepository`, `LocalRecordRepository`, and `DynamoRecordRepository`, all keyed by backend-derived `user_id`.
+- Linked items use `LinkedItemRepository`, `LocalLinkedItemRepository`, and `DynamoLinkedItemRepository`, all keyed by backend-derived `user_id` and indexed by source/target lookup keys.
 - Secure record attachments use `backend/app/attachments.py` for validation, S3, scan reconciliation, and clean promotion logic.
 - Attachment metadata persistence uses `backend/app/attachments_repository.py`, with local JSON and DynamoDB implementations keyed by authenticated user and record.
 - GuardDuty scan EventBridge events invoke `backend/attachment_scan_finalizer.py`, which reconciles the quarantine object tag and promotes only clean, validated files.
@@ -383,7 +403,7 @@ Frontend security headers are deployed through `frontend/public/_headers`, which
 - Mangum adapts FastAPI to Lambda through `backend/lambda_handler.py`.
 - `backend/template.yaml` describes the SAM serverless deployment shape.
 
-Reminder, record, and attachment metadata items include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and item `id` as the sort key for reminders and records, so users cannot read or mutate each other's data through the repository layer. Attachment metadata uses `user_id` plus `<record_id>#<attachment_id>`, and the trusted scan finalizer can resolve a quarantine object through an owner-hash GSI without putting plaintext user ids in S3 keys. Reminder timing preferences, smart birthday fields, smart renewal fields, smart maintenance fields, and alert state fields such as `alert_dismissed_until`, `alert_snoozed_until`, and `alert_last_action_at` are stored on each reminder item without changing the DynamoDB key schema. Records and attachments are stored in separate retained tables so future search, AI, and reminder links can be added without overloading reminder storage. Digest preferences are stored in a separate table keyed by `user_id`, so future notification scheduling can read per-user digest time, timezone, lookahead, enabled state, and last-seen state without changing reminder storage. Google Calendar tokens are stored in a separate connection table keyed by `user_id`; OAuth state is stored server-side and expires before token exchange is allowed.
+Reminder, record, linked item, and attachment metadata items include an internal `user_id`. In local mode it is `local-dev-user`; in Cognito mode it is the Cognito `sub`. DynamoDB uses `user_id` as the partition key and item `id` as the sort key for reminders and records, so users cannot read or mutate each other's data through the repository layer. Linked item rows use `user_id` plus `link_id`, with `SourceLinksIndex` and `TargetLinksIndex` for one-hop traversal without table scans. Attachment metadata uses `user_id` plus `<record_id>#<attachment_id>`, and the trusted scan finalizer can resolve a quarantine object through an owner-hash GSI without putting plaintext user ids in S3 keys. Reminder timing preferences, smart birthday fields, smart renewal fields, smart maintenance fields, and alert state fields such as `alert_dismissed_until`, `alert_snoozed_until`, and `alert_last_action_at` are stored on each reminder item without changing the DynamoDB key schema. Records, linked items, and attachments are stored in separate retained tables so future search, dashboards, and AI retrieval can be added without overloading reminder storage. Digest preferences are stored in a separate table keyed by `user_id`, so future notification scheduling can read per-user digest time, timezone, lookahead, enabled state, and last-seen state without changing reminder storage. Google Calendar tokens are stored in a separate connection table keyed by `user_id`; OAuth state is stored server-side and expires before token exchange is allowed.
 
 ## Environment Variables
 
@@ -398,11 +418,13 @@ Backend local development works without setting any variables.
 | `REMINDERS_TABLE_NAME` | `lifeledger-reminders-auth` | DynamoDB table name when DynamoDB mode is enabled. |
 | `RECORDS_TABLE_NAME` | `lifeledger-records-auth` | DynamoDB records table name when DynamoDB mode is enabled. |
 | `RECORD_ATTACHMENTS_TABLE_NAME` | `lifeledger-record-attachments-auth` | DynamoDB record attachments metadata table name when DynamoDB mode is enabled. |
+| `LINKED_ITEMS_TABLE_NAME` | `lifeledger-linked-items-auth` | DynamoDB linked item edge table name when DynamoDB mode is enabled. |
 | `PREFERENCES_TABLE_NAME` | `lifeledger-preferences-auth` | DynamoDB preferences table name when DynamoDB mode is enabled. |
 | `AWS_REGION` | `us-east-1` | Region used by the DynamoDB repository. Lambda also provides this automatically. |
 | `LOCAL_DATA_FILE` | `backend/data/reminders.json` locally, `/tmp/lifeledger-reminders.json` in Lambda/SAM local | JSON file used when `PERSISTENCE_MODE=local`. |
 | `LOCAL_RECORDS_FILE` | `backend/data/records.json` locally, `/tmp/lifeledger-records.json` in Lambda/SAM local | JSON file used for records when `PERSISTENCE_MODE=local`. |
 | `LOCAL_RECORD_ATTACHMENTS_FILE` | `backend/data/record-attachments.json` locally, `/tmp/lifeledger-record-attachments.json` in Lambda/SAM local | JSON file used for attachment metadata when `PERSISTENCE_MODE=local`. |
+| `LOCAL_LINKED_ITEMS_FILE` | `backend/data/linked-items.json` locally, `/tmp/lifeledger-linked-items.json` in Lambda/SAM local | JSON file used for linked items when `PERSISTENCE_MODE=local`. |
 | `LOCAL_PREFERENCES_FILE` | `backend/data/preferences.json` locally, `/tmp/lifeledger-preferences.json` in Lambda/SAM local | JSON file used for digest preferences when `PERSISTENCE_MODE=local`. |
 | `PUSH_SUBSCRIPTIONS_TABLE_NAME` | `lifeledger-push-subscriptions-auth` | DynamoDB push subscriptions table name when DynamoDB mode is enabled. |
 | `LOCAL_PUSH_SUBSCRIPTIONS_FILE` | `backend/data/push-subscriptions.json` locally, `/tmp/lifeledger-push-subscriptions.json` in Lambda/SAM local | JSON file used for push subscriptions when `PERSISTENCE_MODE=local`. |
@@ -431,7 +453,7 @@ Backend local development works without setting any variables.
 | `ATTACHMENT_MAX_SIZE_BYTES` | `10485760` | Maximum attachment size, 10 MB by default. |
 | `ATTACHMENT_MAX_PER_RECORD` | `5` | Maximum active attachments per record. |
 
-SAM parameters use `RecordEncryptionMode`, `DocumentStorageMode`, `MalwareProtectionEnabled`, `GoogleOAuthSecretArn`, `VapidPublicKey`, `PushSecretArn`, and `VapidSubject`; Cloudflare Pages uses only public `VITE_*` values such as `VITE_VAPID_PUBLIC_KEY`.
+SAM parameters include `LinkedItemsTableName`, `RecordEncryptionMode`, `DocumentStorageMode`, `MalwareProtectionEnabled`, `GoogleOAuthSecretArn`, `VapidPublicKey`, `PushSecretArn`, and `VapidSubject`; Cloudflare Pages uses only public `VITE_*` values such as `VITE_VAPID_PUBLIC_KEY`.
 
 Local protected-field testing:
 
@@ -461,6 +483,7 @@ The SAM template defines:
 - A DynamoDB table named `lifeledger-reminders-auth` with `user_id` partition key and `id` sort key.
 - A DynamoDB table named `lifeledger-records-auth` with `user_id` partition key and `id` sort key.
 - A DynamoDB table named `lifeledger-record-attachments-auth` with `user_id` partition key, `<record_id>#<attachment_id>` sort key, PITR, SSE-KMS, and an owner-hash GSI for trusted scan finalization.
+- A DynamoDB table named `lifeledger-linked-items-auth` with `user_id` partition key, `link_id` sort key, `SourceLinksIndex`, and `TargetLinksIndex` for one-hop linked item traversal.
 - A DynamoDB table named `lifeledger-preferences-auth` with `user_id` partition key for Daily Digest preferences.
 - A DynamoDB table named `lifeledger-google-calendar-connections-auth` with `user_id` partition key for backend-only Google Calendar tokens.
 - A DynamoDB table named `lifeledger-google-oauth-states-auth` with `state` partition key for expiring OAuth state validation.
@@ -469,12 +492,13 @@ The SAM template defines:
 - S3 Block Public Access, Bucket owner enforced object ownership, SSE-KMS document-key defaults, bucket-key support, insecure-transport denies, and incorrect-encryption denies on document buckets.
 - GuardDuty Malware Protection for S3 on the quarantine `quarantine/` prefix with managed object tagging when `MalwareProtectionEnabled=true`.
 - An attachment scan finalizer Lambda and EventBridge rule for `GuardDuty Malware Protection Object Scan Result` events.
+- API Lambda DynamoDB permissions include the linked items table; Digest and attachment finalizer Lambdas do not receive linked item table access.
 - API Lambda permissions for `kms:GenerateDataKey` and `kms:Decrypt` are scoped to the stack KMS key and require encryption context `app=lifeledger`.
 - API and finalizer Lambda document S3/KMS permissions are scoped to the document buckets, `quarantine/*` and `clean/*` prefixes, and the document KMS key through S3.
 - API Lambda Secrets Manager access is scoped to `GoogleOAuthSecretArn` and `PushSecretArn`; the Digest push Lambda may read only `PushSecretArn` and does not receive record KMS decrypt permissions.
 - `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain` on the KMS key and retained DynamoDB tables.
 
-SAM local defaults to `AUTH_MODE=local` and `PERSISTENCE_MODE=local`, so it can serve `/health`, `/reminders`, `/records`, and `/preferences/digest` without Cognito login, AWS credentials, or DynamoDB calls. In Lambda/SAM local mode, local JSON persistence writes to `/tmp/lifeledger-reminders.json`, `/tmp/lifeledger-records.json`, `/tmp/lifeledger-preferences.json`, `/tmp/lifeledger-push-subscriptions.json`, `/tmp/lifeledger-google-calendar-connections.json`, and `/tmp/lifeledger-google-oauth-states.json` because the function code directory may be read-only.
+SAM local defaults to `AUTH_MODE=local` and `PERSISTENCE_MODE=local`, so it can serve `/health`, `/reminders`, `/records`, `/records/{id}/links`, and `/preferences/digest` without Cognito login, AWS credentials, or DynamoDB calls. In Lambda/SAM local mode, local JSON persistence writes to `/tmp/lifeledger-reminders.json`, `/tmp/lifeledger-records.json`, `/tmp/lifeledger-linked-items.json`, `/tmp/lifeledger-preferences.json`, `/tmp/lifeledger-push-subscriptions.json`, `/tmp/lifeledger-google-calendar-connections.json`, and `/tmp/lifeledger-google-oauth-states.json` because the function code directory may be read-only.
 
 High-level SAM commands:
 
@@ -496,6 +520,7 @@ MalwareProtectionEnabled=true
 RemindersTableName=lifeledger-reminders-auth
 RecordsTableName=lifeledger-records-auth
 RecordAttachmentsTableName=lifeledger-record-attachments-auth
+LinkedItemsTableName=lifeledger-linked-items-auth
 CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 VapidPublicKey=<public-vapid-key>
 PushSecretArn=<secrets-manager-arn-with-vapid_private_key>
@@ -516,7 +541,7 @@ sam deploy --guided
 ## Deployment Checklist
 
 - `npm run check` passes.
-- Backend is deployed with `AuthMode=cognito`, `PersistenceMode=dynamodb`, and `RecordEncryptionMode=kms`.
+- Backend is deployed with `AuthMode=cognito`, `PersistenceMode=dynamodb`, `RecordEncryptionMode=kms`, and the linked items table parameter.
 - AWS `/health` works without signing in.
 - AWS `/reminders` rejects requests without a bearer token.
 - AWS `/records` rejects requests without a bearer token.
@@ -524,8 +549,9 @@ sam deploy --guided
 - Cloudflare Pages has all required `VITE_*` environment variables, including `VITE_VAPID_PUBLIC_KEY` for push subscriptions.
 - Cloudflare frontend can load, create, complete, and delete reminders after sign-in.
 - Cloudflare frontend can create, edit, archive, restore, and delete records after sign-in.
-- AWS is redeployed with the records table, push subscription table, scheduled sender, KMS key, secret ARN parameters, Google Calendar connection/state tables, and Google OAuth backend parameters.
-- Cloudflare is redeployed with `VITE_VAPID_PUBLIC_KEY` and the updated Calendar sync and Records UI.
+- Cloudflare frontend can link a record to another record, link a record to a reminder, open a linked item, and remove only the link after sign-in.
+- AWS is redeployed with the records table, linked items table, push subscription table, scheduled sender, KMS key, secret ARN parameters, Google Calendar connection/state tables, and Google OAuth backend parameters.
+- Cloudflare is redeployed with `VITE_VAPID_PUBLIC_KEY` and the updated Calendar sync, Records UI, and Linked Items UI.
 - Settings shows short, user-facing push and Google Calendar statuses; technical diagnostics are not part of the normal UI.
 - Enabling push creates an active subscription, and **Send test push** delivers a summary-only test notification.
 - The scheduled digest sender can be run or observed and does not duplicate pushes for the same local day.
@@ -554,4 +580,4 @@ Rollback notes:
 
 ## Not In This Phase
 
-This phase does not add two-way Google Calendar sync, Google Calendar import, Google Calendar edit ingestion, attendees, shared calendars, email sending, SMS, password-manager functionality, AI/RAG, OCR, global search over protected fields/files, file sharing, public links, Office documents, archives, audio/video, reminder attachments, social login, public registration, mileage-based maintenance, usage-based maintenance, supply inventory, automatic record-to-reminder generation, custom per-reminder push rules, notification history, shared households, roles/admin dashboards, or another frontend redesign. Do not store SSNs, payment card numbers, bank account or routing numbers, passwords, PINs, MFA/recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, or secret/recovery documents in reminders, records, or attachments. Future smart reminder work may include usage-based maintenance, record-linked reminders, search, AI, and calendar or notification integrations.
+This phase does not add two-way Google Calendar sync, Google Calendar import, Google Calendar edit ingestion, attendees, shared calendars, email sending, SMS, password-manager functionality, AI/RAG, OCR, global search over protected fields/files, multi-hop graph traversal, file sharing, public links, Office documents, archives, audio/video, reminder attachments, social login, public registration, mileage-based maintenance, usage-based maintenance, supply inventory, automatic record-to-reminder generation, custom per-reminder push rules, notification history, shared households, roles/admin dashboards, or another frontend redesign. Do not store SSNs, payment card numbers, bank account or routing numbers, passwords, PINs, MFA/recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, or secret/recovery documents in reminders, records, linked item labels, or attachments. Future smart reminder work may include usage-based maintenance, search, AI retrieval over safe summaries, and calendar or notification integrations.

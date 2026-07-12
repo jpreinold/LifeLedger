@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Archive,
+  ArrowLeft,
   Eye,
   EyeOff,
   LockKeyhole,
@@ -21,17 +22,25 @@ import {
 } from '../lib/recordDisplay'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
 import type { LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
+import type { Reminder } from '../types/reminder'
+import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
-export type RecordDetailTab = 'details' | 'documents'
+export type RecordDetailTab = 'details' | 'documents' | 'linkedItems'
 
 interface RecordDetailDrawerProps {
+  canGoBack?: boolean
   initialTab?: RecordDetailTab
   record: LifeRecord
+  records: LifeRecord[]
+  reminders: Reminder[]
   onArchive: (record: LifeRecord) => Promise<void>
+  onBack?: () => void
   onClose: () => void
   onEdit: (record: LifeRecord) => void
+  onOpenLinkedRecord: (recordId: string) => void
+  onOpenLinkedReminder: (reminderId: string) => void
   onProtectedStatusChange: (id: string, status: ProtectedRecordStatus) => void
   onRequestDelete: (record: LifeRecord) => void
   onRestore: (record: LifeRecord) => Promise<void>
@@ -46,11 +55,17 @@ const drawerCloseMs = 220
 const protectedRevealMs = 60_000
 
 export function RecordDetailDrawer({
+  canGoBack = false,
   initialTab = 'details',
   record,
+  records,
+  reminders,
   onArchive,
+  onBack,
   onClose,
   onEdit,
+  onOpenLinkedRecord,
+  onOpenLinkedReminder,
   onProtectedStatusChange,
   onRequestDelete,
   onRestore,
@@ -62,6 +77,7 @@ export function RecordDetailDrawer({
   const [isClearingProtected, setIsClearingProtected] = useState(false)
   const [protectedPayload, setProtectedPayload] = useState<ProtectedRecordPayload | null>(null)
   const [protectedError, setProtectedError] = useState<string | null>(null)
+  const [documentsCount, setDocumentsCount] = useState<number | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
@@ -114,6 +130,30 @@ export function RecordDetailDrawer({
       }
     }
   }, [])
+
+  useEffect(() => {
+    let isCancelled = false
+    setDocumentsCount(null)
+
+    async function loadDocumentCount() {
+      try {
+        const attachments = await recordsApi.listAttachments(record.id)
+        if (!isCancelled) {
+          setDocumentsCount(attachments.length)
+        }
+      } catch {
+        if (!isCancelled) {
+          setDocumentsCount(null)
+        }
+      }
+    }
+
+    void loadDocumentCount()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [record.id])
 
   useEffect(() => {
     if (protectedPayload === null) {
@@ -209,9 +249,16 @@ export function RecordDetailDrawer({
   return (
     <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
       <div className="sheet-header detail-header">
-        <div>
-          <h2 id="record-detail-heading">Record details</h2>
-          <p>{definition.label}</p>
+        <div className="detail-header-title-row">
+          {canGoBack ? (
+            <button type="button" className="icon-button ghost-icon-button detail-back-button" onClick={onBack} aria-label="Back to previous record">
+              <ArrowLeft size={18} aria-hidden="true" />
+            </button>
+          ) : null}
+          <div>
+            <h2 id="record-detail-heading">Record details</h2>
+            <p>{definition.label}</p>
+          </div>
         </div>
         <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
           <X size={19} aria-hidden="true" />
@@ -260,6 +307,17 @@ export function RecordDetailDrawer({
             onClick={() => selectTab('documents')}
           >
             Attachments
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'linkedItems' ? 'record-detail-tab active' : 'record-detail-tab'}
+            id="record-linked-items-tab"
+            role="tab"
+            aria-selected={activeTab === 'linkedItems'}
+            aria-controls="record-linked-items-panel"
+            onClick={() => selectTab('linkedItems')}
+          >
+            Linked Items
           </button>
         </div>
 
@@ -340,6 +398,26 @@ export function RecordDetailDrawer({
           aria-labelledby="record-documents-tab"
         >
           <RecordDocumentsPanel isActive={isDrawerOpen && activeTab === 'documents'} recordId={record.id} />
+        </div>
+
+        <div
+          className="record-tab-panel"
+          hidden={activeTab !== 'linkedItems'}
+          id="record-linked-items-panel"
+          role="tabpanel"
+          aria-labelledby="record-linked-items-tab"
+        >
+          <LinkedItemsPanel
+            documentsCount={documentsCount}
+            records={records}
+            reminders={reminders}
+            showAdd
+            tabLayout
+            sourceId={record.id}
+            sourceType="record"
+            onOpenRecord={onOpenLinkedRecord}
+            onOpenReminder={onOpenLinkedReminder}
+          />
         </div>
       </div>
 

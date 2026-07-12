@@ -12,9 +12,11 @@ from app.main import (
     app,
     get_app_settings,
     get_document_storage_service,
+    get_linked_item_repository,
     get_record_attachment_repository,
     get_record_repository,
 )
+from app.linked_items_repository import LocalLinkedItemRepository
 from app.models import Record, RecordAttachment
 from app.records_repository import LocalRecordRepository
 from app.schemas import AttachmentScanResult, RecordStatus
@@ -37,11 +39,13 @@ def attachment_context(tmp_path):
     )
     record_repo = LocalRecordRepository(tmp_path / "records.json")
     attachment_repo = LocalRecordAttachmentRepository(tmp_path / "attachments.json")
+    linked_repo = LocalLinkedItemRepository(tmp_path / "linked-items.json")
     storage = FakeDocumentStorage(settings)
 
     app.dependency_overrides[get_app_settings] = lambda: settings
     app.dependency_overrides[get_record_repository] = lambda: record_repo
     app.dependency_overrides[get_record_attachment_repository] = lambda: attachment_repo
+    app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
     app.dependency_overrides[get_document_storage_service] = lambda: storage
 
     with TestClient(app) as test_client:

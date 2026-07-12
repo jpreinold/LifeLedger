@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 from app.alerts import get_alert_eligibility
 from app.auth import UserContext, get_current_user
 from app.config import get_settings
-from app.main import app, get_preferences_repository, get_repository
+from app.main import app, get_linked_item_repository, get_preferences_repository, get_repository
+from app.linked_items_repository import LocalLinkedItemRepository
 from app.preferences_repository import LocalPreferencesRepository
 from app.repository import LocalReminderRepository
 from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
@@ -17,8 +18,10 @@ from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, R
 def client(tmp_path):
     repo = LocalReminderRepository(tmp_path / "reminders.json")
     preferences_repo = LocalPreferencesRepository(tmp_path / "preferences.json")
+    linked_repo = LocalLinkedItemRepository(tmp_path / "linked-items.json")
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_preferences_repository] = lambda: preferences_repo
+    app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
 
     with TestClient(app) as test_client:
         yield test_client
@@ -117,6 +120,11 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
         ("delete", "/records/example-id/attachments/attachment-id", None),
         ("post", "/records/example-id/archive", None),
         ("post", "/records/example-id/restore", None),
+        ("get", "/records/example-id/links", None),
+        ("post", "/records/example-id/links", {"target_type": "record", "target_id": "target-id"}),
+        ("delete", "/records/example-id/links/link-id", None),
+        ("get", "/reminders/example-id/links", None),
+        ("delete", "/reminders/example-id/links/link-id", None),
         ("delete", "/records/example-id", None),
     ],
 )

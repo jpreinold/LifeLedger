@@ -45,6 +45,9 @@ Parameters:
   RecordAttachmentsTableName:
     Type: String
     Default: lifeledger-record-attachments-auth
+  LinkedItemsTableName:
+    Type: String
+    Default: lifeledger-linked-items-auth
   DocumentStorageMode:
     Type: String
     Default: s3
@@ -389,6 +392,7 @@ Resources:
           REMINDERS_TABLE_NAME: !Ref RemindersTable
           RECORDS_TABLE_NAME: !Ref RecordsTable
           RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable
+          LINKED_ITEMS_TABLE_NAME: !Ref LinkedItemsTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
@@ -396,6 +400,7 @@ Resources:
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
           LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json
           LOCAL_RECORD_ATTACHMENTS_FILE: /tmp/lifeledger-record-attachments.json
+          LOCAL_LINKED_ITEMS_FILE: /tmp/lifeledger-linked-items.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
@@ -424,6 +429,8 @@ Resources:
             TableName: !Ref RecordsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RecordAttachmentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LinkedItemsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
@@ -684,6 +691,51 @@ Resources:
             - AttributeName: owner_hash
               KeyType: HASH
             - AttributeName: record_attachment_key
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LinkedItemsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref LinkedItemsTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: link_id
+          AttributeType: S
+        - AttributeName: source_link_key
+          AttributeType: S
+        - AttributeName: target_link_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: link_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: SourceLinksIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: source_link_key
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: TargetLinksIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: target_link_key
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
@@ -1002,6 +1054,9 @@ Outputs:
   PreferencesTable:
     Description: DynamoDB user preferences table name.
     Value: !Ref PreferencesTable
+  LinkedItemsTable:
+    Description: DynamoDB linked items table name.
+    Value: !Ref LinkedItemsTable
   PushSubscriptionsTable:
     Description: DynamoDB push subscriptions table name.
     Value: !Ref PushSubscriptionsTable

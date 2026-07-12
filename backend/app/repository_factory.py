@@ -17,6 +17,11 @@ from app.google_calendar_repository import (
     LocalGoogleCalendarConnectionRepository,
     LocalGoogleOAuthStateRepository,
 )
+from app.linked_items_repository import (
+    DynamoLinkedItemRepository,
+    LinkedItemRepository,
+    LocalLinkedItemRepository,
+)
 from app.preferences_repository import DynamoPreferencesRepository, LocalPreferencesRepository, PreferencesRepository
 from app.push_repository import DynamoPushSubscriptionRepository, LocalPushSubscriptionRepository, PushSubscriptionRepository
 from app.records_repository import LocalRecordRepository, RecordRepository
@@ -75,6 +80,24 @@ def create_record_attachment_repository(
         )
 
     return LocalRecordAttachmentRepository(local_file_path or resolved_settings.local_record_attachments_file)
+
+
+def create_linked_item_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> LinkedItemRepository:
+    resolved_settings = settings or get_settings()
+
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoLinkedItemRepository(
+            table_name=resolved_settings.linked_items_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+
+    return LocalLinkedItemRepository(local_file_path or resolved_settings.local_linked_items_file)
 
 
 def create_preferences_repository(
