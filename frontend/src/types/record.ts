@@ -13,6 +13,59 @@ export const recordTypes = [
 
 export const recordStatuses = ['active', 'archived'] as const
 
+export const dynamicFieldTypes = [
+  'short_text',
+  'long_text',
+  'date',
+  'number',
+  'money',
+  'phone',
+  'email',
+  'url',
+  'boolean',
+  'select',
+] as const
+
+export type DynamicFieldType = (typeof dynamicFieldTypes)[number]
+export type DynamicFieldValue = string | number | boolean | null
+
+export interface DynamicRecordField {
+  field_id: string
+  key: string
+  label: string
+  field_type: DynamicFieldType
+  value: DynamicFieldValue
+  is_sensitive: boolean
+  has_value: boolean
+  display_order: number
+  select_options: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface DynamicRecordFieldInput {
+  key?: string | null
+  label: string
+  field_type: DynamicFieldType
+  value?: DynamicFieldValue
+  is_sensitive?: boolean
+  select_options?: string[]
+  display_order?: number | null
+}
+
+export interface DynamicRecordFieldUpdateInput {
+  label?: string
+  field_type?: DynamicFieldType
+  value?: DynamicFieldValue
+  is_sensitive?: boolean
+  select_options?: string[]
+  display_order?: number | null
+}
+
+export interface DynamicRecordFieldReveal {
+  field_id: string
+  value: DynamicFieldValue
+}
 export type RecordType = (typeof recordTypes)[number]
 export type RecordStatus = (typeof recordStatuses)[number]
 
@@ -35,6 +88,7 @@ export interface LifeRecord {
   status: RecordStatus
   has_protected_data: boolean
   protected_field_names: ProtectedRecordField[]
+  dynamic_fields: DynamicRecordField[]
   created_at: string
   updated_at: string
 }

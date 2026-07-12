@@ -6,6 +6,7 @@ import {
   EyeOff,
   LockKeyhole,
   Pencil,
+  Plus,
   RotateCcw,
   Trash2,
   X,
@@ -20,9 +21,11 @@ import {
   getRecordStatusClass,
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
+import { formatDynamicFieldValue, hasDisplayValue, maskedValue } from '../lib/fieldRendering'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
-import type { LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
+import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
 import type { Reminder } from '../types/reminder'
+import { AddFieldDrawer } from './AddFieldDrawer'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
@@ -42,6 +45,7 @@ interface RecordDetailDrawerProps {
   onOpenLinkedRecord: (recordId: string) => void
   onOpenLinkedReminder: (reminderId: string) => void
   onProtectedStatusChange: (id: string, status: ProtectedRecordStatus) => void
+  onRecordChange: (record: LifeRecord) => void
   onRequestDelete: (record: LifeRecord) => void
   onRestore: (record: LifeRecord) => Promise<void>
 }
@@ -52,7 +56,7 @@ interface DetailRow {
 }
 
 const drawerCloseMs = 220
-const protectedRevealMs = 60_000
+const sensitiveRevealMs = 60_000
 
 export function RecordDetailDrawer({
   canGoBack = false,
@@ -67,6 +71,7 @@ export function RecordDetailDrawer({
   onOpenLinkedRecord,
   onOpenLinkedReminder,
   onProtectedStatusChange,
+  onRecordChange,
   onRequestDelete,
   onRestore,
 }: RecordDetailDrawerProps) {
@@ -78,18 +83,36 @@ export function RecordDetailDrawer({
   const [protectedPayload, setProtectedPayload] = useState<ProtectedRecordPayload | null>(null)
   const [protectedError, setProtectedError] = useState<string | null>(null)
   const [documentsCount, setDocumentsCount] = useState<number | null>(null)
+  const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
+  const [revealedFields, setRevealedFields] = useState<Record<string, DynamicFieldValue>>({})
+  const [revealingFieldId, setRevealingFieldId] = useState<string | null>(null)
+  const [removingFieldId, setRemovingFieldId] = useState<string | null>(null)
+  const [fieldError, setFieldError] = useState<string | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
   const revealTimerRef = useRef<number | null>(null)
+  const dynamicRevealTimersRef = useRef<Record<string, number>>({})
   const definition = getRecordTypeDefinition(record.record_type)
   const Icon = definition.icon
   const providerLine = getRecordProviderLine(record)
-  const keyDate = formatRecordKeyDate(record) ?? 'No expiration date'
+  const keyDate = formatRecordKeyDate(record)
   const isArchived = record.status === 'archived'
+  const suggestedDynamicFields = definition.dynamicFieldPresets.filter(
+    (field) => !record.dynamic_fields.some((existing) => existing.key === field.key),
+  )
 
   const resetDetailScroll = useCallback(() => {
     detailBodyRef.current?.scrollTo({ top: 0 })
+  }, [])
+
+  const clearDynamicReveals = useCallback(() => {
+    setRevealedFields({})
+    setRevealingFieldId(null)
+    for (const timerId of Object.values(dynamicRevealTimersRef.current)) {
+      window.clearTimeout(timerId)
+    }
+    dynamicRevealTimersRef.current = {}
   }, [])
 
   const clearProtectedState = useCallback(() => {
@@ -102,8 +125,15 @@ export function RecordDetailDrawer({
     }
   }, [])
 
-  useEffect(() => {
+  const clearSensitiveState = useCallback(() => {
     clearProtectedState()
+    clearDynamicReveals()
+    setFieldError(null)
+  }, [clearDynamicReveals, clearProtectedState])
+
+  useEffect(() => {
+    clearSensitiveState()
+    setIsAddFieldOpen(false)
     setActiveTab(initialTab)
     setIsDrawerOpen(false)
     resetDetailScroll()
@@ -118,7 +148,7 @@ export function RecordDetailDrawer({
         window.cancelAnimationFrame(openFrameRef.current)
       }
     }
-  }, [clearProtectedState, initialTab, record.id, resetDetailScroll])
+  }, [clearSensitiveState, initialTab, record.id, resetDetailScroll])
 
   useEffect(() => {
     return () => {
@@ -127,6 +157,9 @@ export function RecordDetailDrawer({
       }
       if (revealTimerRef.current !== null) {
         window.clearTimeout(revealTimerRef.current)
+      }
+      for (const timerId of Object.values(dynamicRevealTimersRef.current)) {
+        window.clearTimeout(timerId)
       }
     }
   }, [])
@@ -160,7 +193,7 @@ export function RecordDetailDrawer({
       return undefined
     }
 
-    revealTimerRef.current = window.setTimeout(clearProtectedState, protectedRevealMs)
+    revealTimerRef.current = window.setTimeout(clearProtectedState, sensitiveRevealMs)
     return () => {
       if (revealTimerRef.current !== null) {
         window.clearTimeout(revealTimerRef.current)
@@ -172,7 +205,7 @@ export function RecordDetailDrawer({
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.visibilityState === 'hidden') {
-        clearProtectedState()
+        clearSensitiveState()
       }
     }
 
@@ -180,16 +213,17 @@ export function RecordDetailDrawer({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [clearProtectedState])
+  }, [clearSensitiveState])
 
   const requestClose = useCallback(() => {
-    clearProtectedState()
+    clearSensitiveState()
+    setIsAddFieldOpen(false)
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onClose()
     }, drawerCloseMs)
-  }, [clearProtectedState, onClose])
+  }, [clearSensitiveState, onClose])
 
   function selectTab(tab: RecordDetailTab) {
     setActiveTab(tab)
@@ -197,7 +231,7 @@ export function RecordDetailDrawer({
   }
 
   function handleEdit() {
-    clearProtectedState()
+    clearSensitiveState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
@@ -213,7 +247,7 @@ export function RecordDetailDrawer({
       setProtectedPayload(revealed)
     } catch (requestError) {
       setProtectedPayload(null)
-      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to reveal protected details.')
+      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to reveal sensitive details.')
     } finally {
       setIsRevealingProtected(false)
     }
@@ -227,9 +261,58 @@ export function RecordDetailDrawer({
       clearProtectedState()
       onProtectedStatusChange(record.id, nextStatus)
     } catch (requestError) {
-      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to clear protected details.')
+      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to clear sensitive details.')
     } finally {
       setIsClearingProtected(false)
+    }
+  }
+
+  function hideDynamicField(fieldId: string) {
+    setRevealedFields((current) => {
+      const next = { ...current }
+      delete next[fieldId]
+      return next
+    })
+    const timerId = dynamicRevealTimersRef.current[fieldId]
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId)
+      delete dynamicRevealTimersRef.current[fieldId]
+    }
+  }
+
+  async function handleRevealField(field: DynamicRecordField) {
+    setRevealingFieldId(field.field_id)
+    setFieldError(null)
+    try {
+      const revealed = await recordsApi.revealField(record.id, field.field_id)
+      setRevealedFields((current) => ({ ...current, [field.field_id]: revealed.value }))
+      const existingTimer = dynamicRevealTimersRef.current[field.field_id]
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer)
+      }
+      dynamicRevealTimersRef.current[field.field_id] = window.setTimeout(() => hideDynamicField(field.field_id), sensitiveRevealMs)
+    } catch (requestError) {
+      setFieldError(requestError instanceof Error ? requestError.message : 'Unable to reveal this field.')
+    } finally {
+      setRevealingFieldId(null)
+    }
+  }
+
+  async function handleRemoveField(field: DynamicRecordField) {
+    if (field.has_value && !window.confirm(`Remove ${field.label}? This removes only this field.`)) {
+      return
+    }
+
+    setRemovingFieldId(field.field_id)
+    setFieldError(null)
+    try {
+      const updated = await recordsApi.deleteField(record.id, field.field_id)
+      hideDynamicField(field.field_id)
+      onRecordChange(updated)
+    } catch (requestError) {
+      setFieldError(requestError instanceof Error ? requestError.message : 'Unable to remove this field.')
+    } finally {
+      setRemovingFieldId(null)
     }
   }
 
@@ -247,208 +330,226 @@ export function RecordDetailDrawer({
   }
 
   return (
-    <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
-      <div className="sheet-header detail-header">
-        <div className="detail-header-title-row">
-          {canGoBack ? (
-            <button type="button" className="icon-button ghost-icon-button detail-back-button" onClick={onBack} aria-label="Back to previous record">
-              <ArrowLeft size={18} aria-hidden="true" />
-            </button>
-          ) : null}
-          <div>
-            <h2 id="record-detail-heading">Record details</h2>
-            <p>{definition.label}</p>
-          </div>
-        </div>
-        <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
-          <X size={19} aria-hidden="true" />
-        </button>
-      </div>
-
-      <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
-        <section className={`detail-hero tone-${definition.tone}`} aria-labelledby="record-detail-title">
-          <div className={`category-icon category-icon-large tone-${definition.tone}`} aria-hidden="true">
-            <Icon size={30} />
-          </div>
-          <div className="detail-hero-copy">
-            <div className="card-chip-row">
-              <span className="type-chip">{definition.label}</span>
-              <span className="category-chip">{definition.category}</span>
-              <span className={`status-chip ${getRecordStatusClass(record)}`}>{getRecordStatusLabel(record)}</span>
+    <>
+      <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
+        <div className="sheet-header detail-header">
+          <div className="detail-header-title-row">
+            {canGoBack ? (
+              <button type="button" className="icon-button ghost-icon-button detail-back-button" onClick={onBack} aria-label="Back to previous record">
+                <ArrowLeft size={18} aria-hidden="true" />
+              </button>
+            ) : null}
+            <div>
+              <h2 id="record-detail-heading">Record dashboard</h2>
+              <p>{definition.label}</p>
             </div>
-            <h3 id="record-detail-title">{record.title}</h3>
-            {record.subtitle ? <p>{record.subtitle}</p> : null}
-            <p className="detail-smart-label">
-              <Icon size={15} aria-hidden="true" />
-              {keyDate}
-            </p>
           </div>
-        </section>
-
-        <div className="record-detail-tabs" role="tablist" aria-label="Record detail tabs">
-          <button
-            type="button"
-            className={activeTab === 'details' ? 'record-detail-tab active' : 'record-detail-tab'}
-            id="record-details-tab"
-            role="tab"
-            aria-selected={activeTab === 'details'}
-            aria-controls="record-details-panel"
-            onClick={() => selectTab('details')}
-          >
-            Details
-          </button>
-          <button
-            type="button"
-            className={activeTab === 'documents' ? 'record-detail-tab active' : 'record-detail-tab'}
-            id="record-documents-tab"
-            role="tab"
-            aria-selected={activeTab === 'documents'}
-            aria-controls="record-documents-panel"
-            onClick={() => selectTab('documents')}
-          >
-            Attachments
-          </button>
-          <button
-            type="button"
-            className={activeTab === 'linkedItems' ? 'record-detail-tab active' : 'record-detail-tab'}
-            id="record-linked-items-tab"
-            role="tab"
-            aria-selected={activeTab === 'linkedItems'}
-            aria-controls="record-linked-items-panel"
-            onClick={() => selectTab('linkedItems')}
-          >
-            Linked Items
+          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
+            <X size={19} aria-hidden="true" />
           </button>
         </div>
 
-        <div
-          className="record-tab-panel"
-          hidden={activeTab !== 'details'}
-          id="record-details-panel"
-          role="tabpanel"
-          aria-labelledby="record-details-tab"
-        >
-          <DetailSection
-            title="Record"
-            rows={[
-              { label: 'Type', value: definition.label },
-              { label: 'Category', value: definition.category },
-              { label: 'Owner', value: record.owner_name },
-              { label: 'Provider/brand', value: record.provider_or_brand },
-              { label: 'Summary', value: providerLine },
-              { label: 'Location', value: record.location_hint },
-            ]}
-          />
-
-          <DetailSection
-            title="Dates"
-            className="detail-schedule-section"
-            rows={[
-              { label: 'Start date', value: formatRecordDate(record.start_date) },
-              { label: 'Issue date', value: formatRecordDate(record.issue_date) },
-              { label: 'Expiration date', value: formatRecordDate(record.expiration_date) },
-              { label: 'Purchase date', value: formatRecordDate(record.purchase_date) },
-              { label: 'Renewal date', value: formatRecordDate(record.renewal_date) },
-            ]}
-          />
-
-          {record.tags.length > 0 ? (
-            <section className="detail-section" aria-label="Tags">
-              <h3>Tags</h3>
-              <div className="record-tag-list">
-                {record.tags.map((tag) => (
-                  <span className="record-tag" key={tag}>{tag}</span>
-                ))}
+        <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
+          <section className={`detail-hero tone-${definition.tone}`} aria-labelledby="record-detail-title">
+            <div className={`category-icon category-icon-large tone-${definition.tone}`} aria-hidden="true">
+              <Icon size={30} />
+            </div>
+            <div className="detail-hero-copy">
+              <div className="card-chip-row">
+                <span className="type-chip">{definition.label}</span>
+                <span className="category-chip">{definition.category}</span>
+                <span className={`status-chip ${getRecordStatusClass(record)}`}>{getRecordStatusLabel(record)}</span>
               </div>
-            </section>
-          ) : null}
+              <h3 id="record-detail-title">{record.title}</h3>
+              {record.subtitle ? <p>{record.subtitle}</p> : null}
+              {keyDate ? (
+                <p className="detail-smart-label">
+                  <Icon size={15} aria-hidden="true" />
+                  {keyDate}
+                </p>
+              ) : null}
+              <div className="detail-hero-meta" aria-label="Record summary">
+                {documentsCount !== null ? <span className="detail-hero-pill">{documentsCount} document{documentsCount === 1 ? '' : 's'}</span> : null}
+                <span className="detail-hero-pill">{record.dynamic_fields.length} custom field{record.dynamic_fields.length === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+          </section>
 
-          {record.notes ? (
-            <section className="detail-section" aria-label="Notes">
-              <h3>Notes</h3>
-              <p className="detail-note">{record.notes}</p>
-            </section>
-          ) : null}
+          <div className="record-detail-tabs" role="tablist" aria-label="Record dashboard tabs">
+            <button
+              type="button"
+              className={activeTab === 'details' ? 'record-detail-tab active' : 'record-detail-tab'}
+              id="record-details-tab"
+              role="tab"
+              aria-selected={activeTab === 'details'}
+              aria-controls="record-details-panel"
+              onClick={() => selectTab('details')}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'documents' ? 'record-detail-tab active' : 'record-detail-tab'}
+              id="record-documents-tab"
+              role="tab"
+              aria-selected={activeTab === 'documents'}
+              aria-controls="record-documents-panel"
+              onClick={() => selectTab('documents')}
+            >
+              Documents
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'linkedItems' ? 'record-detail-tab active' : 'record-detail-tab'}
+              id="record-linked-items-tab"
+              role="tab"
+              aria-selected={activeTab === 'linkedItems'}
+              aria-controls="record-linked-items-panel"
+              onClick={() => selectTab('linkedItems')}
+            >
+              Linked items
+            </button>
+          </div>
 
-          <ProtectedDetailsSection
-            error={protectedError}
-            isClearing={isClearingProtected}
-            isRevealing={isRevealingProtected}
-            payload={protectedPayload}
-            record={record}
-            onClear={() => void handleClearProtected()}
-            onHide={clearProtectedState}
-            onReveal={() => void handleRevealProtected()}
-          />
+          <div
+            className="record-tab-panel"
+            hidden={activeTab !== 'details'}
+            id="record-details-panel"
+            role="tabpanel"
+            aria-labelledby="record-details-tab"
+          >
+            <DetailSection
+              title="Essentials"
+              rows={[
+                { label: 'Type', value: definition.label },
+                { label: 'Category', value: definition.category },
+                { label: 'Owner', value: record.owner_name },
+                { label: 'Provider/brand', value: record.provider_or_brand },
+                { label: 'Summary', value: providerLine },
+                { label: 'Location', value: record.location_hint },
+              ]}
+            />
 
-          <LinkedItemsPanel
-            documentsCount={documentsCount}
-            records={records}
-            reminders={reminders}
-            showAdd
-            sourceId={record.id}
-            sourceType="record"
-            onOpenRecord={onOpenLinkedRecord}
-            onOpenReminder={onOpenLinkedReminder}
-          />
+            <DetailSection
+              title="Important dates"
+              className="detail-schedule-section"
+              rows={[
+                { label: 'Start date', value: formatRecordDate(record.start_date) },
+                { label: 'Issue date', value: formatRecordDate(record.issue_date) },
+                { label: 'Expiration date', value: formatRecordDate(record.expiration_date) },
+                { label: 'Purchase date', value: formatRecordDate(record.purchase_date) },
+                { label: 'Renewal date', value: formatRecordDate(record.renewal_date) },
+              ]}
+            />
 
-          <DetailSection
-            title="History"
-            rows={[
-              { label: 'Created', value: formatRecordTimestamp(record.created_at) },
-              { label: 'Updated', value: formatRecordTimestamp(record.updated_at) },
-            ]}
-          />
+            <DynamicFieldsSection
+              error={fieldError}
+              fields={record.dynamic_fields}
+              revealedFields={revealedFields}
+              revealingFieldId={revealingFieldId}
+              removingFieldId={removingFieldId}
+              suggestedCount={suggestedDynamicFields.length}
+              onAddField={() => setIsAddFieldOpen(true)}
+              onHideField={hideDynamicField}
+              onRemoveField={(field) => void handleRemoveField(field)}
+              onRevealField={(field) => void handleRevealField(field)}
+            />
+
+            <ProtectedDetailsSection
+              error={protectedError}
+              isClearing={isClearingProtected}
+              isRevealing={isRevealingProtected}
+              payload={protectedPayload}
+              record={record}
+              onClear={() => void handleClearProtected()}
+              onHide={clearProtectedState}
+              onReveal={() => void handleRevealProtected()}
+            />
+
+            {record.tags.length > 0 ? (
+              <section className="detail-section" aria-label="Tags">
+                <h3>Tags</h3>
+                <div className="record-tag-list">
+                  {record.tags.map((tag) => (
+                    <span className="record-tag" key={tag}>{tag}</span>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {record.notes ? (
+              <section className="detail-section" aria-label="Notes">
+                <h3>Notes</h3>
+                <p className="detail-note">{record.notes}</p>
+              </section>
+            ) : null}
+
+            <DetailSection
+              title="History"
+              rows={[
+                { label: 'Created', value: formatRecordTimestamp(record.created_at) },
+                { label: 'Updated', value: formatRecordTimestamp(record.updated_at) },
+              ]}
+            />
+          </div>
+
+          <div
+            className="record-tab-panel"
+            hidden={activeTab !== 'documents'}
+            id="record-documents-panel"
+            role="tabpanel"
+            aria-labelledby="record-documents-tab"
+          >
+            <RecordDocumentsPanel isActive={isDrawerOpen && activeTab === 'documents'} recordId={record.id} />
+          </div>
+
+          <div
+            className="record-tab-panel"
+            hidden={activeTab !== 'linkedItems'}
+            id="record-linked-items-panel"
+            role="tabpanel"
+            aria-labelledby="record-linked-items-tab"
+          >
+            <LinkedItemsPanel
+              documentsCount={documentsCount}
+              records={records}
+              reminders={reminders}
+              showAdd
+              tabLayout
+              sourceId={record.id}
+              sourceType="record"
+              onOpenRecord={onOpenLinkedRecord}
+              onOpenReminder={onOpenLinkedReminder}
+            />
+          </div>
         </div>
 
-        <div
-          className="record-tab-panel"
-          hidden={activeTab !== 'documents'}
-          id="record-documents-panel"
-          role="tabpanel"
-          aria-labelledby="record-documents-tab"
-        >
-          <RecordDocumentsPanel isActive={isDrawerOpen && activeTab === 'documents'} recordId={record.id} />
-        </div>
+        {activeTab === 'details' ? (
+          <section className="detail-actions" aria-label="Record actions">
+            <button type="button" className="primary-button" onClick={handleEdit}>
+              <Pencil size={17} aria-hidden="true" />
+              Edit
+            </button>
+            <button type="button" className="secondary-button" onClick={() => void handleArchiveToggle()} disabled={isArchiving}>
+              {isArchived ? <RotateCcw size={17} aria-hidden="true" /> : <Archive size={17} aria-hidden="true" />}
+              {isArchiving ? 'Saving...' : isArchived ? 'Restore' : 'Archive'}
+            </button>
+            <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(record)}>
+              <Trash2 size={16} aria-hidden="true" />
+              Delete
+            </button>
+          </section>
+        ) : null}
+      </SheetDrawer>
 
-        <div
-          className="record-tab-panel"
-          hidden={activeTab !== 'linkedItems'}
-          id="record-linked-items-panel"
-          role="tabpanel"
-          aria-labelledby="record-linked-items-tab"
-        >
-          <LinkedItemsPanel
-            documentsCount={documentsCount}
-            records={records}
-            reminders={reminders}
-            showAdd
-            tabLayout
-            sourceId={record.id}
-            sourceType="record"
-            onOpenRecord={onOpenLinkedRecord}
-            onOpenReminder={onOpenLinkedReminder}
-          />
-        </div>
-      </div>
-
-      {activeTab === 'details' ? (
-        <section className="detail-actions" aria-label="Record actions">
-          <button type="button" className="secondary-button" onClick={handleEdit}>
-            <Pencil size={17} aria-hidden="true" />
-            Edit
-          </button>
-          <button type="button" className="primary-button" onClick={() => void handleArchiveToggle()} disabled={isArchiving}>
-            {isArchived ? <RotateCcw size={17} aria-hidden="true" /> : <Archive size={17} aria-hidden="true" />}
-            {isArchiving ? 'Saving...' : isArchived ? 'Restore' : 'Archive'}
-          </button>
-          <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(record)}>
-            <Trash2 size={16} aria-hidden="true" />
-            Delete
-          </button>
-        </section>
-      ) : null}
-    </SheetDrawer>
+      <AddFieldDrawer
+        isOpen={isAddFieldOpen}
+        record={record}
+        suggestedFields={suggestedDynamicFields}
+        onClose={() => setIsAddFieldOpen(false)}
+        onSaved={onRecordChange}
+      />
+    </>
   )
 }
 
@@ -474,6 +575,114 @@ function DetailSection({ className = '', rows, title }: { className?: string; ro
   )
 }
 
+function DynamicFieldsSection({
+  error,
+  fields,
+  onAddField,
+  onHideField,
+  onRemoveField,
+  onRevealField,
+  revealedFields,
+  revealingFieldId,
+  removingFieldId,
+  suggestedCount,
+}: {
+  error: string | null
+  fields: DynamicRecordField[]
+  onAddField: () => void
+  onHideField: (fieldId: string) => void
+  onRemoveField: (field: DynamicRecordField) => void
+  onRevealField: (field: DynamicRecordField) => void
+  revealedFields: Record<string, DynamicFieldValue>
+  revealingFieldId: string | null
+  removingFieldId: string | null
+  suggestedCount: number
+}) {
+  const visibleFields = [...fields]
+    .sort((left, right) => left.display_order - right.display_order || left.label.localeCompare(right.label))
+    .filter((field) => field.is_sensitive ? field.has_value : hasDisplayValue(field.value))
+
+  return (
+    <section className="detail-section dynamic-fields-section" aria-label="Additional details">
+      <div className="dynamic-fields-heading">
+        <h3>Additional details</h3>
+        {suggestedCount > 0 ? <span>{suggestedCount} suggested</span> : null}
+      </div>
+
+      {visibleFields.length > 0 ? (
+        <dl className="detail-list dynamic-field-list">
+          {visibleFields.map((field) => {
+            const isRevealed = field.field_id in revealedFields
+            const visibleValue = field.is_sensitive
+              ? isRevealed
+                ? revealedFields[field.field_id]
+                : maskedValue
+              : field.value
+            const displayValue = field.is_sensitive && !isRevealed
+              ? maskedValue
+              : formatDynamicFieldValue(field.field_type, visibleValue)
+
+            return (
+              <div className="detail-row dynamic-field-row" key={field.field_id}>
+                <dt>{field.label}</dt>
+                <dd>
+                  <DynamicFieldDisplay field={field} value={displayValue ?? ''} isMasked={field.is_sensitive && !isRevealed} />
+                  <span className="dynamic-field-actions">
+                    {field.is_sensitive ? (
+                      isRevealed ? (
+                        <button type="button" className="small-outline-button" onClick={() => onHideField(field.field_id)} aria-label={`Hide ${field.label}`}>
+                          <EyeOff size={14} aria-hidden="true" />
+                          Hide
+                        </button>
+                      ) : (
+                        <button type="button" className="small-outline-button" disabled={revealingFieldId === field.field_id} onClick={() => onRevealField(field)} aria-label={`Reveal ${field.label}`}>
+                          <Eye size={14} aria-hidden="true" />
+                          {revealingFieldId === field.field_id ? 'Revealing...' : 'Reveal'}
+                        </button>
+                      )
+                    ) : null}
+                    <button type="button" className="icon-button ghost-icon-button dynamic-field-remove" disabled={removingFieldId === field.field_id} onClick={() => onRemoveField(field)} aria-label={`Remove ${field.label}`}>
+                      <Trash2 size={15} aria-hidden="true" />
+                    </button>
+                  </span>
+                </dd>
+              </div>
+            )
+          })}
+        </dl>
+      ) : null}
+
+      {error ? <p className="field-error protected-detail-error">{error}</p> : null}
+
+      <button type="button" className="secondary-button dynamic-add-field-button" onClick={onAddField}>
+        <Plus size={16} aria-hidden="true" />
+        Add field
+      </button>
+    </section>
+  )
+}
+
+function DynamicFieldDisplay({ field, isMasked, value }: { field: DynamicRecordField; isMasked: boolean; value: string }) {
+  if (isMasked || !value) {
+    return <span className={isMasked ? 'masked-field-value' : ''}>{value}</span>
+  }
+
+  if (field.field_type === 'url') {
+    const href = /^https?:\/\//i.test(value) ? value : `https://${value}`
+    return <a href={href} target="_blank" rel="noreferrer">{value}</a>
+  }
+
+  if (field.field_type === 'email') {
+    return <a href={`mailto:${value}`}>{value}</a>
+  }
+
+  if (field.field_type === 'phone') {
+    return <a href={`tel:${value.replace(/\s+/g, '')}`}>{value}</a>
+  }
+
+  return <span>{value}</span>
+}
+
 function ProtectedDetailsSection({
   error,
   isClearing,
@@ -493,66 +702,54 @@ function ProtectedDetailsSection({
   payload: ProtectedRecordPayload | null
   record: LifeRecord
 }) {
-  const definition = getRecordTypeDefinition(record.record_type)
-  const hasProtectedFieldsForType = definition.protectedFields.length > 0
   const hasProtectedData = record.has_protected_data && record.protected_field_names.length > 0
 
-  if (!hasProtectedFieldsForType && !hasProtectedData) {
+  if (!hasProtectedData) {
     return null
   }
 
   const isRevealed = payload !== null
-  const fieldNames = hasProtectedData ? record.protected_field_names : definition.protectedFields
-  const rows = fieldNames.map((field) => ({
+  const rows = record.protected_field_names.map((field) => ({
     field,
     label: getProtectedFieldLabel(field),
     value: isRevealed ? payload?.[field] ?? null : null,
   }))
 
   return (
-    <section className="detail-section protected-details-section" aria-label="Protected details">
+    <section className="detail-section protected-details-section" aria-label="Sensitive details">
       <div className="protected-details-heading">
-        <div>
-          <h3>Protected details</h3>
-          <p>Encrypted before storage and revealed only when requested.</p>
-        </div>
+        <h3>Sensitive details</h3>
         <LockKeyhole size={18} aria-hidden="true" />
       </div>
 
-      {!hasProtectedData ? <p className="protected-details-empty">No protected details saved.</p> : null}
-
-      {hasProtectedData ? (
-        <dl className="detail-list protected-detail-list">
-          {rows.map((row) => (
-            <div className="detail-row" key={row.field}>
-              <dt>{row.label}</dt>
-              <dd>{isRevealed && row.value ? row.value : 'Hidden'}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
+      <dl className="detail-list protected-detail-list">
+        {rows.map((row) => (
+          <div className="detail-row" key={row.field}>
+            <dt>{row.label}</dt>
+            <dd className={isRevealed && row.value ? '' : 'masked-field-value'}>{isRevealed && row.value ? row.value : maskedValue}</dd>
+          </div>
+        ))}
+      </dl>
 
       {error ? <p className="field-error protected-detail-error">{error}</p> : null}
 
-      {hasProtectedData ? (
-        <div className="protected-detail-actions">
-          {isRevealed ? (
-            <button type="button" className="secondary-button" onClick={onHide}>
-              <EyeOff size={16} aria-hidden="true" />
-              Hide details
-            </button>
-          ) : (
-            <button type="button" className="primary-button" disabled={isRevealing} onClick={onReveal}>
-              <Eye size={16} aria-hidden="true" />
-              {isRevealing ? 'Revealing...' : 'Reveal protected details'}
-            </button>
-          )}
-          <button type="button" className="text-danger-button" disabled={isClearing} onClick={onClear}>
-            <Trash2 size={15} aria-hidden="true" />
-            {isClearing ? 'Clearing...' : 'Clear protected details'}
+      <div className="protected-detail-actions">
+        {isRevealed ? (
+          <button type="button" className="secondary-button" onClick={onHide}>
+            <EyeOff size={16} aria-hidden="true" />
+            Hide
           </button>
-        </div>
-      ) : null}
+        ) : (
+          <button type="button" className="secondary-button" disabled={isRevealing} onClick={onReveal}>
+            <Eye size={16} aria-hidden="true" />
+            {isRevealing ? 'Revealing...' : 'Reveal'}
+          </button>
+        )}
+        <button type="button" className="text-danger-button" disabled={isClearing} onClick={onClear}>
+          <Trash2 size={15} aria-hidden="true" />
+          {isClearing ? 'Clearing...' : 'Clear'}
+        </button>
+      </div>
     </section>
   )
 }

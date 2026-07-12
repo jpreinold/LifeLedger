@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-import type { ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
+import type { DynamicFieldType, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 
 export type RecordField =
   | 'subtitle'
@@ -26,6 +26,16 @@ export type RecordField =
   | 'notes'
   | 'tags'
 
+export interface DynamicFieldPreset {
+  key: string
+  label: string
+  field_type: DynamicFieldType
+  is_sensitive?: boolean
+  select_options?: string[]
+  description?: string
+  display_order?: number
+}
+
 export interface RecordTypeDefinition {
   type: RecordType
   label: string
@@ -35,6 +45,10 @@ export interface RecordTypeDefinition {
   defaultTitle: string
   tone: 'other' | 'car' | 'finance' | 'home' | 'family' | 'subscriptions' | 'health'
   fields: RecordField[]
+  coreFields: Array<'title' | RecordField>
+  defaultSuggestedFields: RecordField[]
+  optionalSuggestedFields: RecordField[]
+  dynamicFieldPresets: DynamicFieldPreset[]
   protectedFields: ProtectedRecordField[]
   labels?: Partial<Record<RecordField, string>>
   placeholders?: Partial<Record<RecordField, string>>
@@ -60,6 +74,13 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
       'notes',
       'tags',
     ],
+    coreFields: ['title'],
+    defaultSuggestedFields: ['subtitle', 'owner_name', 'provider_or_brand'],
+    optionalSuggestedFields: ['start_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'date', label: 'Date', field_type: 'date', description: 'A useful date for this record.', display_order: 200 },
+      { key: 'sensitive_notes', label: 'Sensitive notes', field_type: 'long_text', is_sensitive: true, description: 'Private notes shown masked by default.', display_order: 900 },
+    ],
   },
   passport: {
     type: 'passport',
@@ -71,6 +92,13 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'other',
     protectedFields: ['document_number'],
     fields: ['owner_name', 'provider_or_brand', 'issue_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
+    coreFields: ['title', 'owner_name', 'expiration_date'],
+    defaultSuggestedFields: ['owner_name', 'provider_or_brand', 'expiration_date'],
+    optionalSuggestedFields: ['issue_date', 'location_hint', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'passport_number', label: 'Passport number', field_type: 'short_text', is_sensitive: true, description: 'Masked by default.', display_order: 110 },
+      { key: 'nationality', label: 'Nationality', field_type: 'short_text', display_order: 140 },
+    ],
     labels: { provider_or_brand: 'Issuing country' },
     placeholders: { provider_or_brand: 'United States' },
   },
@@ -84,6 +112,15 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'other',
     protectedFields: ['license_number'],
     fields: ['owner_name', 'provider_or_brand', 'issue_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
+    coreFields: ['title', 'owner_name', 'expiration_date'],
+    defaultSuggestedFields: ['owner_name', 'provider_or_brand', 'expiration_date'],
+    optionalSuggestedFields: ['issue_date', 'location_hint', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'license_number', label: 'License number', field_type: 'short_text', is_sensitive: true, description: 'Masked by default.', display_order: 110 },
+      { key: 'class', label: 'Class', field_type: 'short_text', display_order: 140 },
+      { key: 'restrictions', label: 'Restrictions', field_type: 'short_text', display_order: 150 },
+      { key: 'real_id', label: 'Real ID', field_type: 'boolean', display_order: 160 },
+    ],
     labels: { provider_or_brand: 'Issuing state or authority' },
     placeholders: { provider_or_brand: 'Maryland' },
   },
@@ -97,6 +134,18 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'car',
     protectedFields: ['vin'],
     fields: ['subtitle', 'owner_name', 'provider_or_brand', 'purchase_date', 'location_hint', 'notes', 'tags'],
+    coreFields: ['title', 'provider_or_brand'],
+    defaultSuggestedFields: ['subtitle', 'provider_or_brand'],
+    optionalSuggestedFields: ['owner_name', 'purchase_date', 'location_hint', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'year', label: 'Year', field_type: 'number', display_order: 110 },
+      { key: 'model', label: 'Model', field_type: 'short_text', display_order: 120 },
+      { key: 'vin', label: 'VIN', field_type: 'short_text', is_sensitive: true, description: 'Masked by default.', display_order: 130 },
+      { key: 'color', label: 'Color', field_type: 'short_text', display_order: 140 },
+      { key: 'purchase_price', label: 'Purchase price', field_type: 'money', display_order: 150 },
+      { key: 'mileage', label: 'Mileage', field_type: 'number', display_order: 160 },
+      { key: 'license_plate', label: 'License plate', field_type: 'short_text', is_sensitive: true, display_order: 170 },
+    ],
     labels: { provider_or_brand: 'Make or brand' },
     placeholders: { subtitle: 'Daily driver', provider_or_brand: 'Toyota' },
   },
@@ -110,6 +159,14 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'finance',
     protectedFields: ['policy_number', 'member_number'],
     fields: ['subtitle', 'owner_name', 'provider_or_brand', 'start_date', 'renewal_date', 'expiration_date', 'notes', 'tags'],
+    coreFields: ['title', 'provider_or_brand'],
+    defaultSuggestedFields: ['provider_or_brand', 'renewal_date', 'expiration_date'],
+    optionalSuggestedFields: ['subtitle', 'owner_name', 'start_date', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'policy_number', label: 'Policy number', field_type: 'short_text', is_sensitive: true, display_order: 110 },
+      { key: 'member_number', label: 'Member number', field_type: 'short_text', is_sensitive: true, display_order: 120 },
+      { key: 'coverage', label: 'Coverage', field_type: 'short_text', display_order: 130 },
+    ],
     labels: { provider_or_brand: 'Provider' },
     placeholders: { provider_or_brand: 'Insurer' },
   },
@@ -123,6 +180,13 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'home',
     protectedFields: ['serial_number'],
     fields: ['subtitle', 'provider_or_brand', 'purchase_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
+    coreFields: ['title', 'provider_or_brand'],
+    defaultSuggestedFields: ['provider_or_brand', 'purchase_date', 'expiration_date'],
+    optionalSuggestedFields: ['subtitle', 'location_hint', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'serial_number', label: 'Serial number', field_type: 'short_text', is_sensitive: true, display_order: 110 },
+      { key: 'model_number', label: 'Model number', field_type: 'short_text', display_order: 120 },
+    ],
     labels: { provider_or_brand: 'Brand', expiration_date: 'Warranty expiration' },
     placeholders: { provider_or_brand: 'Bosch' },
   },
@@ -136,6 +200,13 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'family',
     protectedFields: [],
     fields: ['subtitle', 'owner_name', 'start_date', 'notes', 'tags'],
+    coreFields: ['title'],
+    defaultSuggestedFields: ['owner_name', 'start_date'],
+    optionalSuggestedFields: ['subtitle', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'microchip', label: 'Microchip', field_type: 'short_text', is_sensitive: true, display_order: 110 },
+      { key: 'vet', label: 'Vet', field_type: 'short_text', display_order: 120 },
+    ],
     labels: { start_date: 'Adoption or start date' },
   },
   home: {
@@ -148,6 +219,13 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'home',
     protectedFields: [],
     fields: ['subtitle', 'purchase_date', 'start_date', 'location_hint', 'notes', 'tags'],
+    coreFields: ['title'],
+    defaultSuggestedFields: ['location_hint', 'purchase_date'],
+    optionalSuggestedFields: ['subtitle', 'start_date', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'home_type', label: 'Home type', field_type: 'short_text', display_order: 110 },
+      { key: 'year_built', label: 'Year built', field_type: 'number', display_order: 120 },
+    ],
     labels: { location_hint: 'Location hint' },
     placeholders: { location_hint: 'City, neighborhood, or nickname' },
   },
@@ -161,6 +239,14 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'subscriptions',
     protectedFields: ['account_reference'],
     fields: ['subtitle', 'provider_or_brand', 'start_date', 'renewal_date', 'notes', 'tags'],
+    coreFields: ['title', 'provider_or_brand'],
+    defaultSuggestedFields: ['provider_or_brand', 'renewal_date'],
+    optionalSuggestedFields: ['subtitle', 'start_date', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'account_reference', label: 'Account reference', field_type: 'short_text', is_sensitive: true, display_order: 110 },
+      { key: 'cost', label: 'Cost', field_type: 'money', display_order: 120 },
+      { key: 'billing_cycle', label: 'Billing cycle', field_type: 'select', select_options: ['Monthly', 'Quarterly', 'Yearly'], display_order: 130 },
+    ],
     labels: { provider_or_brand: 'Provider' },
     placeholders: { provider_or_brand: 'Streaming service' },
   },
@@ -174,6 +260,13 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     tone: 'health',
     protectedFields: ['serial_number'],
     fields: ['subtitle', 'provider_or_brand', 'purchase_date', 'expiration_date', 'notes', 'tags'],
+    coreFields: ['title', 'provider_or_brand'],
+    defaultSuggestedFields: ['provider_or_brand', 'purchase_date', 'expiration_date'],
+    optionalSuggestedFields: ['subtitle', 'notes', 'tags'],
+    dynamicFieldPresets: [
+      { key: 'serial_number', label: 'Serial number', field_type: 'short_text', is_sensitive: true, display_order: 110 },
+      { key: 'coverage', label: 'Coverage', field_type: 'short_text', display_order: 120 },
+    ],
     labels: { provider_or_brand: 'Brand or provider' },
   },
 }

@@ -1,5 +1,8 @@
 import { getAuthorizationHeaders } from '../auth/session'
 import type {
+  DynamicRecordFieldInput,
+  DynamicRecordFieldReveal,
+  DynamicRecordFieldUpdateInput,
   LifeRecord,
   PresignedPostUpload,
   ProtectedRecordInput,
@@ -77,6 +80,31 @@ export const recordsApi = {
 
   clearProtected: (id: string) =>
     request<ProtectedRecordStatus>(`/records/${id}/protected`, {
+      method: 'DELETE',
+      cache: 'no-store',
+    }),
+
+  addField: (id: string, input: DynamicRecordFieldInput) =>
+    request<LifeRecord>(`/records/${id}/fields`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    }),
+
+  updateField: (id: string, fieldId: string, input: DynamicRecordFieldUpdateInput) =>
+    request<LifeRecord>(`/records/${id}/fields/${fieldId}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    }),
+
+  revealField: (id: string, fieldId: string) =>
+    request<DynamicRecordFieldReveal>(`/records/${id}/fields/${fieldId}/reveal`, {
+      cache: 'no-store',
+    }),
+
+  deleteField: (id: string, fieldId: string) =>
+    request<LifeRecord>(`/records/${id}/fields/${fieldId}`, {
       method: 'DELETE',
       cache: 'no-store',
     }),

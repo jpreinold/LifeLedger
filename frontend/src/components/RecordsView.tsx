@@ -136,7 +136,7 @@ function RecordCard({ record, onView }: { record: LifeRecord; onView: () => void
           {record.has_protected_data ? (
             <small className="record-protected-indicator">
               <LockKeyhole size={13} aria-hidden="true" />
-              Protected details saved
+              Sensitive fields saved
             </small>
           ) : null}
         </span>

@@ -88,6 +88,19 @@ class RecordStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class DynamicFieldType(str, Enum):
+    SHORT_TEXT = "short_text"
+    LONG_TEXT = "long_text"
+    DATE = "date"
+    NUMBER = "number"
+    MONEY = "money"
+    PHONE = "phone"
+    EMAIL = "email"
+    URL = "url"
+    BOOLEAN = "boolean"
+    SELECT = "select"
+
+
 class LinkedEntityType(str, Enum):
     RECORD = "record"
     REMINDER = "reminder"
@@ -536,6 +549,209 @@ class RecordUpdate(BaseModel):
         return RecordBase.normalize_tags(value)
 
 
+DynamicFieldValue = str | int | float | bool | None
+
+
+class DynamicRecordFieldBase(BaseModel):
+    label: str = Field(..., min_length=1, max_length=80)
+    field_type: DynamicFieldType
+    value: DynamicFieldValue = None
+    is_sensitive: bool = False
+    select_options: list[str] = Field(default_factory=list, max_length=20)
+    display_order: int | None = Field(default=None, ge=0, le=10_000)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: str) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("select_options", mode="before")
+    @classmethod
+    def normalize_select_options(cls, value) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("Select options must be a list")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("Select options must be text")
+            option = item.strip()
+            if not option:
+                continue
+            option = option[:60]
+            key = option.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(option)
+            if len(normalized) >= 20:
+                break
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_value_for_type(self) -> "DynamicRecordFieldBase":
+        self.value = normalize_dynamic_field_value(self.field_type, self.value, self.select_options)
+        return self
+
+
+class DynamicRecordFieldCreate(DynamicRecordFieldBase):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str | None = Field(default=None, max_length=80)
+
+    @field_validator("key", mode="before")
+    @classmethod
+    def normalize_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class DynamicRecordFieldUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+    value: DynamicFieldValue = None
+    field_type: DynamicFieldType | None = None
+    is_sensitive: bool | None = None
+    select_options: list[str] | None = Field(default=None, max_length=20)
+    display_order: int | None = Field(default=None, ge=0, le=10_000)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("select_options", mode="before")
+    @classmethod
+    def normalize_select_options(cls, value) -> list[str] | None:
+        if value is None:
+            return None
+        return DynamicRecordFieldBase.normalize_select_options(value)
+
+
+class DynamicRecordFieldResponse(BaseModel):
+    field_id: str
+    key: str
+    label: str
+    field_type: DynamicFieldType
+    value: DynamicFieldValue = None
+    is_sensitive: bool = False
+    has_value: bool = False
+    display_order: int = 0
+    select_options: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class DynamicRecordFieldRevealResponse(BaseModel):
+    field_id: str
+    value: DynamicFieldValue
+
+
+def normalize_dynamic_field_value(
+    field_type: DynamicFieldType,
+    value: DynamicFieldValue,
+    select_options: list[str] | None = None,
+) -> DynamicFieldValue:
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        if field_type == DynamicFieldType.BOOLEAN:
+            return value
+        if field_type in {DynamicFieldType.SHORT_TEXT, DynamicFieldType.LONG_TEXT, DynamicFieldType.SELECT}:
+            value = "Yes" if value else "No"
+        else:
+            raise ValueError("Value type is not valid for this field")
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if field_type in {DynamicFieldType.NUMBER, DynamicFieldType.MONEY}:
+            numeric_value = float(value)
+            if not -1_000_000_000_000 <= numeric_value <= 1_000_000_000_000:
+                raise ValueError("Number is outside the supported range")
+            return numeric_value
+        value = str(value)
+
+    if not isinstance(value, str):
+        raise ValueError("Dynamic field values must be text, number, boolean, or blank")
+
+    stripped = value.strip()
+    if not stripped:
+        return None
+
+    if field_type == DynamicFieldType.LONG_TEXT:
+        if len(stripped) > 1000:
+            raise ValueError("Long text fields are limited to 1000 characters")
+        return stripped
+
+    if field_type == DynamicFieldType.SHORT_TEXT:
+        if len(stripped) > 160:
+            raise ValueError("Text fields are limited to 160 characters")
+        return stripped
+
+    if field_type == DynamicFieldType.DATE:
+        try:
+            date.fromisoformat(stripped)
+        except ValueError as exc:
+            raise ValueError("Date fields must use YYYY-MM-DD") from exc
+        return stripped
+
+    if field_type in {DynamicFieldType.NUMBER, DynamicFieldType.MONEY}:
+        try:
+            numeric_value = float(stripped)
+        except ValueError as exc:
+            raise ValueError("Number fields must contain a valid number") from exc
+        if not -1_000_000_000_000 <= numeric_value <= 1_000_000_000_000:
+            raise ValueError("Number is outside the supported range")
+        return numeric_value
+
+    if field_type == DynamicFieldType.PHONE:
+        if len(stripped) > 40:
+            raise ValueError("Phone fields are limited to 40 characters")
+        return stripped
+
+    if field_type == DynamicFieldType.EMAIL:
+        if len(stripped) > 254 or "@" not in stripped or any(character.isspace() for character in stripped):
+            raise ValueError("Email fields must contain a valid email address")
+        return stripped
+
+    if field_type == DynamicFieldType.URL:
+        if len(stripped) > 500 or not stripped.lower().startswith(("http://", "https://")):
+            raise ValueError("URL fields must start with http:// or https://")
+        return stripped
+
+    if field_type == DynamicFieldType.BOOLEAN:
+        normalized = stripped.casefold()
+        if normalized in {"true", "yes", "1", "on"}:
+            return True
+        if normalized in {"false", "no", "0", "off"}:
+            return False
+        raise ValueError("Boolean fields must be true or false")
+
+    if field_type == DynamicFieldType.SELECT:
+        options = select_options or []
+        if not options:
+            raise ValueError("Select fields require options")
+        if stripped not in options:
+            raise ValueError("Select value must match one of the configured options")
+        return stripped
+
+    raise ValueError("Unsupported field type")
+
+
 class ProtectedRecordPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -589,6 +805,7 @@ class RecordResponse(RecordBase):
     id: str
     has_protected_data: bool = False
     protected_field_names: list[str] = Field(default_factory=list)
+    dynamic_fields: list[DynamicRecordFieldResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

@@ -359,3 +359,128 @@ def build_record(user_id="local-dev-user"):
         created_at=now,
         updated_at=now,
     )
+
+
+def test_dynamic_record_field_crud_preserves_record_and_validates_types(client, record_repo):
+    created = client.post("/records", json=record_payload(record_type="vehicle", title="Vehicle")).json()
+
+    add_response = client.post(
+        f"/records/{created['id']}/fields",
+        json={"label": "Mileage", "field_type": "number", "value": "42000"},
+    )
+    assert add_response.status_code == 201
+    field = add_response.json()["dynamic_fields"][0]
+    assert field["label"] == "Mileage"
+    assert field["field_type"] == "number"
+    assert field["value"] == 42000.0
+    assert field["has_value"] is True
+
+    invalid_response = client.post(
+        f"/records/{created['id']}/fields",
+        json={"label": "Service date", "field_type": "date", "value": "tomorrow"},
+    )
+    assert invalid_response.status_code == 422
+
+    update_response = client.put(
+        f"/records/{created['id']}/fields/{field['field_id']}",
+        json={"value": 43000, "display_order": 5},
+    )
+    assert update_response.status_code == 200
+    updated_field = update_response.json()["dynamic_fields"][0]
+    assert updated_field["value"] == 43000.0
+    assert updated_field["display_order"] == 5
+
+    type_change_response = client.put(
+        f"/records/{created['id']}/fields/{field['field_id']}",
+        json={"field_type": "date"},
+    )
+    assert type_change_response.status_code == 409
+
+    delete_response = client.delete(f"/records/{created['id']}/fields/{field['field_id']}")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["dynamic_fields"] == []
+    assert record_repo.get_record("local-dev-user", created["id"]) is not None
+
+
+def test_sensitive_dynamic_field_is_encrypted_masked_revealed_and_user_scoped(encrypted_client, record_repo, caplog):
+    caplog.set_level("INFO", logger="app.security")
+    set_auth_user("user-a")
+    created = encrypted_client.post("/records", json=record_payload(record_type="vehicle", title="Vehicle")).json()
+
+    add_response = encrypted_client.post(
+        f"/records/{created['id']}/fields",
+        json={"label": "VIN", "field_type": "short_text", "value": "1HGCM82633A004352", "is_sensitive": True},
+    )
+    assert add_response.status_code == 201
+    field = add_response.json()["dynamic_fields"][0]
+    assert field["is_sensitive"] is True
+    assert field["value"] is None
+    assert field["has_value"] is True
+
+    saved = record_repo.get_record("user-a", created["id"])
+    assert saved is not None
+    assert saved.protected_ciphertext
+    assert "1HGCM82633A004352" not in str(saved.model_dump())
+
+    list_body = encrypted_client.get("/records").json()
+    detail_body = encrypted_client.get(f"/records/{created['id']}").json()
+    assert "1HGCM82633A004352" not in str(list_body)
+    assert "1HGCM82633A004352" not in str(detail_body)
+
+    reveal_response = encrypted_client.get(f"/records/{created['id']}/fields/{field['field_id']}/reveal")
+    assert reveal_response.status_code == 200
+    assert reveal_response.json() == {"field_id": field["field_id"], "value": "1HGCM82633A004352"}
+    assert reveal_response.headers["cache-control"] == "no-store, private"
+    assert reveal_response.headers["pragma"] == "no-cache"
+
+    set_auth_user("user-b")
+    assert encrypted_client.get(f"/records/{created['id']}/fields/{field['field_id']}/reveal").status_code == 404
+    assert encrypted_client.put(f"/records/{created['id']}/fields/{field['field_id']}", json={"value": "blocked"}).status_code == 404
+    assert encrypted_client.delete(f"/records/{created['id']}/fields/{field['field_id']}").status_code == 404
+    assert "1HGCM82633A004352" not in caplog.text
+
+
+def test_legacy_protected_payload_and_dynamic_sensitive_fields_preserve_each_other(encrypted_client, record_repo):
+    created = encrypted_client.post("/records", json=record_payload(record_type="passport", title="Passport")).json()
+    protected_response = encrypted_client.put(
+        f"/records/{created['id']}/protected",
+        json={"document_number": "P1234567"},
+    )
+    assert protected_response.status_code == 200
+
+    dynamic_response = encrypted_client.post(
+        f"/records/{created['id']}/fields",
+        json={"label": "Backup document number", "field_type": "short_text", "value": "B7654321", "is_sensitive": True},
+    )
+    assert dynamic_response.status_code == 201
+    field = dynamic_response.json()["dynamic_fields"][0]
+
+    reveal_protected = encrypted_client.get(f"/records/{created['id']}/protected")
+    assert reveal_protected.status_code == 200
+    assert reveal_protected.json()["document_number"] == "P1234567"
+
+    cleared = encrypted_client.delete(f"/records/{created['id']}/protected")
+    assert cleared.status_code == 200
+    assert cleared.json()["has_protected_data"] is True
+    assert cleared.json()["protected_field_names"] == []
+
+    reveal_dynamic = encrypted_client.get(f"/records/{created['id']}/fields/{field['field_id']}/reveal")
+    assert reveal_dynamic.status_code == 200
+    assert reveal_dynamic.json()["value"] == "B7654321"
+
+    saved = record_repo.get_record("local-dev-user", created["id"])
+    assert saved is not None
+    assert "P1234567" not in str(saved.model_dump())
+    assert "B7654321" not in str(saved.model_dump())
+
+
+def test_sensitive_dynamic_field_requires_encryption_configuration(client):
+    created = client.post("/records", json=record_payload(record_type="general", title="General")).json()
+
+    response = client.post(
+        f"/records/{created['id']}/fields",
+        json={"label": "Sensitive note", "field_type": "short_text", "value": "private", "is_sensitive": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Protected record storage is not configured for this environment."

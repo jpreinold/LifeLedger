@@ -107,6 +107,10 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
         ("get", "/records/example-id/protected", None),
         ("put", "/records/example-id/protected", {"sensitive_notes": "private"}),
         ("delete", "/records/example-id/protected", None),
+        ("post", "/records/example-id/fields", {"label": "Field", "field_type": "short_text"}),
+        ("put", "/records/example-id/fields/field-id", {"value": "Updated"}),
+        ("get", "/records/example-id/fields/field-id/reveal", None),
+        ("delete", "/records/example-id/fields/field-id", None),
         ("get", "/records/example-id/attachments", None),
         (
             "post",

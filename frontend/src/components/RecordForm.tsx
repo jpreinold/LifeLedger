@@ -10,17 +10,14 @@ import {
 } from '../lib/attachmentFiles'
 import {
   createRecordInput,
-  createProtectedRecordInput,
   getRecordTypeDefinition,
-  getProtectedFieldLabel,
   normalizeRecordInput,
-  normalizeProtectedRecordInput,
   recordToInput,
   tagsFromText,
   tagsToText,
   type RecordField,
 } from '../lib/recordTypes'
-import type { LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
+import type { LifeRecord, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
@@ -59,7 +56,6 @@ export function RecordForm({
   onUpdate,
 }: RecordFormProps) {
   const [form, setForm] = useState<RecordInput>(() => createRecordInput(recordType))
-  const [protectedForm, setProtectedForm] = useState<ProtectedRecordInput>(() => createProtectedRecordInput(recordType))
   const [activeTab, setActiveTab] = useState<RecordFormTab>('record')
   const [tagsText, setTagsText] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
@@ -67,6 +63,7 @@ export function RecordForm({
   const [stagedError, setStagedError] = useState<string | null>(null)
   const formBodyRef = useRef<HTMLFormElement | null>(null)
   const stagedFileInputRef = useRef<HTMLInputElement | null>(null)
+  const [visibleOptionalFields, setVisibleOptionalFields] = useState<Set<RecordField>>(() => new Set())
   const definition = getRecordTypeDefinition(form.record_type)
   const Icon = definition.icon
   const isEditing = record !== null
@@ -96,8 +93,8 @@ export function RecordForm({
 
     const nextForm = record ? recordToInput(record) : createRecordInput(recordType)
     setForm(nextForm)
-    setProtectedForm(createProtectedRecordInput(nextForm.record_type))
     setTagsText(tagsToText(nextForm.tags))
+    setVisibleOptionalFields(getInitialVisibleFields(nextForm, getRecordTypeDefinition(nextForm.record_type)))
     setValidationError(null)
     setActiveTab('record')
     clearStagedAttachments()
@@ -127,7 +124,7 @@ export function RecordForm({
     }
 
     setValidationError(null)
-    const protectedInput = normalizeProtectedRecordInput(input.record_type, protectedForm)
+    const protectedInput: ProtectedRecordInput = {}
     const wasSaved = record
       ? await onUpdate(record.id, input, protectedInput)
       : await onCreate(input, protectedInput, stagedAttachments.map((item) => item.file))
@@ -188,14 +185,35 @@ export function RecordForm({
     setForm((current) => ({ ...current, [field]: value }))
   }
 
-  function updateProtectedField(field: ProtectedRecordField, value: string | null) {
-    setProtectedForm((current) => ({ ...current, [field]: value }))
+
+  function showOptionalField(field: RecordField) {
+    setVisibleOptionalFields((current) => new Set([...current, field]))
   }
 
   function selectTab(tab: RecordFormTab) {
     setActiveTab(tab)
     formBodyRef.current?.scrollTo({ top: 0 })
   }
+
+  const visibleRecordFields = definition.fields.filter((field) => visibleOptionalFields.has(field))
+  const visibleEssentialFields = visibleRecordFields.filter((field) =>
+    !dateFields.includes(field) &&
+    field !== 'notes' &&
+    field !== 'tags' &&
+    (definition.coreFields.includes(field) || definition.defaultSuggestedFields.includes(field)),
+  )
+  const visibleDateFields = visibleRecordFields.filter((field) => dateFields.includes(field))
+  const visibleAdditionalFields = visibleRecordFields.filter((field) =>
+    !visibleEssentialFields.includes(field) &&
+    !dateFields.includes(field) &&
+    field !== 'notes' &&
+    field !== 'tags',
+  )
+  const hiddenSuggestedFields = definition.fields.filter((field) =>
+    field !== 'notes' && field !== 'tags' && !visibleOptionalFields.has(field),
+  )
+  const canShowNotes = definition.fields.includes('notes') && (visibleOptionalFields.has('notes') || Boolean(form.notes))
+  const canShowTags = definition.fields.includes('tags') && (visibleOptionalFields.has('tags') || tagsText.trim().length > 0)
 
   return (
     <SheetDrawer
@@ -267,58 +285,79 @@ export function RecordForm({
           role="tabpanel"
           aria-labelledby="record-form-record-tab"
         >
-          <label>
-            <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
-            <input
-              required
-              maxLength={120}
-              value={form.title}
-              onChange={(event) => updateField('title', event.target.value)}
-              placeholder={definition.defaultTitle}
-            />
-          </label>
-
-          <div className="record-form-type-row">
-            <span>Record type</span>
-            <strong>{definition.label}</strong>
-          </div>
-
-          {definition.fields.includes('subtitle') ? (
-            <RecordTextField
-              field="subtitle"
-              form={form}
-              definitionType={form.record_type}
-              onChange={updateField}
-            />
-          ) : null}
-
-          <RecordFieldGrid fields={definition.fields.filter((field) => field !== 'subtitle' && field !== 'notes' && field !== 'tags')} form={form} onChange={updateField} />
-
-          {definition.fields.includes('notes') ? (
-            <RecordTextArea field="notes" form={form} definitionType={form.record_type} onChange={updateField} />
-          ) : null}
-
-          {definition.fields.includes('tags') ? (
+          <section className="record-progressive-section record-essentials-section" aria-labelledby="record-essentials-heading">
+            <div className="form-section-heading">
+              <span id="record-essentials-heading">Essentials</span>
+            </div>
             <label>
-              <span>Tags</span>
+              <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
               <input
-                maxLength={240}
-                value={tagsText}
-                onChange={(event) => setTagsText(event.target.value)}
-                placeholder="travel, home, renewal"
+                required
+                maxLength={120}
+                value={form.title}
+                onChange={(event) => updateField('title', event.target.value)}
+                placeholder={definition.defaultTitle}
               />
             </label>
+
+            <div className="record-form-type-row">
+              <span>Record type</span>
+              <strong>{definition.label}</strong>
+            </div>
+
+            <RecordFieldGrid fields={visibleEssentialFields} form={form} onChange={updateField} />
+          </section>
+
+          {(visibleDateFields.length > 0 || hiddenSuggestedFields.some((field) => dateFields.includes(field))) ? (
+            <details className="record-progressive-section record-collapsible-section">
+              <summary>Dates</summary>
+              <RecordFieldGrid fields={visibleDateFields} form={form} onChange={updateField} />
+              <SuggestedFieldButtons
+                fields={hiddenSuggestedFields.filter((field) => dateFields.includes(field))}
+                recordType={form.record_type}
+                onAdd={showOptionalField}
+              />
+            </details>
           ) : null}
 
-          <ProtectedRecordFields
-            input={protectedForm}
-            isEditing={isEditing}
-            recordType={form.record_type}
-            onChange={updateProtectedField}
-          />
+          {(visibleAdditionalFields.length > 0 || hiddenSuggestedFields.some((field) => !dateFields.includes(field))) ? (
+            <details className="record-progressive-section record-collapsible-section">
+              <summary>Additional details</summary>
+              <RecordFieldGrid fields={visibleAdditionalFields} form={form} onChange={updateField} />
+              <SuggestedFieldButtons
+                fields={hiddenSuggestedFields.filter((field) => !dateFields.includes(field))}
+                recordType={form.record_type}
+                onAdd={showOptionalField}
+              />
+            </details>
+          ) : null}
+
+          {(canShowNotes || canShowTags || definition.fields.includes('notes') || definition.fields.includes('tags')) ? (
+            <details className="record-progressive-section record-collapsible-section">
+              <summary>Notes</summary>
+              {canShowNotes ? (
+                <RecordTextArea field="notes" form={form} definitionType={form.record_type} onChange={updateField} />
+              ) : null}
+              {canShowTags ? (
+                <label>
+                  <span>Tags</span>
+                  <input
+                    maxLength={240}
+                    value={tagsText}
+                    onChange={(event) => setTagsText(event.target.value)}
+                    placeholder="travel, home, renewal"
+                  />
+                </label>
+              ) : null}
+              <SuggestedFieldButtons
+                fields={(['notes', 'tags'] as RecordField[]).filter((field) => definition.fields.includes(field) && !visibleOptionalFields.has(field))}
+                recordType={form.record_type}
+                onAdd={showOptionalField}
+              />
+            </details>
+          ) : null}
 
           {validationError ? <p className="field-error">{validationError}</p> : null}
-
           <button className="primary-button" type="submit" disabled={isSaving}>
             {isEditing ? <Save size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
             {isSaving ? 'Saving' : isEditing ? 'Save record' : 'Add record'}
@@ -376,6 +415,25 @@ export function RecordForm({
   )
 }
 
+function getInitialVisibleFields(input: RecordInput, definition: ReturnType<typeof getRecordTypeDefinition>) {
+  const visibleFields = new Set<RecordField>()
+
+  for (const field of definition.fields) {
+    if (definition.coreFields.includes(field) || definition.defaultSuggestedFields.includes(field) || hasRecordFieldValue(input, field)) {
+      visibleFields.add(field)
+    }
+  }
+
+  return visibleFields
+}
+
+function hasRecordFieldValue(input: RecordInput, field: RecordField) {
+  const value = input[field]
+  if (Array.isArray(value)) {
+    return value.length > 0
+  }
+  return typeof value === 'string' && value.trim().length > 0
+}
 function StagedAttachmentsPanel({
   attachments,
   error,
@@ -495,6 +553,30 @@ function StagedAttachmentCard({
   )
 }
 
+function SuggestedFieldButtons({
+  fields,
+  onAdd,
+  recordType,
+}: {
+  fields: RecordField[]
+  onAdd: (field: RecordField) => void
+  recordType: RecordType
+}) {
+  if (fields.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="record-suggested-fields" aria-label="Suggested fields">
+      {fields.map((field) => (
+        <button type="button" className="small-outline-button" key={field} onClick={() => onAdd(field)}>
+          <Plus size={14} aria-hidden="true" />
+          {getFieldLabel(field, recordType)}
+        </button>
+      ))}
+    </div>
+  )
+}
 function RecordFieldGrid({
   fields,
   form,
@@ -520,61 +602,6 @@ function RecordFieldGrid({
         ),
       )}
     </div>
-  )
-}
-
-function ProtectedRecordFields({
-  input,
-  isEditing,
-  onChange,
-  recordType,
-}: {
-  input: ProtectedRecordInput
-  isEditing: boolean
-  onChange: (field: ProtectedRecordField, value: string | null) => void
-  recordType: RecordType
-}) {
-  const definition = getRecordTypeDefinition(recordType)
-
-  if (definition.protectedFields.length === 0) {
-    return null
-  }
-
-  return (
-    <section className="record-protected-section" aria-labelledby="record-protected-heading">
-      <div className="record-protected-header">
-        <div>
-          <h3 id="record-protected-heading">Protected details</h3>
-          <p>Encrypted before storage and revealed only when requested.</p>
-        </div>
-        <ShieldCheck size={17} aria-hidden="true" />
-      </div>
-      {isEditing ? <p className="record-protected-edit-note">Leave blank to keep existing protected details.</p> : null}
-      <div className="record-form-grid">
-        {definition.protectedFields.map((field) =>
-          field === 'sensitive_notes' ? (
-            <label className="record-protected-wide-field" key={field}>
-              <span>{getProtectedFieldLabel(field)}</span>
-              <textarea
-                maxLength={1000}
-                rows={3}
-                value={getProtectedTextValue(input, field)}
-                onChange={(event) => onChange(field, event.target.value || null)}
-              />
-            </label>
-          ) : (
-            <label key={field}>
-              <span>{getProtectedFieldLabel(field)}</span>
-              <input
-                maxLength={field === 'vin' ? 17 : 120}
-                value={getProtectedTextValue(input, field)}
-                onChange={(event) => onChange(field, event.target.value || null)}
-              />
-            </label>
-          ),
-        )}
-      </div>
-    </section>
   )
 }
 
@@ -655,10 +682,6 @@ function getTextValue(form: RecordInput, field: RecordField) {
   return typeof value === 'string' ? value : ''
 }
 
-function getProtectedTextValue(form: ProtectedRecordInput, field: ProtectedRecordField) {
-  const value = form[field]
-  return typeof value === 'string' ? value : ''
-}
 
 function getFieldLabel(field: RecordField, type: RecordType) {
   const definition = getRecordTypeDefinition(type)

@@ -98,6 +98,9 @@ function shouldBypassRuntimeCaching(request: Request) {
   if (/\/records\/[^/]+\/protected(?:\/status)?$/.test(url.pathname)) {
     return true
   }
+  if (/\/records\/[^/]+\/fields\/[^/]+\/reveal$/.test(url.pathname)) {
+    return true
+  }
   if (/\/records\/[^/]+\/attachments(?:\/.*)?$/.test(url.pathname)) {
     return true
   }

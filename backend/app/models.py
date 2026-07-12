@@ -7,6 +7,7 @@ from app.schemas import (
     AttachmentStatus,
     BirthdayDetails,
     CalendarSyncStatus,
+    DynamicFieldType,
     GoogleCalendarConnectionStatus,
     LinkedEntityType,
     MaintenanceDetails,
@@ -71,6 +72,20 @@ class ReminderPatch(BaseModel):
     maintenance_details: MaintenanceDetails | None = None
 
 
+class DynamicRecordField(BaseModel):
+    field_id: str
+    key: str
+    label: str
+    field_type: DynamicFieldType
+    value: str | float | bool | None = None
+    is_sensitive: bool = False
+    has_value: bool = False
+    display_order: int = 0
+    select_options: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
 class Record(BaseModel):
     id: str
     user_id: str = "local-dev-user"
@@ -89,6 +104,7 @@ class Record(BaseModel):
     notes: str | None = None
     tags: list[str] = Field(default_factory=list)
     status: RecordStatus = RecordStatus.ACTIVE
+    dynamic_fields: list[DynamicRecordField] = Field(default_factory=list)
     protected_ciphertext: str | None = None
     protected_encrypted_data_key: str | None = None
     protected_nonce: str | None = None

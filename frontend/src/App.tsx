@@ -409,7 +409,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       await loadRecordData()
       setActivePage('records')
       setRecordBackStack([])
-      setViewingRecord({ record: nextRecord, initialTab: 'documents' })
+      setViewingRecord({ record: nextRecord, initialTab: 'details' })
       if (!protectedSaved) {
         setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
       } else if (attachmentFailures > 0) {
@@ -522,6 +522,13 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setReminders((current) => current.map((item) => (item.id === updated.id ? updated : item)))
     setViewingReminder((current) => (current?.reminder.id === updated.id ? { ...current, reminder: updated } : current))
     setEditingReminder((current) => (current?.id === updated.id ? updated : current))
+  }
+
+  function replaceRecord(updated: LifeRecord) {
+    setRecords((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+    setViewingRecord((current) => (current?.record.id === updated.id ? { ...current, record: updated } : current))
+    setEditingRecord((current) => (current?.id === updated.id ? updated : current))
+    setRecordBackStack((current) => current.map((item) => (item.record.id === updated.id ? { ...item, record: updated } : item)))
   }
 
   async function handleEnableCalendarSync(id: string) {
@@ -1149,6 +1156,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onOpenLinkedRecord={openLinkedRecord}
           onOpenLinkedReminder={openLinkedReminder}
           onProtectedStatusChange={handleProtectedRecordStatusChange}
+          onRecordChange={replaceRecord}
           onRequestDelete={requestRecordDelete}
           onRestore={handleRestoreRecord}
         />
@@ -2274,4 +2282,3 @@ function getPageTitle(page: AppPage) {
 }
 
 export default App
-

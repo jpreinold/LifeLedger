@@ -6020,3 +6020,260 @@ textarea:focus-visible {
     justify-content: center;
   }
 }
+/* Phase 26 editable dashboard fields */
+.dynamic-fields-section,
+.record-progressive-section,
+.reminder-progressive-section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.dynamic-fields-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.dynamic-fields-heading span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  background: var(--color-surface-muted);
+  font-size: 0.68rem;
+  font-weight: 780;
+}
+
+.dynamic-field-row dd {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dynamic-field-row a {
+  color: var(--color-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.dynamic-field-row a:focus-visible,
+.dynamic-field-row a:hover {
+  text-decoration: underline;
+}
+
+.dynamic-field-actions,
+.protected-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dynamic-field-actions .small-outline-button,
+.dynamic-field-remove {
+  min-height: 34px;
+}
+
+.dynamic-field-remove {
+  width: 36px;
+  height: 36px;
+}
+
+.masked-field-value {
+  font-family: var(--font-body);
+  letter-spacing: 0.08em;
+}
+
+.dynamic-add-field-button,
+.add-field-save-button {
+  width: 100%;
+  min-height: 44px;
+}
+
+.add-field-dialog {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.add-field-header,
+.add-field-title-row,
+.add-field-selected-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.add-field-title-row {
+  min-width: 0;
+}
+
+.add-field-body,
+.add-field-form,
+.add-field-suggestions {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.add-field-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 44px;
+  border: 1px solid rgba(200, 212, 230, 0.9);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.add-field-mode-tabs button {
+  min-height: 44px;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.74);
+  font-size: 0.8rem;
+  font-weight: 780;
+}
+
+.add-field-mode-tabs button.active {
+  color: var(--color-primary);
+  background: #eef5ff;
+}
+
+.add-field-suggestion {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgba(223, 231, 242, 0.9);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-text);
+  text-align: left;
+}
+
+.add-field-suggestion span:nth-child(2),
+.add-field-selected-summary div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.add-field-suggestion strong,
+.add-field-selected-summary strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.add-field-suggestion small,
+.add-field-selected-summary small {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.add-field-suggestion-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  background: #eef5ff;
+}
+
+.add-field-empty {
+  min-height: 180px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.add-field-empty p {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 680;
+}
+
+.field-toggle-label {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.field-toggle-label input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+}
+
+.record-progressive-section,
+.reminder-progressive-section {
+  padding: var(--space-3);
+  border: 1px solid rgba(223, 231, 242, 0.88);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.record-collapsible-section,
+.reminder-collapsible-section {
+  align-content: start;
+}
+
+.record-collapsible-section summary,
+.reminder-collapsible-section summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 820;
+  list-style-position: inside;
+}
+
+.record-collapsible-section[open] summary,
+.reminder-collapsible-section[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+.record-suggested-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.record-suggested-fields .small-outline-button {
+  min-height: 36px;
+}
+
+.reminder-essentials-section .form-section-heading,
+.record-essentials-section .form-section-heading {
+  color: var(--color-text);
+  font-size: 0.88rem;
+  font-weight: 820;
+}
+
+.reminder-progressive-section .maintenance-details-section,
+.reminder-progressive-section .renewal-details-section,
+.reminder-progressive-section .birthday-details-section {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (max-width: 520px) {
+  .detail-row.dynamic-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .dynamic-field-actions .small-outline-button {
+    flex: 1 1 auto;
+  }
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
-import { Bell, Cake, LayoutTemplate, Plus, RefreshCcw, Wrench, X } from 'lucide-react'
+import { Cake, LayoutTemplate, Plus, RefreshCcw, Wrench, X } from 'lucide-react'
 
 import {
   type BirthdayDetailsInput,
@@ -214,38 +214,55 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
 
   return (
     <>
-      {form.reminder_type === 'birthday' ? <BirthdayFields form={form} setForm={setForm} /> : null}
-      {form.reminder_type === 'renewal' ? <RenewalFields form={form} setForm={setForm} /> : null}
-      {form.reminder_type === 'maintenance' ? <MaintenanceFields form={form} setForm={setForm} /> : null}
-
-      <label>
-        <span>{form.reminder_type === 'renewal' || form.reminder_type === 'maintenance' ? 'Reminder title' : 'Title'}</span>
-        <input
-          required
-          maxLength={120}
-          value={form.title}
-          onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-          placeholder={titlePlaceholder}
-        />
-      </label>
-
-      <div className="form-row">
+      <section className="reminder-progressive-section reminder-essentials-section" aria-labelledby="reminder-essentials-heading">
+        <div className="form-section-heading">
+          <span id="reminder-essentials-heading">Essentials</span>
+        </div>
         <label>
-          <span>Category</span>
-          <select
-            value={form.category}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, category: event.target.value as ReminderInput['category'] }))
-            }
-          >
-            {reminderCategories.map((category) => (
-              <option value={category} key={category}>
-                {category}
-              </option>
-            ))}
-          </select>
+          <span>{form.reminder_type === 'renewal' || form.reminder_type === 'maintenance' ? 'Reminder title' : 'Title'}</span>
+          <input
+            required
+            maxLength={120}
+            value={form.title}
+            onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+            placeholder={titlePlaceholder}
+          />
         </label>
 
+        <div className="form-row">
+          <label>
+            <span>Type</span>
+            <input value={getReminderTypeLabelForForm(form.reminder_type)} readOnly />
+          </label>
+          <label>
+            <span>Category</span>
+            <select
+              value={form.category}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, category: event.target.value as ReminderInput['category'] }))
+              }
+            >
+              {reminderCategories.map((category) => (
+                <option value={category} key={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
+
+      {form.reminder_type !== 'generic' ? (
+        <details className="reminder-progressive-section reminder-collapsible-section" open>
+          <summary>Smart details</summary>
+          {form.reminder_type === 'birthday' ? <BirthdayFields form={form} setForm={setForm} /> : null}
+          {form.reminder_type === 'renewal' ? <RenewalFields form={form} setForm={setForm} /> : null}
+          {form.reminder_type === 'maintenance' ? <MaintenanceFields form={form} setForm={setForm} /> : null}
+        </details>
+      ) : null}
+
+      <details className="reminder-progressive-section reminder-collapsible-section" open={form.reminder_type === 'generic'}>
+        <summary>Schedule</summary>
         {form.reminder_type !== 'renewal' && form.reminder_type !== 'maintenance' ? (
           <label>
             <span>{getDueDateFieldLabel(form.reminder_type)}</span>
@@ -258,25 +275,92 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
             />
           </label>
         ) : null}
-      </div>
 
-      <div className="form-row">
-        <label>
-          <span>Repeat</span>
-          <select
-            value={form.repeat}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, repeat: event.target.value as ReminderInput['repeat'] }))
-            }
-          >
-            {repeatOptions.map((repeat) => (
-              <option value={repeat} key={repeat}>
-                {repeat}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="form-row">
+          <label>
+            <span>Repeat</span>
+            <select
+              value={form.repeat}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, repeat: event.target.value as ReminderInput['repeat'] }))
+              }
+            >
+              {repeatOptions.map((repeat) => (
+                <option value={repeat} key={repeat}>
+                  {repeat}
+                </option>
+              ))}
+            </select>
+          </label>
 
+          <label>
+            <span>Timing</span>
+            <select
+              value={selectedReminderPreset}
+              onChange={(event) => handleReminderPresetChange(event.target.value as ReminderLeadPreset)}
+            >
+              {reminderLeadOptions.map((option) => (
+                <option value={option.id} key={option.id}>
+                  {option.label}
+                </option>
+              ))}
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="form-row">
+          <label>
+            <span>Time</span>
+            <input
+              type="time"
+              value={form.reminder_time ?? DEFAULT_REMINDER_TIME}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, reminder_time: event.target.value || DEFAULT_REMINDER_TIME }))
+              }
+            />
+          </label>
+
+          {selectedReminderPreset === 'custom' ? (
+            <label>
+              <span>Lead</span>
+              <input
+                type="number"
+                min="0"
+                max="36"
+                value={form.reminder_lead_value ?? DEFAULT_REMINDER_LEAD_VALUE}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, reminder_lead_value: Number(event.target.value || 0) }))
+                }
+              />
+            </label>
+          ) : null}
+        </div>
+
+        {selectedReminderPreset === 'custom' ? (
+          <label>
+            <span>Unit</span>
+            <select
+              value={form.reminder_lead_unit ?? DEFAULT_REMINDER_LEAD_UNIT}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reminder_lead_unit: event.target.value as ReminderInput['reminder_lead_unit'],
+                }))
+              }
+            >
+              {reminderLeadUnits.map((unit) => (
+                <option value={unit} key={unit}>
+                  {unit}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </details>
+
+      <details className="reminder-progressive-section reminder-collapsible-section">
+        <summary>More options</summary>
         <label>
           <span>Priority</span>
           <select
@@ -292,88 +376,18 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
             ))}
           </select>
         </label>
-      </div>
 
-      <section className="remind-me-section" aria-labelledby="remind-me-heading">
-        <div className="form-section-heading">
-          <Bell size={16} aria-hidden="true" />
-          <span id="remind-me-heading">Remind me</span>
-        </div>
-
-        <div className="form-row">
-          <label>
-            <span>Timing</span>
-            <select
-              value={selectedReminderPreset}
-              onChange={(event) => handleReminderPresetChange(event.target.value as ReminderLeadPreset)}
-            >
-              {reminderLeadOptions.map((option) => (
-                <option value={option.id} key={option.id}>
-                  {option.label}
-                </option>
-              ))}
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-
-          <label>
-            <span>Time</span>
-            <input
-              type="time"
-              value={form.reminder_time ?? DEFAULT_REMINDER_TIME}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, reminder_time: event.target.value || DEFAULT_REMINDER_TIME }))
-              }
-            />
-          </label>
-        </div>
-
-        {selectedReminderPreset === 'custom' ? (
-          <div className="form-row">
-            <label>
-              <span>Lead</span>
-              <input
-                type="number"
-                min="0"
-                max="36"
-                value={form.reminder_lead_value ?? DEFAULT_REMINDER_LEAD_VALUE}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, reminder_lead_value: Number(event.target.value || 0) }))
-                }
-              />
-            </label>
-
-            <label>
-              <span>Unit</span>
-              <select
-                value={form.reminder_lead_unit ?? DEFAULT_REMINDER_LEAD_UNIT}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    reminder_lead_unit: event.target.value as ReminderInput['reminder_lead_unit'],
-                  }))
-                }
-              >
-                {reminderLeadUnits.map((unit) => (
-                  <option value={unit} key={unit}>
-                    {unit}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        ) : null}
-      </section>
-      <label>
-        <span>Notes</span>
-        <textarea
-          maxLength={1000}
-          value={form.notes ?? ''}
-          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value || null }))}
-          rows={4}
-          placeholder={form.reminder_type === 'maintenance' ? 'Keep notes general. Do not store sensitive details.' : 'Optional details'}
-        />
-      </label>
+        <label>
+          <span>Notes</span>
+          <textarea
+            maxLength={1000}
+            value={form.notes ?? ''}
+            onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value || null }))}
+            rows={4}
+            placeholder="Optional details"
+          />
+        </label>
+      </details>
     </>
   )
 }
@@ -706,6 +720,18 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
   )
 }
 
+function getReminderTypeLabelForForm(type: ReminderInput['reminder_type']) {
+  if (type === 'birthday') {
+    return 'Birthday'
+  }
+  if (type === 'renewal') {
+    return 'Renewal'
+  }
+  if (type === 'maintenance') {
+    return 'Maintenance'
+  }
+  return 'Reminder'
+}
 function getAddFormHeading(reminderType: ReminderInput['reminder_type']) {
   if (reminderType === 'birthday') {
     return 'Add Birthday'
@@ -1110,4 +1136,3 @@ function toOptionalNumber(value: string | number | null | undefined) {
   const numericValue = Number(value)
   return Number.isFinite(numericValue) ? numericValue : null
 }
-

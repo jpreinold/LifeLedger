@@ -97,6 +97,24 @@ Supported record types are `general`, `passport`, `driver_license`, `vehicle`, `
 
 Privacy guardrails are intentional. Normal record metadata stays safe and searchable: type, title, subtitle, category, owner display name, provider/brand, dates, broad location hint, non-sensitive notes, tags, and status. The frontend must not send `user_id`; the backend derives ownership from Cognito or local auth.
 
+## Editable Dashboards And Dynamic Fields
+
+LifeLedger treats Records and Reminders as editable dashboards rather than fixed database forms. Templates provide a small set of useful starting fields, while optional and custom fields can be added over time. Empty fields are hidden, sensitive values are encrypted and masked by default, and the interface reveals complexity only when the user needs it.
+
+Record detail opens as a compact dashboard with Overview, Documents, and Linked items tabs. Overview shows populated essentials, important dates, additional details, notes, and history without blank rows or "not provided" placeholders. Documents and Linked Items remain first-class tabs backed by the existing secure attachment and linked-item systems.
+
+Record templates are starting points, not forced schemas. Each record type defines required core fields, default suggested metadata, optional suggested metadata, dynamic field presets, sensitive field presets, and display order. The record form opens with Essentials first, then lets the user expand Dates, Additional details, and Notes. Existing populated optional fields remain visible when editing old records, so users do not need to recreate data.
+
+Records support bounded dynamic fields embedded on the existing record item: `field_id`, `key`, `label`, `field_type`, `value`, `is_sensitive`, `display_order`, `select_options`, `created_at`, and `updated_at`. Supported field types are text, long text, date, number, money, phone, email, URL, boolean, and select. Dynamic fields intentionally do not support executable code, HTML, arbitrary JSON, nested schemas, file fields, password field types, SSNs, card/bank data, passwords, or recovery codes.
+
+The storage tradeoff is deliberately cost-conscious: dynamic fields live on the existing user-scoped Records item instead of a new table. This keeps local JSON persistence, DynamoDB PAY_PER_REQUEST usage, ownership checks, backups, and deployment shape simple. The implementation avoids scans and does not add AI, OCR, embeddings, OpenSearch, Neptune, a vector database, automation, scheduled migrations, or another managed database.
+
+Field privacy has three internal categories: system/indexed metadata needed for filtering and app behavior, private metadata that can appear in dashboards, and sensitive masked data. Users do not see or choose those categories in normal flows. Dynamic sensitive values are encrypted into the existing protected record envelope, masked as `••••••••` in the UI, and revealed only through owner-checked no-store API calls. Revealed values auto-hide after about 60 seconds, when the drawer closes, when the app loses visibility, and when the user navigates away or signs out. Revealed values are not persisted to browser storage or service-worker caches.
+
+Quick Add remains available from the center plus action, Home, Records, Reminders, and Calendar date flows. Record Quick Add starts from the selected template with only essentials and high-value suggested fields visible, then opens the new record dashboard after save. Reminder add/edit uses compact sections for Essentials, Smart details, Schedule, and More options while preserving birthday, renewal, maintenance, Google Calendar, Daily Digest, push, and alert calculations.
+
+Backward compatibility is adapter-based. Existing record metadata, protected-field payloads, documents, linked items, reminder calculations, Calendar sync, Daily Digest behavior, alert state, and push behavior continue to use their existing storage. Legacy protected fields remain revealable and clearable, while new sensitive dynamic fields share the same encrypted envelope without deleting legacy protected values.
+
 ## Linked Items Virtual Knowledge Graph
 
 Linked Items make a record or reminder a small private hub for related LifeLedger items without adding a graph database or new AI service. The backend stores explicit user-created edges in the retained `lifeledger-linked-items-auth` DynamoDB table and resolves one-hop neighborhoods in the application layer with indexed DynamoDB queries. This keeps the feature low cost, simple to operate, and aligned with the existing user-scoped storage model.
@@ -115,7 +133,7 @@ Cognito authenticates deployed users before private routes reach the backend, an
 
 This is not zero-knowledge or end-to-end encryption. The authenticated LifeLedger backend can decrypt protected fields after it verifies that the record belongs to the current user and the user explicitly requests reveal. Ordinary list/detail APIs, Daily Digest, push payloads, calendar event descriptions, URLs, service-worker caches, and record cards do not include protected plaintext.
 
-Protected fields are stored separately from normal metadata. Supported protected fields are `document_number`, `license_number`, `vin`, `policy_number`, `member_number`, `serial_number`, `account_reference`, and `sensitive_notes`, with fields limited by record type. LifeLedger still does not support storing SSNs, payment card data, bank account or routing numbers, passwords, PINs, MFA or recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, OCR, AI/RAG, shared household access, file sharing, public links, reminder attachments, or global search over protected fields/files.
+Protected fields are stored separately from normal metadata. Legacy protected fields are `document_number`, `license_number`, `vin`, `policy_number`, `member_number`, `serial_number`, `account_reference`, and `sensitive_notes`, with fields limited by record type. Dynamic sensitive fields are stored in the same encrypted protected envelope under an internal `dynamic_fields` payload and are returned masked by ordinary list/detail APIs. LifeLedger still does not support storing SSNs, payment card data, bank account or routing numbers, passwords, PINs, MFA or recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, OCR, AI/RAG, shared household access, file sharing, public links, reminder attachments, or global search over protected fields/files.
 
 Protected record routes:
 

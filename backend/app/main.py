@@ -65,7 +65,7 @@ from app.maintenance import (
     get_maintenance_status_label,
     prepare_maintenance_details,
 )
-from app.models import GoogleCalendarConnection, GoogleOAuthState, PushSubscription, Record, RecordAttachment, Reminder
+from app.models import DynamicRecordField, GoogleCalendarConnection, GoogleOAuthState, PushSubscription, Record, RecordAttachment, Reminder
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
@@ -103,6 +103,10 @@ from app.schemas import (
     CalendarSyncStatus,
     DigestPreferences,
     DigestPreferencesUpdate,
+    DynamicFieldType,
+    DynamicRecordFieldCreate,
+    DynamicRecordFieldRevealResponse,
+    DynamicRecordFieldUpdate,
     GoogleCalendarCallbackRequest,
     GoogleCalendarConnectResponse,
     GoogleCalendarConnectionStatus,
@@ -138,6 +142,7 @@ from app.schemas import (
     ReminderUpdate,
     RenewalDetails,
     RepeatOption,
+    normalize_dynamic_field_value,
 )
 from app.security_audit import log_security_event
 from app.push_sender import (
@@ -187,7 +192,7 @@ app.add_middleware(
 @app.middleware("http")
 async def no_store_attachment_responses(request: Request, call_next):
     response = await call_next(request)
-    if "/attachments" in request.url.path:
+    if "/attachments" in request.url.path or "/fields/" in request.url.path:
         for header, value in no_store_headers().items():
             response.headers[header] = value
     return response
@@ -343,6 +348,193 @@ def update_record(
     updated = Record.model_validate({**record.model_dump(), **updates, "updated_at": utc_now()})
     return to_record_response(repo.update_record(updated))
 
+
+@app.post("/records/{record_id}/fields", response_model=RecordResponse, status_code=status.HTTP_201_CREATED)
+def add_record_field(
+    record_id: str,
+    payload: DynamicRecordFieldCreate,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
+) -> RecordResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    if len(record.dynamic_fields) >= 30:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Records can have up to 30 custom fields.")
+
+    now = utc_now()
+    field_id = str(uuid4())
+    field_value = payload.value
+    field = DynamicRecordField(
+        field_id=field_id,
+        key=normalize_dynamic_field_key(payload.key or payload.label, field_id),
+        label=payload.label,
+        field_type=payload.field_type,
+        value=None if payload.is_sensitive else field_value,
+        is_sensitive=payload.is_sensitive,
+        has_value=dynamic_value_has_content(field_value),
+        display_order=payload.display_order if payload.display_order is not None else next_dynamic_field_order(record),
+        select_options=payload.select_options,
+        created_at=now,
+        updated_at=now,
+    )
+
+    updated_record = record.model_copy(update={"dynamic_fields": sorted_dynamic_fields([*record.dynamic_fields, field]), "updated_at": now})
+    if field.is_sensitive and dynamic_value_has_content(field_value):
+        updated_record = set_dynamic_sensitive_value(record, updated_record, field.field_id, field_value, encryption_service, now)
+
+    saved = repo.update_record(updated_record)
+    log_security_event(
+        "record_dynamic_field_created",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        field_id=field.field_id,
+        field_type=field.field_type.value,
+        is_sensitive=field.is_sensitive,
+        result="success",
+    )
+    return to_record_response(saved)
+
+
+@app.put("/records/{record_id}/fields/{field_id}", response_model=RecordResponse)
+def update_record_field(
+    record_id: str,
+    field_id: str,
+    payload: DynamicRecordFieldUpdate,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
+) -> RecordResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    existing = find_dynamic_field(record, field_id)
+    updates = payload.model_dump(exclude_unset=True)
+    now = utc_now()
+
+    next_type = updates.get("field_type", existing.field_type)
+    next_select_options = updates.get("select_options", existing.select_options)
+    if "value" in updates:
+        updates["value"] = normalize_dynamic_field_value(next_type, updates["value"], next_select_options)
+
+    if next_type != existing.field_type and existing.has_value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Remove and recreate this field to change its type without losing data.",
+        )
+
+    next_sensitive = updates.get("is_sensitive", existing.is_sensitive)
+    if next_sensitive != existing.is_sensitive and existing.has_value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Remove and recreate this populated field to change its sensitivity.",
+        )
+
+    next_value = updates.pop("value", existing.value)
+    if next_sensitive:
+        next_value_for_model = None
+        next_has_value = existing.has_value
+        if "value" in payload.model_fields_set:
+            next_has_value = dynamic_value_has_content(next_value)
+    else:
+        next_value_for_model = next_value
+        next_has_value = dynamic_value_has_content(next_value)
+
+    updated_field = existing.model_copy(
+        update={
+            **updates,
+            "field_type": next_type,
+            "is_sensitive": next_sensitive,
+            "select_options": next_select_options,
+            "value": next_value_for_model,
+            "has_value": next_has_value,
+            "updated_at": now,
+        }
+    )
+    updated_record = record.model_copy(
+        update={
+            "dynamic_fields": sorted_dynamic_fields(replace_dynamic_field(record.dynamic_fields, updated_field)),
+            "updated_at": now,
+        }
+    )
+
+    if updated_field.is_sensitive and "value" in payload.model_fields_set:
+        updated_record = set_dynamic_sensitive_value(record, updated_record, field_id, next_value, encryption_service, now)
+    elif existing.is_sensitive and not updated_field.is_sensitive:
+        updated_record = remove_dynamic_sensitive_value(record, updated_record, field_id, encryption_service, now)
+
+    saved = repo.update_record(updated_record)
+    log_security_event(
+        "record_dynamic_field_updated",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        field_id=field_id,
+        field_type=updated_field.field_type.value,
+        is_sensitive=updated_field.is_sensitive,
+        result="success",
+    )
+    return to_record_response(saved)
+
+
+@app.get("/records/{record_id}/fields/{field_id}/reveal", response_model=DynamicRecordFieldRevealResponse)
+def reveal_record_field(
+    record_id: str,
+    field_id: str,
+    response: Response,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
+) -> DynamicRecordFieldRevealResponse:
+    for header, value in no_store_headers().items():
+        response.headers[header] = value
+    record = require_record(repo, current_user.user_id, record_id)
+    field = find_dynamic_field(record, field_id)
+    if not field.is_sensitive:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Only sensitive fields require reveal.")
+    if not field.has_value:
+        return DynamicRecordFieldRevealResponse(field_id=field_id, value=None)
+
+    values = decrypt_record_private_payload(record, encryption_service)
+    dynamic_values = protected_dynamic_values(values)
+    if field_id not in dynamic_values:
+        return DynamicRecordFieldRevealResponse(field_id=field_id, value=None)
+
+    log_security_event(
+        "record_dynamic_field_revealed",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        field_id=field_id,
+        result="success",
+    )
+    return DynamicRecordFieldRevealResponse(field_id=field_id, value=dynamic_values[field_id])
+
+
+@app.delete("/records/{record_id}/fields/{field_id}", response_model=RecordResponse)
+def delete_record_field(
+    record_id: str,
+    field_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
+) -> RecordResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    existing = find_dynamic_field(record, field_id)
+    now = utc_now()
+    updated_record = record.model_copy(
+        update={
+            "dynamic_fields": [field for field in record.dynamic_fields if field.field_id != field_id],
+            "updated_at": now,
+        }
+    )
+    if existing.is_sensitive:
+        updated_record = remove_dynamic_sensitive_value(record, updated_record, field_id, encryption_service, now)
+
+    saved = repo.update_record(updated_record)
+    log_security_event(
+        "record_dynamic_field_deleted",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        field_id=field_id,
+        result="success",
+    )
+    return to_record_response(saved)
 
 @app.post("/records/{record_id}/archive", response_model=RecordResponse)
 def archive_record(
@@ -768,8 +960,10 @@ def set_protected_record_payload(
     values = payload.safe_values()
     validate_protected_record_fields(record, values)
     now = utc_now()
+    current_payload = decrypt_record_private_payload(record, encryption_service) if record_has_protected_data(record) else {}
+    dynamic_values = protected_dynamic_values(current_payload)
 
-    if not values:
+    if not values and not dynamic_values:
         cleared = repo.update_record(clear_record_protected_fields(record, now))
         log_security_event(
             "protected_record_cleared",
@@ -780,25 +974,11 @@ def set_protected_record_payload(
         )
         return to_protected_record_status(cleared)
 
-    try:
-        encrypted = encryption_service.encrypt_json(values, record_encryption_context(record.user_id, record.id))
-    except EncryptionConfigurationError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.safe_message) from exc
-    except EncryptionOperationError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.safe_message) from exc
+    next_payload = {**values}
+    if dynamic_values:
+        next_payload[DYNAMIC_PROTECTED_VALUES_KEY] = dynamic_values
 
-    updated = record.model_copy(
-        update={
-            "protected_ciphertext": encrypted.ciphertext,
-            "protected_encrypted_data_key": encrypted.encrypted_data_key,
-            "protected_nonce": encrypted.nonce,
-            "protected_encryption_version": encrypted.encryption_version,
-            "protected_key_arn": encrypted.key_arn,
-            "protected_updated_at": now,
-            "protected_field_names": sorted(values.keys()),
-            "updated_at": now,
-        }
-    )
+    updated = encrypt_record_private_payload(record, next_payload, sorted(values.keys()), encryption_service, now)
     saved = repo.update_record(updated)
     log_security_event(
         "protected_record_set",
@@ -808,7 +988,6 @@ def set_protected_record_payload(
         result="success",
     )
     return to_protected_record_status(saved)
-
 
 @app.get("/records/{record_id}/protected", response_model=ProtectedRecordPayload)
 def reveal_protected_record_payload(
@@ -863,9 +1042,24 @@ def clear_protected_record_payload(
     record_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
 ) -> ProtectedRecordStatusResponse:
     record = require_record(repo, current_user.user_id, record_id)
-    cleared = repo.update_record(clear_record_protected_fields(record, utc_now()))
+    now = utc_now()
+    current_payload = decrypt_record_private_payload(record, encryption_service) if record_has_protected_data(record) else {}
+    dynamic_values = protected_dynamic_values(current_payload)
+    if dynamic_values:
+        updated = encrypt_record_private_payload(
+            record,
+            {DYNAMIC_PROTECTED_VALUES_KEY: dynamic_values},
+            [],
+            encryption_service,
+            now,
+        )
+    else:
+        updated = clear_record_protected_fields(record, now)
+
+    cleared = repo.update_record(updated)
     log_security_event(
         "protected_record_cleared",
         user_id=current_user.user_id,
@@ -874,7 +1068,6 @@ def clear_protected_record_payload(
         result="success",
     )
     return to_protected_record_status(cleared)
-
 
 @app.get("/preferences/digest", response_model=DigestPreferences)
 def get_digest_preferences(
@@ -2034,6 +2227,148 @@ def set_attachment_no_store(response: Response) -> None:
 def attachment_http_exception(status_code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail, headers=no_store_headers())
 
+
+DYNAMIC_PROTECTED_VALUES_KEY = "dynamic_fields"
+
+
+def dynamic_value_has_content(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return len(value.strip()) > 0
+    return True
+
+
+def next_dynamic_field_order(record: Record) -> int:
+    if not record.dynamic_fields:
+        return 100
+    return max(field.display_order for field in record.dynamic_fields) + 10
+
+
+def sorted_dynamic_fields(fields: list[DynamicRecordField]) -> list[DynamicRecordField]:
+    return sorted(fields, key=lambda field: (field.display_order, field.created_at, field.label.casefold()))
+
+
+def replace_dynamic_field(fields: list[DynamicRecordField], updated: DynamicRecordField) -> list[DynamicRecordField]:
+    return [updated if field.field_id == updated.field_id else field for field in fields]
+
+
+def find_dynamic_field(record: Record, field_id: str) -> DynamicRecordField:
+    for field in record.dynamic_fields:
+        if field.field_id == field_id:
+            return field
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record field not found")
+
+
+def normalize_dynamic_field_key(label_or_key: str, fallback_id: str) -> str:
+    normalized = []
+    previous_was_separator = False
+    for character in label_or_key.strip().lower():
+        if character.isalnum():
+            normalized.append(character)
+            previous_was_separator = False
+        elif not previous_was_separator:
+            normalized.append("_")
+            previous_was_separator = True
+
+    key = "".join(normalized).strip("_")[:60]
+    return key or f"field_{fallback_id[:8]}"
+
+
+def decrypt_record_private_payload(record: Record, encryption_service: EncryptionService) -> dict:
+    if not record_has_protected_data(record):
+        return {}
+
+    try:
+        return encryption_service.decrypt_json(record_encrypted_payload(record), record_encryption_context(record.user_id, record.id))
+    except EncryptionConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.safe_message) from exc
+    except EncryptionOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.safe_message) from exc
+
+
+def protected_dynamic_values(payload: dict) -> dict[str, object]:
+    values = payload.get(DYNAMIC_PROTECTED_VALUES_KEY, {})
+    return values if isinstance(values, dict) else {}
+
+
+def protected_legacy_values(payload: dict) -> dict[str, object]:
+    return {key: value for key, value in payload.items() if key != DYNAMIC_PROTECTED_VALUES_KEY}
+
+
+def encrypt_record_private_payload(
+    record: Record,
+    payload: dict,
+    protected_field_names: list[str],
+    encryption_service: EncryptionService,
+    now: datetime,
+) -> Record:
+    legacy_values = protected_legacy_values(payload)
+    dynamic_values = protected_dynamic_values(payload)
+    if not legacy_values and not dynamic_values:
+        return clear_record_protected_fields(record, now)
+
+    compact_payload = {**legacy_values}
+    if dynamic_values:
+        compact_payload[DYNAMIC_PROTECTED_VALUES_KEY] = dynamic_values
+
+    try:
+        encrypted = encryption_service.encrypt_json(compact_payload, record_encryption_context(record.user_id, record.id))
+    except EncryptionConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.safe_message) from exc
+    except EncryptionOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.safe_message) from exc
+
+    return record.model_copy(
+        update={
+            "protected_ciphertext": encrypted.ciphertext,
+            "protected_encrypted_data_key": encrypted.encrypted_data_key,
+            "protected_nonce": encrypted.nonce,
+            "protected_encryption_version": encrypted.encryption_version,
+            "protected_key_arn": encrypted.key_arn,
+            "protected_updated_at": now,
+            "protected_field_names": sorted(protected_field_names),
+            "updated_at": now,
+        }
+    )
+
+
+def set_dynamic_sensitive_value(
+    previous_record: Record,
+    updated_record: Record,
+    field_id: str,
+    value,
+    encryption_service: EncryptionService,
+    now: datetime,
+) -> Record:
+    payload = decrypt_record_private_payload(previous_record, encryption_service)
+    dynamic_values = dict(protected_dynamic_values(payload))
+    if dynamic_value_has_content(value):
+        dynamic_values[field_id] = value
+    else:
+        dynamic_values.pop(field_id, None)
+
+    next_payload = {**protected_legacy_values(payload)}
+    if dynamic_values:
+        next_payload[DYNAMIC_PROTECTED_VALUES_KEY] = dynamic_values
+    return encrypt_record_private_payload(updated_record, next_payload, previous_record.protected_field_names, encryption_service, now)
+
+
+def remove_dynamic_sensitive_value(
+    previous_record: Record,
+    updated_record: Record,
+    field_id: str,
+    encryption_service: EncryptionService,
+    now: datetime,
+) -> Record:
+    payload = decrypt_record_private_payload(previous_record, encryption_service)
+    dynamic_values = dict(protected_dynamic_values(payload))
+    dynamic_values.pop(field_id, None)
+
+    next_payload = {**protected_legacy_values(payload)}
+    if dynamic_values:
+        next_payload[DYNAMIC_PROTECTED_VALUES_KEY] = dynamic_values
+    return encrypt_record_private_payload(updated_record, next_payload, previous_record.protected_field_names, encryption_service, now)
 
 def to_record_response(record: Record) -> RecordResponse:
     return RecordResponse.model_validate(
