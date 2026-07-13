@@ -3170,8 +3170,10 @@ textarea:focus-visible {
   display: grid;
   align-content: start;
   gap: var(--space-3);
-  padding: 0 var(--space-5) var(--space-5);
+  padding: var(--space-3) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 96px;
 }
 
 .digest-summary-card,
