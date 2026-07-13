@@ -49,3 +49,16 @@ export interface LinkCreateRequest {
   relationship_type?: RelationshipType
   label?: string | null
 }
+
+export const relationshipLabels: Record<RelationshipType, string> = {
+  related: 'Related to',
+  belongs_to: 'Belongs to',
+  covers: 'Covers',
+  renews: 'Reminder for',
+  maintains: 'Maintenance for',
+  insures: 'Insurance for',
+  warranty_for: 'Warranty for',
+  document_for: 'Document for',
+  appointment_for: 'Appointment for',
+  custom: 'Custom',
+}

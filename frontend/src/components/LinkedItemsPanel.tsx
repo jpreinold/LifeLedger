@@ -14,7 +14,7 @@ import {
 import { linkedItemsApi } from '../api/linkedItemsApi'
 import { formatDueDateLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
 import { getRecordTypeDefinition } from '../lib/recordTypes'
-import type { LinkedItem, LinkedItemsResponse, RelationshipType } from '../types/linkedItem'
+import { relationshipLabels, type LinkedItem, type LinkedItemsResponse, type RelationshipType } from '../types/linkedItem'
 import type { LifeRecord } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -47,26 +47,16 @@ const emptyLinks: LinkedItemsResponse = { records: [], reminders: [] }
 
 const relationshipOptions: Array<{ label: string; value: RelationshipType }> = [
   { label: 'Related to', value: 'related' },
+  { label: 'Belongs to', value: 'belongs_to' },
   { label: 'Insurance for', value: 'insures' },
   { label: 'Warranty for', value: 'warranty_for' },
   { label: 'Maintenance for', value: 'maintains' },
   { label: 'Reminder for', value: 'renews' },
   { label: 'Covers', value: 'covers' },
+  { label: 'Document for', value: 'document_for' },
+  { label: 'Appointment for', value: 'appointment_for' },
   { label: 'Custom', value: 'custom' },
 ]
-
-const relationshipLabels: Record<RelationshipType, string> = {
-  related: 'Related to',
-  belongs_to: 'Belongs to',
-  covers: 'Covers',
-  renews: 'Reminder for',
-  maintains: 'Maintenance for',
-  insures: 'Insurance for',
-  warranty_for: 'Warranty for',
-  document_for: 'Document for',
-  appointment_for: 'Appointment for',
-  custom: 'Custom',
-}
 
 export function LinkedItemsPanel({
   documentsCount = null,

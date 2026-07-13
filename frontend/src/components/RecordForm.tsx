@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { AlertCircle, Bell, Clock3, FileText, FileUp, Link2, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
 
+import { linkedItemsApi } from '../api/linkedItemsApi'
 import {
   attachmentAccept,
   attachmentMaxPerRecord,
@@ -18,7 +19,7 @@ import {
   type RecordField,
 } from '../lib/recordTypes'
 import { formatDueDateLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
-import type { LinkCreateRequest, RelationshipType } from '../types/linkedItem'
+import { relationshipLabels, type LinkedItem, type LinkedItemsResponse, type LinkCreateRequest, type RelationshipType } from '../types/linkedItem'
 import type { LifeRecord, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { AddLinkedItemDrawer, LinkedItemsPanel, type LinkDraft } from './LinkedItemsPanel'
@@ -34,6 +35,8 @@ interface RecordFormProps {
   reminders: Reminder[]
   onClose: () => void
   onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[], links: LinkCreateRequest[]) => Promise<boolean>
+  onOpenRecord?: (recordId: string) => void
+  onOpenReminder?: (reminderId: string) => void
   onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
 }
 
@@ -63,6 +66,8 @@ export function RecordForm({
   reminders,
   onClose,
   onCreate,
+  onOpenRecord,
+  onOpenReminder,
   onUpdate,
 }: RecordFormProps) {
   const [form, setForm] = useState<RecordInput>(() => createRecordInput(recordType))
@@ -73,8 +78,11 @@ export function RecordForm({
   const [stagedError, setStagedError] = useState<string | null>(null)
   const [stagedLinks, setStagedLinks] = useState<StagedLink[]>([])
   const [isStagedLinkPickerOpen, setIsStagedLinkPickerOpen] = useState(false)
-  const formBodyRef = useRef<HTMLFormElement | null>(null)
+  const formBodyRef = useRef<HTMLDivElement | null>(null)
   const stagedFileInputRef = useRef<HTMLInputElement | null>(null)
+  const initialLinksRef = useRef<LinkedItemsResponse | null>(null)
+  const wasSavedRef = useRef(false)
+  const isClosingRef = useRef(false)
   const [visibleOptionalFields, setVisibleOptionalFields] = useState<Set<RecordField>>(() => new Set())
   const definition = getRecordTypeDefinition(form.record_type)
   const isEditing = record !== null
@@ -104,6 +112,9 @@ export function RecordForm({
       return
     }
 
+    wasSavedRef.current = false
+    isClosingRef.current = false
+    initialLinksRef.current = null
     const nextForm = record ? recordToInput(record) : createRecordInput(recordType)
     setForm(nextForm)
     setTagsText(tagsToText(nextForm.tags))
@@ -114,6 +125,35 @@ export function RecordForm({
     setStagedLinks([])
     setIsStagedLinkPickerOpen(false)
   }, [isOpen, record, recordType])
+
+  useEffect(() => {
+    if (!isOpen || !record) {
+      initialLinksRef.current = null
+      return
+    }
+
+    let isCancelled = false
+    const recordId = record.id
+
+    async function loadInitialLinks() {
+      try {
+        const links = await linkedItemsApi.listRecordLinks(recordId)
+        if (!isCancelled) {
+          initialLinksRef.current = links
+        }
+      } catch {
+        if (!isCancelled) {
+          initialLinksRef.current = null
+        }
+      }
+    }
+
+    void loadInitialLinks()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [isOpen, record])
 
   useEffect(() => {
     return () => {
@@ -134,6 +174,7 @@ export function RecordForm({
     const input = normalizeRecordInput({ ...form, tags: tagsFromText(tagsText) })
     if (!input.title) {
       setActiveTab('record')
+      formBodyRef.current?.scrollTo({ top: 0 })
       setValidationError('Title is required.')
       return
     }
@@ -150,7 +191,24 @@ export function RecordForm({
       )
 
     if (wasSaved) {
+      wasSavedRef.current = true
       onClose()
+    }
+  }
+
+  async function handleRequestClose() {
+    if (isClosingRef.current) {
+      return
+    }
+
+    isClosingRef.current = true
+    try {
+      if (record && !wasSavedRef.current && initialLinksRef.current) {
+        await restoreRecordLinks(record.id, initialLinksRef.current)
+      }
+    } finally {
+      onClose()
+      isClosingRef.current = false
     }
   }
 
@@ -202,13 +260,19 @@ export function RecordForm({
   }
 
   async function handleStageLink(input: LinkDraft) {
-    setStagedLinks((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        ...input,
-      },
-    ])
+    setStagedLinks((current) => {
+      if (current.some((item) => item.targetType === input.targetType && item.targetId === input.targetId)) {
+        return current
+      }
+
+      return [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          ...input,
+        },
+      ]
+    })
     setIsStagedLinkPickerOpen(false)
   }
 
@@ -255,185 +319,191 @@ export function RecordForm({
       className="add-dialog record-form-dialog"
       isOpen={isOpen}
       labelledBy="record-form-heading"
-      onClose={onClose}
+      onClose={() => void handleRequestClose()}
     >
       <div className="sheet-header">
         <div>
           <h2 id="record-form-heading">{isEditing ? `Edit ${record.title}` : `Add ${definition.label}`}</h2>
           <p>{definition.category}</p>
         </div>
-        <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close record form">
+        <button type="button" className="icon-button ghost-icon-button" onClick={() => void handleRequestClose()} aria-label="Close record form">
           <X size={19} aria-hidden="true" />
         </button>
       </div>
 
-      <form className="reminder-form sheet-body record-form" ref={formBodyRef} onSubmit={handleSubmit}>
-        <div className="record-form-tabs record-form-tabs-three" role="tablist" aria-label="Edit record sections">
-          <button
-            type="button"
-            className={activeTab === 'record' ? 'record-form-tab active' : 'record-form-tab'}
-            id="record-form-record-tab"
-            role="tab"
-            aria-selected={activeTab === 'record'}
-            aria-controls="record-form-record-panel"
-            onClick={() => selectTab('record')}
+      <form className="record-form-shell" onSubmit={handleSubmit}>
+        <div className="reminder-form sheet-body record-form" data-drawer-scroll ref={formBodyRef}>
+          <div className="record-form-tabs record-form-tabs-three" role="tablist" aria-label="Edit record sections">
+            <button
+              type="button"
+              className={activeTab === 'record' ? 'record-form-tab active' : 'record-form-tab'}
+              id="record-form-record-tab"
+              role="tab"
+              aria-selected={activeTab === 'record'}
+              aria-controls="record-form-record-panel"
+              onClick={() => selectTab('record')}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'documents' ? 'record-form-tab active' : 'record-form-tab'}
+              id="record-form-documents-tab"
+              role="tab"
+              aria-selected={activeTab === 'documents'}
+              aria-controls="record-form-documents-panel"
+              onClick={() => selectTab('documents')}
+            >
+              Documents
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'links' ? 'record-form-tab active' : 'record-form-tab'}
+              id="record-form-links-tab"
+              role="tab"
+              aria-selected={activeTab === 'links'}
+              aria-controls="record-form-links-panel"
+              onClick={() => selectTab('links')}
+            >
+              Linked items
+            </button>
+          </div>
+
+          <div
+            className="record-form-tab-panel"
+            hidden={activeTab !== 'record'}
+            id="record-form-record-panel"
+            role="tabpanel"
+            aria-labelledby="record-form-record-tab"
           >
-            Details
-          </button>
-          <button
-            type="button"
-            className={activeTab === 'documents' ? 'record-form-tab active' : 'record-form-tab'}
-            id="record-form-documents-tab"
-            role="tab"
-            aria-selected={activeTab === 'documents'}
-            aria-controls="record-form-documents-panel"
-            onClick={() => selectTab('documents')}
+            <section className="record-progressive-section record-essentials-section" aria-labelledby="record-essentials-heading">
+              <div className="form-section-heading">
+                <span id="record-essentials-heading">Essentials</span>
+              </div>
+              <label>
+                <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
+                <input
+                  maxLength={120}
+                  value={form.title}
+                  onChange={(event) => updateField('title', event.target.value)}
+                  placeholder={definition.defaultTitle}
+                />
+              </label>
+
+              <div className="record-form-type-row">
+                <span>Record type</span>
+                <strong>{definition.label}</strong>
+              </div>
+
+              <RecordFieldGrid fields={visibleEssentialFields} form={form} onChange={updateField} />
+            </section>
+
+            {(visibleDateFields.length > 0 || hiddenSuggestedFields.some((field) => dateFields.includes(field))) ? (
+              <details className="record-progressive-section record-collapsible-section">
+                <summary>Dates</summary>
+                <RecordFieldGrid fields={visibleDateFields} form={form} onChange={updateField} />
+                <SuggestedFieldButtons
+                  fields={hiddenSuggestedFields.filter((field) => dateFields.includes(field))}
+                  recordType={form.record_type}
+                  onAdd={showOptionalField}
+                />
+              </details>
+            ) : null}
+
+            {(visibleAdditionalFields.length > 0 || hiddenSuggestedFields.some((field) => !dateFields.includes(field))) ? (
+              <details className="record-progressive-section record-collapsible-section">
+                <summary>Additional details</summary>
+                <RecordFieldGrid fields={visibleAdditionalFields} form={form} onChange={updateField} />
+                <SuggestedFieldButtons
+                  fields={hiddenSuggestedFields.filter((field) => !dateFields.includes(field))}
+                  recordType={form.record_type}
+                  onAdd={showOptionalField}
+                />
+              </details>
+            ) : null}
+
+            {(canShowNotes || canShowTags || definition.fields.includes('notes') || definition.fields.includes('tags')) ? (
+              <details className="record-progressive-section record-collapsible-section">
+                <summary>Notes</summary>
+                {canShowNotes ? (
+                  <RecordTextArea field="notes" form={form} definitionType={form.record_type} onChange={updateField} />
+                ) : null}
+                {canShowTags ? (
+                  <label>
+                    <span>Tags</span>
+                    <input
+                      maxLength={240}
+                      value={tagsText}
+                      onChange={(event) => setTagsText(event.target.value)}
+                      placeholder="travel, home, renewal"
+                    />
+                  </label>
+                ) : null}
+                <SuggestedFieldButtons
+                  fields={(['notes', 'tags'] as RecordField[]).filter((field) => definition.fields.includes(field) && !visibleOptionalFields.has(field))}
+                  recordType={form.record_type}
+                  onAdd={showOptionalField}
+                />
+              </details>
+            ) : null}
+
+            {validationError ? <p className="field-error">{validationError}</p> : null}
+          </div>
+
+          <div
+            className="record-form-tab-panel"
+            hidden={activeTab !== 'documents'}
+            id="record-form-documents-panel"
+            role="tabpanel"
+            aria-labelledby="record-form-documents-tab"
           >
-            Documents
-          </button>
-          <button
-            type="button"
-            className={activeTab === 'links' ? 'record-form-tab active' : 'record-form-tab'}
-            id="record-form-links-tab"
-            role="tab"
-            aria-selected={activeTab === 'links'}
-            aria-controls="record-form-links-panel"
-            onClick={() => selectTab('links')}
+            {record ? (
+              <RecordDocumentsPanel isActive={isOpen && activeTab === 'documents'} mode="edit" recordId={record.id} />
+            ) : (
+              <StagedAttachmentsPanel
+                attachments={stagedAttachments}
+                error={stagedError}
+                onChoose={handleChooseStagedAttachment}
+                onRemove={handleRemoveStagedAttachment}
+              />
+            )}
+          </div>
+
+          <div
+            className="record-form-tab-panel"
+            hidden={activeTab !== 'links'}
+            id="record-form-links-panel"
+            role="tabpanel"
+            aria-labelledby="record-form-links-tab"
           >
-            Linked items
-          </button>
+            {record ? (
+              <LinkedItemsPanel
+                records={records}
+                reminders={reminders}
+                showAdd
+                tabLayout
+                sourceId={record.id}
+                sourceType="record"
+                onOpenRecord={onOpenRecord}
+                onOpenReminder={onOpenReminder}
+              />
+            ) : (
+              <StagedLinkedItemsPanel
+                records={records}
+                reminders={reminders}
+                stagedLinks={stagedLinks}
+                onAdd={() => setIsStagedLinkPickerOpen(true)}
+                onRemove={handleRemoveStagedLink}
+              />
+            )}
+          </div>
         </div>
 
-        <div
-          className="record-form-tab-panel"
-          hidden={activeTab !== 'record'}
-          id="record-form-record-panel"
-          role="tabpanel"
-          aria-labelledby="record-form-record-tab"
-        >
-          <section className="record-progressive-section record-essentials-section" aria-labelledby="record-essentials-heading">
-            <div className="form-section-heading">
-              <span id="record-essentials-heading">Essentials</span>
-            </div>
-            <label>
-              <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
-              <input
-                required
-                maxLength={120}
-                value={form.title}
-                onChange={(event) => updateField('title', event.target.value)}
-                placeholder={definition.defaultTitle}
-              />
-            </label>
-
-            <div className="record-form-type-row">
-              <span>Record type</span>
-              <strong>{definition.label}</strong>
-            </div>
-
-            <RecordFieldGrid fields={visibleEssentialFields} form={form} onChange={updateField} />
-          </section>
-
-          {(visibleDateFields.length > 0 || hiddenSuggestedFields.some((field) => dateFields.includes(field))) ? (
-            <details className="record-progressive-section record-collapsible-section">
-              <summary>Dates</summary>
-              <RecordFieldGrid fields={visibleDateFields} form={form} onChange={updateField} />
-              <SuggestedFieldButtons
-                fields={hiddenSuggestedFields.filter((field) => dateFields.includes(field))}
-                recordType={form.record_type}
-                onAdd={showOptionalField}
-              />
-            </details>
-          ) : null}
-
-          {(visibleAdditionalFields.length > 0 || hiddenSuggestedFields.some((field) => !dateFields.includes(field))) ? (
-            <details className="record-progressive-section record-collapsible-section">
-              <summary>Additional details</summary>
-              <RecordFieldGrid fields={visibleAdditionalFields} form={form} onChange={updateField} />
-              <SuggestedFieldButtons
-                fields={hiddenSuggestedFields.filter((field) => !dateFields.includes(field))}
-                recordType={form.record_type}
-                onAdd={showOptionalField}
-              />
-            </details>
-          ) : null}
-
-          {(canShowNotes || canShowTags || definition.fields.includes('notes') || definition.fields.includes('tags')) ? (
-            <details className="record-progressive-section record-collapsible-section">
-              <summary>Notes</summary>
-              {canShowNotes ? (
-                <RecordTextArea field="notes" form={form} definitionType={form.record_type} onChange={updateField} />
-              ) : null}
-              {canShowTags ? (
-                <label>
-                  <span>Tags</span>
-                  <input
-                    maxLength={240}
-                    value={tagsText}
-                    onChange={(event) => setTagsText(event.target.value)}
-                    placeholder="travel, home, renewal"
-                  />
-                </label>
-              ) : null}
-              <SuggestedFieldButtons
-                fields={(['notes', 'tags'] as RecordField[]).filter((field) => definition.fields.includes(field) && !visibleOptionalFields.has(field))}
-                recordType={form.record_type}
-                onAdd={showOptionalField}
-              />
-            </details>
-          ) : null}
-
-          {validationError ? <p className="field-error">{validationError}</p> : null}
+        <div className="sheet-footer record-form-footer">
           <button className="primary-button" type="submit" disabled={isSaving}>
             {isEditing ? <Save size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
             {isSaving ? 'Saving' : isEditing ? 'Save record' : 'Add record'}
           </button>
-        </div>
-
-        <div
-          className="record-form-tab-panel"
-          hidden={activeTab !== 'documents'}
-          id="record-form-documents-panel"
-          role="tabpanel"
-          aria-labelledby="record-form-documents-tab"
-        >
-          {record ? (
-            <RecordDocumentsPanel isActive={isOpen && activeTab === 'documents'} mode="edit" recordId={record.id} />
-          ) : (
-            <StagedAttachmentsPanel
-              attachments={stagedAttachments}
-              error={stagedError}
-              onChoose={handleChooseStagedAttachment}
-              onRemove={handleRemoveStagedAttachment}
-            />
-          )}
-        </div>
-
-        <div
-          className="record-form-tab-panel"
-          hidden={activeTab !== 'links'}
-          id="record-form-links-panel"
-          role="tabpanel"
-          aria-labelledby="record-form-links-tab"
-        >
-          {record ? (
-            <LinkedItemsPanel
-              records={records}
-              reminders={reminders}
-              showAdd
-              tabLayout
-              sourceId={record.id}
-              sourceType="record"
-            />
-          ) : (
-            <StagedLinkedItemsPanel
-              records={records}
-              reminders={reminders}
-              stagedLinks={stagedLinks}
-              onAdd={() => setIsStagedLinkPickerOpen(true)}
-              onRemove={handleRemoveStagedLink}
-            />
-          )}
         </div>
       </form>
 
@@ -469,6 +539,44 @@ function toLinkCreateRequest(link: StagedLink): LinkCreateRequest {
     relationship_type: link.relationshipType,
     label: link.label,
   }
+}
+
+async function restoreRecordLinks(recordId: string, initialLinks: LinkedItemsResponse) {
+  const currentLinks = await linkedItemsApi.listRecordLinks(recordId)
+  const initialItems = flattenLinkedItems(initialLinks)
+  const currentItems = flattenLinkedItems(currentLinks)
+  const initialKeys = new Set(initialItems.map(getLinkedItemComparisonKey))
+  const currentKeys = new Set(currentItems.map(getLinkedItemComparisonKey))
+
+  for (const item of currentItems) {
+    if (!initialKeys.has(getLinkedItemComparisonKey(item))) {
+      await linkedItemsApi.deleteRecordLink(recordId, item.link_id)
+    }
+  }
+
+  for (const item of initialItems) {
+    if (!currentKeys.has(getLinkedItemComparisonKey(item))) {
+      await linkedItemsApi.createRecordLink(recordId, {
+        target_type: item.linked_entity.entity_type,
+        target_id: item.linked_entity.id,
+        relationship_type: item.relationship_type,
+        label: item.label,
+      })
+    }
+  }
+}
+
+function flattenLinkedItems(links: LinkedItemsResponse) {
+  return [...links.records, ...links.reminders]
+}
+
+function getLinkedItemComparisonKey(item: LinkedItem) {
+  return [
+    item.linked_entity.entity_type,
+    item.linked_entity.id,
+    item.relationship_type,
+    item.label ?? '',
+  ].join(':')
 }
 
 function StagedLinkedItemsPanel({
@@ -617,19 +725,6 @@ function getStagedLinkMeta(link: StagedLink, record: LifeRecord | null, reminder
   }
 
   return relationship
-}
-
-const relationshipLabels: Record<RelationshipType, string> = {
-  related: 'Related to',
-  belongs_to: 'Belongs to',
-  covers: 'Covers',
-  renews: 'Reminder for',
-  maintains: 'Maintenance for',
-  insures: 'Insurance for',
-  warranty_for: 'Warranty for',
-  document_for: 'Document for',
-  appointment_for: 'Appointment for',
-  custom: 'Custom',
 }
 
 function getInitialVisibleFields(input: RecordInput, definition: ReturnType<typeof getRecordTypeDefinition>) {

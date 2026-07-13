@@ -61,11 +61,6 @@ export const recordsApi = {
 
   get: (id: string) => request<LifeRecord>(`/records/${id}`),
 
-  protectedStatus: (id: string) =>
-    request<ProtectedRecordStatus>(`/records/${id}/protected/status`, {
-      cache: 'no-store',
-    }),
-
   revealProtected: (id: string) =>
     request<ProtectedRecordPayload>(`/records/${id}/protected`, {
       cache: 'no-store',
@@ -123,12 +118,6 @@ export const recordsApi = {
 
   completeAttachmentUpload: (id: string, attachmentId: string) =>
     request<RecordAttachment>(`/records/${id}/attachments/${attachmentId}/complete`, {
-      method: 'POST',
-      cache: 'no-store',
-    }),
-
-  refreshAttachmentStatus: (id: string, attachmentId: string) =>
-    request<RecordAttachment>(`/records/${id}/attachments/${attachmentId}/refresh-status`, {
       method: 'POST',
       cache: 'no-store',
     }),

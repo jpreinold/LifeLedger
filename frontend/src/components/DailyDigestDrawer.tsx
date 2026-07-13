@@ -1,6 +1,7 @@
 import { CalendarDays, CheckCircle2, ChevronRight, X } from 'lucide-react'
 import type { MouseEvent, ReactNode } from 'react'
 
+import { getAttentionDetail, getAttentionLabel } from '../lib/attentionDisplay'
 import type { DailyDigest } from '../lib/digest'
 import {
   formatLongDate,
@@ -259,27 +260,6 @@ function getDigestIntro(digest: DailyDigest) {
   }
 
   return 'No reminders need attention today.'
-}
-
-function getAttentionDetail(item: AttentionReminder) {
-  const smartLabel = getSmartReminderLabel(item.reminder)
-  if (smartLabel) {
-    return smartLabel
-  }
-
-  if (item.reason === 'Reminder window') {
-    return `Reminder started • ${formatReminderDueLabel(item.reminder, { includeDate: false })}`
-  }
-
-  return formatReminderDueLabel(item.reminder, { includeDate: false })
-}
-
-function getAttentionLabel(item: AttentionReminder) {
-  if (item.reason === 'Reminder window') {
-    return 'Reminder window'
-  }
-
-  return item.reason
 }
 
 function getReminderDetail(reminder: Reminder) {

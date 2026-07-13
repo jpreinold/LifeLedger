@@ -46,8 +46,6 @@ export const remindersApi = {
 
   alerts: () => request<ReminderAlert[]>('/alerts'),
 
-  get: (id: string) => request<Reminder>(`/reminders/${id}`),
-
   create: (input: ReminderInput) =>
     request<Reminder>('/reminders', {
       method: 'POST',

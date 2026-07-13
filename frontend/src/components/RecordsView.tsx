@@ -6,6 +6,7 @@ import {
   getRecordStatusClass,
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
+import { hasSensitiveDynamicFields } from '../lib/fieldRendering'
 import { getRecordTypeDefinition, recordFilterOptions, type RecordFilter } from '../lib/recordTypes'
 import type { LifeRecord } from '../types/record'
 
@@ -117,6 +118,7 @@ function RecordCard({ record, onView }: { record: LifeRecord; onView: () => void
   const Icon = definition.icon
   const keyDate = formatRecordKeyDate(record)
   const providerLine = getRecordProviderLine(record)
+  const hasSensitiveFields = record.has_protected_data || hasSensitiveDynamicFields(record.dynamic_fields)
 
   return (
     <article className="record-card">
@@ -133,7 +135,7 @@ function RecordCard({ record, onView }: { record: LifeRecord; onView: () => void
           <span>{record.subtitle || definition.category}</span>
           {keyDate ? <small>{keyDate}</small> : null}
           {providerLine ? <small>{providerLine}</small> : null}
-          {record.has_protected_data ? (
+          {hasSensitiveFields ? (
             <small className="record-protected-indicator">
               <LockKeyhole size={13} aria-hidden="true" />
               Sensitive fields saved

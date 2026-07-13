@@ -1,5 +1,5 @@
 import { formatLongDate } from './reminderDisplay'
-import type { DynamicFieldType, DynamicFieldValue } from '../types/record'
+import type { DynamicFieldType, DynamicFieldValue, DynamicRecordField } from '../types/record'
 
 export const maskedValue = '••••••••'
 
@@ -11,6 +11,14 @@ export function hasDisplayValue(value: DynamicFieldValue | string | null | undef
     return value.trim().length > 0
   }
   return true
+}
+
+export function hasSensitiveDynamicFields(fields: DynamicRecordField[]) {
+  return fields.some((field) => field.is_sensitive && field.has_value)
+}
+
+export function getVisibleDynamicFieldCount(fields: DynamicRecordField[]) {
+  return fields.filter((field) => field.is_sensitive ? field.has_value : hasDisplayValue(field.value)).length
 }
 
 export function formatDynamicFieldValue(fieldType: DynamicFieldType, value: DynamicFieldValue) {

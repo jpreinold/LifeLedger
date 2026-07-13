@@ -6,12 +6,6 @@ export type ReminderTypeFilter = 'all' | ReminderType
 
 export type ReminderStatusFilter = 'active' | 'overdue' | 'today' | 'month'
 
-export const reminderStatusFilters: Array<{ id: ReminderStatusFilter; label: string }> = [
-  { id: 'active', label: 'All active' },
-  { id: 'overdue', label: 'Overdue' },
-  { id: 'today', label: 'Due today' },
-  { id: 'month', label: 'Due this month' },
-]
 export const reminderTypeFilters: Array<{ id: ReminderTypeFilter; label: string }> = [
   { id: 'all', label: 'All types' },
   { id: 'generic', label: 'Reminders' },
@@ -29,10 +23,6 @@ const reminderTypeLabels: Record<ReminderType, string> = {
 
 export function getReminderTypeLabel(type: ReminderType | null | undefined) {
   return reminderTypeLabels[type ?? 'generic']
-}
-
-export function getReminderStatusFilterLabel(filter: ReminderStatusFilter) {
-  return reminderStatusFilters.find((item) => item.id === filter)?.label ?? 'All active'
 }
 
 export function matchesReminderStatusFilter(reminder: Reminder, filter: ReminderStatusFilter) {

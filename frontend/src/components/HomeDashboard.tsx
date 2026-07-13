@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
+import { getAttentionDetail, getAttentionTone } from '../lib/attentionDisplay'
 import { getDigestSummaryText, hasDigestItems, type DailyDigest } from '../lib/digest'
 import { formatReminderDueLabel, parseDateOnly, startOfDay } from '../lib/reminderDisplay'
 import { toAttentionReminder, type AttentionReminder } from '../lib/reminderSchedule'
@@ -264,8 +265,7 @@ function QuickAction({
 function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () => void }) {
   const { reminder } = item
   const { Icon, tone } = getCategoryVisual(reminder.category)
-  const smartLabel = getSmartReminderLabel(reminder)
-  const detail = smartLabel ?? formatAttentionStatus(item)
+  const detail = getAttentionDetail(item)
 
   return (
     <button type="button" className="home-list-row" onClick={onClick}>
@@ -372,26 +372,6 @@ function getDigestSeenLabel(lastSeenAt: string | null) {
 
 function formatOverviewSublabel(count: number, label: string) {
   return count === 0 ? 'All clear' : `${count} ${label}`
-}
-
-function formatAttentionStatus(item: AttentionReminder) {
-  if (item.reason === 'Reminder window') {
-    return `Reminder started \u2022 ${formatReminderDueLabel(item.reminder, { includeDate: false })}`
-  }
-
-  return formatReminderDueLabel(item.reminder, { includeDate: false })
-}
-
-function getAttentionTone(item: AttentionReminder) {
-  if (item.reason === 'Overdue') {
-    return 'danger'
-  }
-
-  if (item.reason === 'Due today') {
-    return 'warning'
-  }
-
-  return 'primary'
 }
 
 function getUpcomingReminders(reminders: Reminder[]) {

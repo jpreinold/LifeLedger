@@ -182,6 +182,8 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
   const selectedReminderPreset = getReminderLeadPreset(form)
   const renewalDetails = form.renewal_details
   const maintenanceDetails = form.maintenance_details
+  const computedRepeat = getComputedRepeat(form)
+  const canEditRepeat = form.reminder_type === 'generic' || form.reminder_type === 'renewal'
   const renewalDisplayKind = form.reminder_type === 'renewal'
     ? getRenewalDisplayKind(renewalDetails, { title: form.title, category: form.category })
     : null
@@ -265,7 +267,8 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
           <label>
             <span>Repeat</span>
             <select
-              value={form.repeat}
+              value={computedRepeat}
+              disabled={!canEditRepeat}
               onChange={(event) =>
                 setForm((current) => ({ ...current, repeat: event.target.value as ReminderInput['repeat'] }))
               }
@@ -276,6 +279,9 @@ export function ReminderFields({ form, setForm }: ReminderFieldsProps) {
                 </option>
               ))}
             </select>
+            {!canEditRepeat ? (
+              <small className="field-helper">Repeat is calculated from the smart reminder details.</small>
+            ) : null}
           </label>
 
           <label>
@@ -443,7 +449,7 @@ function MaintenanceFields({ form, setForm }: ReminderFieldsProps) {
 
       return {
         ...current,
-        category: defaults.category,
+        category: current.category === 'Other' ? defaults.category : current.category,
         repeat: getMaintenanceRepeat(nextWithDueDate),
         priority: defaults.priority,
         reminder_lead_value: defaults.reminder_lead_value,
@@ -804,6 +810,18 @@ function getDueDateFieldLabel(reminderType: ReminderInput['reminder_type']) {
   }
 
   return 'Due date'
+}
+
+function getComputedRepeat(form: ReminderInput): ReminderInput['repeat'] {
+  if (form.reminder_type === 'birthday') {
+    return 'Yearly'
+  }
+
+  if (form.reminder_type === 'maintenance') {
+    return getMaintenanceRepeat(form.maintenance_details ?? emptyMaintenanceDetails())
+  }
+
+  return form.repeat
 }
 
 function getRelevantRenewalFormDate(details: RenewalDetailsInput, fallbackDate: string) {

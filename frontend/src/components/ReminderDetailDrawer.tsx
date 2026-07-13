@@ -22,6 +22,7 @@ import type { GoogleCalendarStatus } from '../api/calendarApi'
 import type { Reminder } from '../types/reminder'
 import type { LifeRecord } from '../types/record'
 import { getCategoryVisual } from './categoryVisuals'
+import { DetailSection, type DetailRow } from './DetailSection'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -42,11 +43,6 @@ interface ReminderDetailDrawerProps {
   onOpenLinkedRecord: (recordId: string) => void
   onRequestDelete: (reminder: Reminder) => void
   onSnooze: (id: string) => Promise<void>
-}
-
-interface DetailRow {
-  label: string
-  value: string | null | undefined
 }
 
 export function ReminderDetailDrawer({
@@ -399,28 +395,6 @@ function formatCalendarSyncTimestamp(value: string) {
   })
 }
 
-function DetailSection({ className = '', rows, title }: { className?: string; rows: DetailRow[]; title: string }) {
-  const visibleRows = rows.filter((row) => hasValue(row.value))
-
-  if (visibleRows.length === 0) {
-    return null
-  }
-
-  return (
-    <section className={`detail-section ${className}`.trim()} aria-label={title}>
-      <h3>{title}</h3>
-      <dl className="detail-list">
-        {visibleRows.map((row) => (
-          <div className="detail-row" key={row.label}>
-            <dt>{row.label}</dt>
-            <dd>{row.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  )
-}
-
 function getDetailSectionTitle(reminder: Reminder) {
   if (reminder.reminder_type === 'birthday') {
     return 'Birthday details'
@@ -531,6 +505,3 @@ function formatInterval(value: number | null, unit: string | null) {
   return `Every ${value} ${unitLabel}`
 }
 
-function hasValue(value: string | null | undefined) {
-  return value !== null && value !== undefined && value.trim().length > 0
-}

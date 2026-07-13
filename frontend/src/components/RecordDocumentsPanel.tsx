@@ -192,17 +192,21 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
   }
 
   async function handleAttachmentFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0] ?? null
+    const selectedFiles = Array.from(event.currentTarget.files ?? [])
     event.currentTarget.value = ''
-    if (!file) {
+    if (selectedFiles.length === 0) {
       return
     }
 
-    const validationError = validateAttachmentFile(file, activeCount)
-    if (validationError) {
-      setAttachmentError(validationError)
-      setAttachmentMessage(null)
-      return
+    let count = activeCount
+    for (const file of selectedFiles) {
+      const validationError = validateAttachmentFile(file, count)
+      if (validationError) {
+        setAttachmentError(validationError)
+        setAttachmentMessage(null)
+        return
+      }
+      count += 1
     }
 
     setIsUploadingAttachment(true)
@@ -210,15 +214,17 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
     setAttachmentMessage(null)
 
     try {
-      const intent = await recordsApi.createAttachmentUploadIntent(recordId, {
-        filename: file.name,
-        content_type: file.type,
-        size_bytes: file.size,
-      })
-      await recordsApi.uploadAttachmentFile(intent.upload, file)
-      const completed = await recordsApi.completeAttachmentUpload(recordId, intent.attachment_id)
-      setAttachments((current) => upsertAttachment(current, completed))
-      setAttachmentMessage('Document uploaded. Security scan in progress.')
+      for (const file of selectedFiles) {
+        const intent = await recordsApi.createAttachmentUploadIntent(recordId, {
+          filename: file.name,
+          content_type: file.type,
+          size_bytes: file.size,
+        })
+        await recordsApi.uploadAttachmentFile(intent.upload, file)
+        const completed = await recordsApi.completeAttachmentUpload(recordId, intent.attachment_id)
+        setAttachments((current) => upsertAttachment(current, completed))
+      }
+      setAttachmentMessage(selectedFiles.length === 1 ? 'Document uploaded. Security scan in progress.' : 'Documents uploaded. Security scans in progress.')
       void loadAttachments({ quiet: true })
     } catch (requestError) {
       setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to upload document.')
@@ -376,6 +382,7 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
 
       <input
         type="file"
+        multiple
         accept={attachmentAccept}
         className="attachment-file-input"
         ref={fileInputRef}

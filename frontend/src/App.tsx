@@ -32,7 +32,7 @@ import { CalendarView } from './components/CalendarView'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { DailyDigestDrawer } from './components/DailyDigestDrawer'
 import { Dashboard } from './components/Dashboard'
-import { EditReminderModal } from './components/EditReminderModal'
+import { EditReminderDrawer } from './components/EditReminderDrawer'
 import { HomeDashboard } from './components/HomeDashboard'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { RecordDetailDrawer, type RecordDetailTab } from './components/RecordDetailDrawer'
@@ -425,7 +425,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       await loadRecordData()
       setActivePage('records')
       setRecordBackStack([])
-      setViewingRecord({ record: nextRecord, initialTab: 'details' })
+      setViewingRecord({ record: nextRecord, initialTab: links.length > 0 ? 'linkedItems' : 'details' })
       if (!protectedSaved) {
         setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
       } else if (attachmentFailures > 0 || linkFailures > 0) {
@@ -962,7 +962,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           isLoading={isLoading}
           recordsCount={activeRecordsCount}
           userName={displayName}
-          onAddRecord={openRecordTypeSelector}
+          onAddRecord={openAddReminder}
           onAddReminder={openAddReminder}
           onBrowseTemplates={openTemplates}
           onViewReminders={() => showPage('reminders')}
@@ -1005,7 +1005,6 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
               onStatusFilterChange={setReminderStatusFilter}
               onTypeFilterChange={setReminderTypeFilter}
               onComplete={handleComplete}
-              onEdit={setEditingReminder}
               onDelete={requestDelete}
               onView={openReminderDetail}
               onBrowseTemplates={openTemplates}
@@ -1029,7 +1028,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           isLoading={isRecordsLoading}
           records={records}
           showArchived={showArchivedRecords}
-          onAddRecord={openRecordTypeSelector}
+          onAddRecord={openAddReminder}
           onFilterChange={setRecordFilter}
           onShowArchivedChange={setShowArchivedRecords}
           onViewRecord={openRecordDetail}
@@ -1109,6 +1108,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         reminders={reminders}
         onClose={closeRecordForm}
         onCreate={handleCreateRecord}
+        onOpenRecord={openLinkedRecord}
+        onOpenReminder={openLinkedReminder}
         onUpdate={handleUpdateRecord}
       />
 
@@ -1126,7 +1127,6 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onClose={() => setIsAlertCenterOpen(false)}
         onComplete={handleComplete}
         onDismiss={handleDismissAlert}
-        onEdit={openAlertDetail}
         onSnooze={handleSnoozeAlert}
         onView={openAlertDetail}
       />
@@ -1180,7 +1180,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         />
       ) : null}
       {editingReminder ? (
-        <EditReminderModal
+        <EditReminderDrawer
           reminder={editingReminder}
           isSaving={isSaving}
           onCancel={() => setEditingReminder(null)}

@@ -5,13 +5,14 @@ import { Check, ListPlus, LockKeyhole, Plus, Type } from 'lucide-react'
 import { recordsApi } from '../api/recordsApi'
 import { getDynamicFieldTypeLabel, getInputTypeForDynamicField, toFieldInputValue } from '../lib/fieldRendering'
 import type { DynamicFieldPreset } from '../lib/recordTypes'
-import type { DynamicFieldType, DynamicFieldValue, LifeRecord } from '../types/record'
+import type { DynamicFieldType, DynamicFieldValue, DynamicRecordField, LifeRecord } from '../types/record'
 import { dynamicFieldTypes } from '../types/record'
 import { SheetDrawer } from './SheetDrawer'
 
 interface AddFieldDrawerProps {
   isOpen: boolean
   record: LifeRecord
+  field?: DynamicRecordField | null
   suggestedFields: DynamicFieldPreset[]
   onClose: () => void
   onSaved: (record: LifeRecord) => void
@@ -19,17 +20,19 @@ interface AddFieldDrawerProps {
 
 type Mode = 'suggested' | 'custom'
 
-export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSaved }: AddFieldDrawerProps) {
+export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, onClose, onSaved }: AddFieldDrawerProps) {
   const [mode, setMode] = useState<Mode>('suggested')
   const [selectedPreset, setSelectedPreset] = useState<DynamicFieldPreset | null>(null)
   const [customLabel, setCustomLabel] = useState('')
   const [customType, setCustomType] = useState<DynamicFieldType>('short_text')
   const [customSensitive, setCustomSensitive] = useState(false)
   const [value, setValue] = useState<DynamicFieldValue>(null)
+  const [hasValueChanged, setHasValueChanged] = useState(false)
   const [selectOptionsText, setSelectOptionsText] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const firstInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null>(null)
+  const isEditing = field !== null
 
   useEffect(() => {
     if (!isOpen) {
@@ -39,14 +42,27 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
       setCustomType('short_text')
       setCustomSensitive(false)
       setValue(null)
+      setHasValueChanged(false)
       setSelectOptionsText('')
       setError(null)
       setIsSaving(false)
       return
     }
 
+    if (field) {
+      setMode('custom')
+      setSelectedPreset(null)
+      setCustomLabel(field.label)
+      setCustomType(field.field_type)
+      setCustomSensitive(field.is_sensitive)
+      setValue(field.is_sensitive && field.has_value ? null : field.value)
+      setHasValueChanged(false)
+      setSelectOptionsText(field.select_options.join('\n'))
+      setError(null)
+    }
+
     window.requestAnimationFrame(() => firstInputRef.current?.focus())
-  }, [isOpen])
+  }, [field, isOpen])
 
   const customField = useMemo<DynamicFieldPreset>(() => ({
     key: customLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
@@ -57,7 +73,7 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
   }), [customLabel, customSensitive, customType, selectOptionsText])
 
   const activeField = selectedPreset ?? customField
-  const isCustomMode = mode === 'custom' && selectedPreset === null
+  const isCustomMode = (mode === 'custom' && selectedPreset === null) || isEditing
   const canSave = selectedPreset !== null || isCustomMode
 
   function chooseSuggested(field: DynamicFieldPreset) {
@@ -95,19 +111,29 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
     setIsSaving(true)
     setError(null)
     try {
-      const updated = await recordsApi.addField(record.id, {
-        key: activeField.key || null,
-        label: activeField.label,
-        field_type: activeField.field_type,
-        value: normalizeValue(activeField.field_type, value),
-        is_sensitive: activeField.is_sensitive ?? false,
-        select_options: activeField.select_options ?? [],
-        display_order: activeField.display_order ?? null,
-      })
+      const normalizedValue = normalizeValue(activeField.field_type, value)
+      const updated = field
+        ? await recordsApi.updateField(record.id, field.field_id, {
+          label: activeField.label,
+          field_type: activeField.field_type,
+          ...(hasValueChanged ? { value: normalizedValue } : {}),
+          is_sensitive: activeField.is_sensitive ?? false,
+          select_options: activeField.select_options ?? [],
+          display_order: activeField.display_order ?? field.display_order,
+        })
+        : await recordsApi.addField(record.id, {
+          key: activeField.key || null,
+          label: activeField.label,
+          field_type: activeField.field_type,
+          value: normalizedValue,
+          is_sensitive: activeField.is_sensitive ?? false,
+          select_options: activeField.select_options ?? [],
+          display_order: activeField.display_order ?? null,
+        })
       onSaved(updated)
       onClose()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to add field.')
+      setError(requestError instanceof Error ? requestError.message : isEditing ? 'Unable to update field.' : 'Unable to add field.')
     } finally {
       setIsSaving(false)
     }
@@ -121,18 +147,18 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
       footer={canSave ? (
         <button type="button" className="primary-button add-field-save-button" disabled={isSaving} onClick={() => void saveField()}>
           <Check size={17} aria-hidden="true" />
-          {isSaving ? 'Saving...' : 'Save field'}
+          {isSaving ? 'Saving...' : isEditing ? 'Save changes' : 'Save field'}
         </button>
       ) : null}
       isOpen={isOpen}
       labelledBy="add-field-heading"
-      onBack={selectedPreset ? backToSuggestedList : undefined}
+      onBack={!isEditing && selectedPreset ? backToSuggestedList : undefined}
       onClose={onClose}
       backLabel="Back to suggested fields"
       subtitle={record.title}
-      title="Add field"
+      title={isEditing ? 'Edit field' : 'Add field'}
     >
-        {selectedPreset === null ? (
+        {selectedPreset === null && !isEditing ? (
           <div className="add-field-mode-tabs" role="tablist" aria-label="Field source">
             <button
               type="button"
@@ -155,7 +181,7 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
           </div>
         ) : null}
 
-        {mode === 'suggested' && selectedPreset === null ? (
+        {mode === 'suggested' && selectedPreset === null && !isEditing ? (
           suggestedFields.length > 0 ? (
             <>
               <p className="add-field-list-heading">Choose a suggested field</p>
@@ -207,7 +233,18 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
                 <textarea rows={3} maxLength={400} value={selectOptionsText} onChange={(event) => setSelectOptionsText(event.target.value)} placeholder="One option per line" />
               </label>
             ) : null}
-            <DynamicValueControl field={customField} inputRef={firstInputRef} value={value} onChange={setValue} />
+            {field?.is_sensitive && field.has_value && !hasValueChanged ? (
+              <p className="field-helper">The current value is hidden. Enter a new value only if you want to replace it.</p>
+            ) : null}
+            <DynamicValueControl
+              field={customField}
+              inputRef={firstInputRef}
+              value={value}
+              onChange={(nextValue) => {
+                setValue(nextValue)
+                setHasValueChanged(true)
+              }}
+            />
           </div>
         ) : null}
 
@@ -222,7 +259,15 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
                 <small>{getDynamicFieldTypeLabel(selectedPreset.field_type)}</small>
               </div>
             </div>
-            <DynamicValueControl field={selectedPreset} inputRef={firstInputRef} value={value} onChange={setValue} />
+            <DynamicValueControl
+              field={selectedPreset}
+              inputRef={firstInputRef}
+              value={value}
+              onChange={(nextValue) => {
+                setValue(nextValue)
+                setHasValueChanged(true)
+              }}
+            />
           </div>
         ) : null}
 

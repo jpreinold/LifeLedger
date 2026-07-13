@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, Cake, ChevronRight, FileText, RefreshCcw, Wrench, X } from 'lucide-react'
+import { Bell, Cake, ChevronRight, FileText, RefreshCcw, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { useDrawerCloseTransition } from '../lib/useDrawerCloseTransition'
 import { SheetDrawer } from './SheetDrawer'
 
 interface AddTypeSelectorProps {
@@ -22,8 +22,6 @@ interface AddOption {
   onClick?: () => void
 }
 
-const drawerCloseMs = 220
-
 export function AddTypeSelector({
   isOpen,
   onClose,
@@ -33,65 +31,7 @@ export function AddTypeSelector({
   onChooseMaintenance,
   onChooseRecord,
 }: AddTypeSelectorProps) {
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-  const isClosingRef = useRef(false)
-  const closeTimerRef = useRef<number | null>(null)
-
-  const requestClose = useCallback(() => {
-    if (isClosingRef.current) {
-      return
-    }
-
-    isClosingRef.current = true
-    setIsDrawerOpen(false)
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null
-      onClose()
-    }, drawerCloseMs)
-  }, [onClose])
-
-  const closeWithAction = useCallback((action: () => void) => {
-    if (isClosingRef.current) {
-      return
-    }
-
-    isClosingRef.current = true
-    setIsDrawerOpen(false)
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null
-      action()
-    }, drawerCloseMs)
-  }, [])
-
-  useEffect(() => {
-    if (isOpen) {
-      isClosingRef.current = false
-      setIsDrawerOpen(true)
-    }
-  }, [isOpen])
-
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        requestClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, requestClose])
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current)
-      }
-    }
-  }, [])
+  const { closeWithAction, isDrawerOpen, requestClose } = useDrawerCloseTransition({ isOpen, onClose })
 
   const options: AddOption[] = [
     {
@@ -134,25 +74,17 @@ export function AddTypeSelector({
   return (
     <SheetDrawer
       className="add-type-dialog"
+      bodyClassName="sheet-body add-type-options"
+      closeLabel="Close add options"
       isOpen={isOpen && isDrawerOpen}
       labelledBy="add-type-heading"
       onClose={requestClose}
+      subtitle="Choose the kind of item to create."
+      title="What would you like to add?"
     >
-        <div className="sheet-header">
-          <div>
-            <h2 id="add-type-heading">What would you like to add?</h2>
-            <p>Choose the kind of item to create.</p>
-          </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close add options">
-            <X size={19} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="add-type-options">
-          {options.map((option) => (
-            <AddTypeOption option={option} key={option.title} />
-          ))}
-        </div>
+      {options.map((option) => (
+        <AddTypeOption option={option} key={option.title} />
+      ))}
     </SheetDrawer>
   )
 }

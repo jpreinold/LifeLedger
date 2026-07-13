@@ -8,8 +8,9 @@ import { createRenewalReminderInput } from '../lib/reminderInput'
 import type { DynamicFieldPreset } from '../lib/recordTypes'
 import type { LinkCreateRequest } from '../types/linkedItem'
 import type { LifeRecord, ProtectedRecordInput, RecordInput } from '../types/record'
-import type { ReminderInput } from '../types/reminder'
+import type { Reminder, ReminderInput } from '../types/reminder'
 import { AddFieldDrawer } from './AddFieldDrawer'
+import { EditReminderDrawer } from './EditReminderDrawer'
 import { RecordDetailDrawer } from './RecordDetailDrawer'
 import { RecordForm } from './RecordForm'
 import { ReminderFields } from './ReminderForm'
@@ -68,6 +69,44 @@ const suggestedFields: DynamicFieldPreset[] = [
     description: 'Veterinarian clinic or doctor.',
   },
 ]
+
+const baseReminder: Reminder = {
+  id: 'reminder-1',
+  title: 'Water plants',
+  category: 'Home',
+  due_date: '2026-07-14',
+  repeat: 'Weekly',
+  priority: 'Medium',
+  notes: null,
+  reminder_lead_value: 1,
+  reminder_lead_unit: 'days',
+  reminder_time: '09:00',
+  reminder_type: 'generic',
+  birthday_details: null,
+  renewal_details: null,
+  maintenance_details: null,
+  completed: false,
+  alert_dismissed_until: null,
+  alert_last_seen_at: null,
+  alert_last_action_at: null,
+  alert_snoozed_until: null,
+  status: 'Upcoming',
+  created_at: '2026-07-11T22:54:00.000Z',
+  updated_at: '2026-07-11T22:54:00.000Z',
+  completed_at: null,
+  next_due_date: null,
+  computed_label: null,
+  birthday_age_label: null,
+  renewal_status_label: null,
+  renewal_window_label: null,
+  maintenance_status_label: null,
+  calendar_sync_enabled: false,
+  calendar_provider: null,
+  calendar_id: null,
+  calendar_last_synced_at: null,
+  calendar_sync_status: 'not_synced',
+  calendar_sync_error: null,
+}
 
 describe('Phase 6 mobile flows', () => {
   beforeEach(() => {
@@ -264,6 +303,7 @@ describe('Phase 6 mobile flows', () => {
       />,
     )
 
+    await user.type(screen.getByLabelText('Title'), 'Travel folder')
     await user.click(screen.getByRole('tab', { name: 'Linked items' }))
     await user.click(screen.getByRole('button', { name: 'Link item' }))
 
@@ -275,8 +315,6 @@ describe('Phase 6 mobile flows', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add linked item' })).not.toBeInTheDocument())
     expect(await screen.findByText('Passport')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Details' }))
-    await user.type(screen.getByLabelText('Title'), 'Travel folder')
     await user.click(screen.getByRole('button', { name: /Add record/ }))
 
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1))
@@ -288,6 +326,66 @@ describe('Phase 6 mobile flows', () => {
         label: null,
       },
     ])
+  })
+
+  it('keeps the record save action available while editing on another tab', async () => {
+    const user = userEvent.setup()
+    const onUpdate = vi.fn(async (
+      _id: string,
+      _input: RecordInput,
+      _protectedInput: ProtectedRecordInput,
+    ) => true)
+
+    render(
+      <RecordForm
+        isOpen
+        isSaving={false}
+        record={baseRecord}
+        records={[baseRecord]}
+        recordType="general"
+        reminders={[]}
+        onClose={vi.fn()}
+        onCreate={vi.fn(async () => true)}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Documents' }))
+    await user.click(screen.getByRole('button', { name: /Save record/ }))
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    expect(onUpdate.mock.calls[0][0]).toBe(baseRecord.id)
+  })
+
+  it('keeps edit reminder actions in the sheet footer', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_id: string, _input: ReminderInput) => true)
+    const onDelete = vi.fn()
+
+    render(
+      <EditReminderDrawer
+        reminder={baseReminder}
+        isSaving={false}
+        onCancel={vi.fn()}
+        onDelete={onDelete}
+        onSave={onSave}
+      />,
+    )
+
+    const saveButton = screen.getByRole('button', { name: /Save changes/ })
+    const deleteButton = screen.getByRole('button', { name: /Delete reminder/ })
+
+    expect(saveButton.closest('.sheet-footer')).not.toBeNull()
+    expect(deleteButton.closest('.sheet-footer')).not.toBeNull()
+
+    await user.click(deleteButton)
+
+    expect(onDelete).toHaveBeenCalledWith(baseReminder)
+
+    await user.click(saveButton)
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toBe(baseReminder.id)
   })
 })
 

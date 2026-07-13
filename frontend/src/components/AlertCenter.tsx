@@ -1,8 +1,8 @@
 import { CheckCircle2, Clock3, Eye, X } from 'lucide-react'
 
-import { formatReminderDueLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
+import { getAttentionDetail, getAttentionLabel, getAttentionTone } from '../lib/attentionDisplay'
+import { getReminderTypeLabel } from '../lib/reminderDisplay'
 import { toAttentionReminder, type AttentionReminder } from '../lib/reminderSchedule'
-import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { Reminder, ReminderAlert } from '../types/reminder'
 import { getCategoryVisual } from './categoryVisuals'
 import { SheetDrawer } from './SheetDrawer'
@@ -14,7 +14,6 @@ interface AlertCenterProps {
   onClose: () => void
   onComplete: (id: string) => Promise<void>
   onDismiss: (id: string) => Promise<void>
-  onEdit: (reminder: Reminder) => void
   onSnooze: (id: string) => Promise<void>
   onView: (reminder: Reminder) => void
 }
@@ -26,7 +25,6 @@ export function AlertCenter({
   onClose,
   onComplete,
   onDismiss,
-  onEdit,
   onSnooze,
   onView,
 }: AlertCenterProps) {
@@ -62,7 +60,6 @@ export function AlertCenter({
                 key={item.reminder.id}
                 onComplete={onComplete}
                 onDismiss={onDismiss}
-                onEdit={onEdit}
                 onSnooze={onSnooze}
                 onView={onView}
               />
@@ -78,14 +75,12 @@ function AlertItem({
   item,
   onComplete,
   onDismiss,
-  onEdit,
   onSnooze,
   onView,
 }: {
   item: AttentionReminder
   onComplete: (id: string) => Promise<void>
   onDismiss: (id: string) => Promise<void>
-  onEdit: (reminder: Reminder) => void
   onSnooze: (id: string) => Promise<void>
   onView: (reminder: Reminder) => void
 }) {
@@ -113,7 +108,7 @@ function AlertItem({
       </button>
 
       <div className="alert-center-actions">
-        <button type="button" className="secondary-button alert-action-secondary" onClick={() => onEdit(reminder)}>
+        <button type="button" className="secondary-button alert-action-secondary" onClick={() => onView(reminder)}>
           <Eye size={16} aria-hidden="true" />
           View
         </button>
@@ -142,35 +137,12 @@ function formatAlertCount(count: number, isLoading: boolean) {
 }
 
 function getAlertReasonLabel(item: AttentionReminder) {
-  if (item.reason === 'Reminder window') {
-    return 'Reminder window started'
-  }
-
-  return item.reason
+  return getAttentionLabel(item, { windowLabel: 'Reminder window started' })
 }
 
 function getAlertDetail(item: AttentionReminder) {
-  const smartLabel = getSmartReminderLabel(item.reminder)
-  if (smartLabel) {
-    return smartLabel
-  }
-
-  if (item.reason === 'Reminder window' && item.reminderDate) {
-    return `Reminder started. ${formatReminderDueLabel(item.reminder, { includeDate: false })}`
-  }
-
-  return formatReminderDueLabel(item.reminder, { includeDate: false })
+  return getAttentionDetail(item, { windowSeparator: '. ' })
 }
 
-function getAlertTone(item: AttentionReminder) {
-  if (item.reason === 'Overdue') {
-    return 'danger'
-  }
-
-  if (item.reason === 'Due today') {
-    return 'warning'
-  }
-
-  return 'primary'
-}
+const getAlertTone = getAttentionTone
 

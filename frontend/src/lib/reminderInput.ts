@@ -163,7 +163,7 @@ export function isReminderReady(form: ReminderInput) {
     return getMaintenanceValidationMessage(form) === null
   }
 
-  return true
+  return Boolean(form.due_date)
 }
 
 export function buildReminderSubmitInput(form: ReminderInput): ReminderInput {

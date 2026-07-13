@@ -19,11 +19,12 @@ import {
   getRecordStatusClass,
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
-import { formatDynamicFieldValue, hasDisplayValue, maskedValue } from '../lib/fieldRendering'
+import { formatDynamicFieldValue, getVisibleDynamicFieldCount, hasDisplayValue, hasSensitiveDynamicFields, maskedValue } from '../lib/fieldRendering'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
 import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { AddFieldDrawer } from './AddFieldDrawer'
+import { DetailSection } from './DetailSection'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
@@ -46,11 +47,6 @@ interface RecordDetailDrawerProps {
   onRecordChange: (record: LifeRecord) => void
   onRequestDelete: (record: LifeRecord) => void
   onRestore: (record: LifeRecord) => Promise<void>
-}
-
-interface DetailRow {
-  label: string
-  value: string | null | undefined
 }
 
 const drawerCloseMs = 220
@@ -82,6 +78,7 @@ export function RecordDetailDrawer({
   const [protectedError, setProtectedError] = useState<string | null>(null)
   const [documentsCount, setDocumentsCount] = useState<number | null>(null)
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false)
+  const [editingField, setEditingField] = useState<DynamicRecordField | null>(null)
   const [revealedFields, setRevealedFields] = useState<Record<string, DynamicFieldValue>>({})
   const [revealingFieldId, setRevealingFieldId] = useState<string | null>(null)
   const [removingFieldId, setRemovingFieldId] = useState<string | null>(null)
@@ -96,6 +93,8 @@ export function RecordDetailDrawer({
   const providerLine = getRecordProviderLine(record)
   const keyDate = formatRecordKeyDate(record)
   const updatedLabel = formatRecordTimestamp(record.updated_at)
+  const dynamicFieldCount = getVisibleDynamicFieldCount(record.dynamic_fields)
+  const hasSensitiveFields = record.has_protected_data || hasSensitiveDynamicFields(record.dynamic_fields)
   const isArchived = record.status === 'archived'
   const showCategoryChip = definition.category.trim().toLowerCase() !== definition.label.trim().toLowerCase()
   const suggestedDynamicFields = definition.dynamicFieldPresets.filter(
@@ -134,6 +133,7 @@ export function RecordDetailDrawer({
   useEffect(() => {
     clearSensitiveState()
     setIsAddFieldOpen(false)
+    setEditingField(null)
     setActiveTab(initialTab)
     setIsDrawerOpen(false)
     resetDetailScroll()
@@ -218,6 +218,7 @@ export function RecordDetailDrawer({
   const requestClose = useCallback(() => {
     clearSensitiveState()
     setIsAddFieldOpen(false)
+    setEditingField(null)
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
@@ -381,7 +382,8 @@ export function RecordDetailDrawer({
               ) : null}
               <div className="detail-hero-meta" aria-label="Record summary">
                 {documentsCount !== null ? <span className="detail-hero-pill">{documentsCount} document{documentsCount === 1 ? '' : 's'}</span> : null}
-                <span className="detail-hero-pill">{record.dynamic_fields.length} custom field{record.dynamic_fields.length === 1 ? '' : 's'}</span>
+                <span className="detail-hero-pill">{dynamicFieldCount} custom field{dynamicFieldCount === 1 ? '' : 's'}</span>
+                {hasSensitiveFields ? <span className="detail-hero-pill">Sensitive fields saved</span> : null}
               </div>
             </div>
           </section>
@@ -461,6 +463,7 @@ export function RecordDetailDrawer({
               removingFieldId={removingFieldId}
               suggestedCount={suggestedDynamicFields.length}
               onAddField={() => setIsAddFieldOpen(true)}
+              onEditField={setEditingField}
               onHideField={hideDynamicField}
               onRemoveField={(field) => void handleRemoveField(field)}
               onRevealField={(field) => void handleRevealField(field)}
@@ -536,35 +539,17 @@ export function RecordDetailDrawer({
       </SheetDrawer>
 
       <AddFieldDrawer
-        isOpen={isAddFieldOpen}
+        field={editingField}
+        isOpen={isAddFieldOpen || editingField !== null}
         record={record}
         suggestedFields={suggestedDynamicFields}
-        onClose={() => setIsAddFieldOpen(false)}
+        onClose={() => {
+          setIsAddFieldOpen(false)
+          setEditingField(null)
+        }}
         onSaved={onRecordChange}
       />
     </>
-  )
-}
-
-function DetailSection({ className = '', rows, title }: { className?: string; rows: DetailRow[]; title: string }) {
-  const visibleRows = rows.filter((row) => hasValue(row.value))
-
-  if (visibleRows.length === 0) {
-    return null
-  }
-
-  return (
-    <section className={`detail-section ${className}`.trim()} aria-label={title}>
-      <h3>{title}</h3>
-      <dl className="detail-list">
-        {visibleRows.map((row) => (
-          <div className="detail-row" key={row.label}>
-            <dt>{row.label}</dt>
-            <dd>{row.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
   )
 }
 
@@ -572,6 +557,7 @@ function DynamicFieldsSection({
   error,
   fields,
   onAddField,
+  onEditField,
   onHideField,
   onRemoveField,
   onRevealField,
@@ -583,6 +569,7 @@ function DynamicFieldsSection({
   error: string | null
   fields: DynamicRecordField[]
   onAddField: () => void
+  onEditField: (field: DynamicRecordField) => void
   onHideField: (fieldId: string) => void
   onRemoveField: (field: DynamicRecordField) => void
   onRevealField: (field: DynamicRecordField) => void
@@ -634,6 +621,9 @@ function DynamicFieldsSection({
                         </button>
                       )
                     ) : null}
+                    <button type="button" className="icon-button ghost-icon-button dynamic-field-edit" onClick={() => onEditField(field)} aria-label={`Edit ${field.label}`}>
+                      <Pencil size={15} aria-hidden="true" />
+                    </button>
                     <button type="button" className="icon-button ghost-icon-button dynamic-field-remove" disabled={removingFieldId === field.field_id} onClick={() => onRemoveField(field)} aria-label={`Remove ${field.label}`}>
                       <Trash2 size={15} aria-hidden="true" />
                     </button>
@@ -747,6 +737,3 @@ function ProtectedDetailsSection({
   )
 }
 
-function hasValue(value: string | null | undefined) {
-  return value !== null && value !== undefined && value.trim().length > 0
-}

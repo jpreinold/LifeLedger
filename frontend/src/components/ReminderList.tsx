@@ -20,7 +20,6 @@ interface ReminderListProps {
   onStatusFilterChange: (filter: ReminderStatusFilter) => void
   onTypeFilterChange: (filter: ReminderTypeFilter) => void
   onComplete: (id: string) => Promise<void>
-  onEdit: (reminder: Reminder) => void
   onDelete: (reminder: Reminder) => void
   onView: (reminder: Reminder) => void
   onBrowseTemplates: () => void
@@ -35,7 +34,6 @@ export function ReminderList({
   onStatusFilterChange,
   onTypeFilterChange,
   onComplete,
-  onEdit,
   onDelete,
   onView,
   onBrowseTemplates,
@@ -118,7 +116,6 @@ export function ReminderList({
             reminder={reminder}
             key={reminder.id}
             onComplete={onComplete}
-            onEdit={onEdit}
             onDelete={onDelete}
             onView={onView}
           />

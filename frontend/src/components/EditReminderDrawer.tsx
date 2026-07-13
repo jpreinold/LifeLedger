@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Save, Trash2, X } from 'lucide-react'
+import { Save, Trash2 } from 'lucide-react'
 
 import type { Reminder, ReminderInput } from '../types/reminder'
 import { buildReminderSubmitInput, isReminderReady } from '../lib/reminderInput'
@@ -9,8 +9,9 @@ import { ReminderFields } from './ReminderForm'
 import { SheetDrawer } from './SheetDrawer'
 
 const drawerCloseMs = 220
+const editReminderFormId = 'edit-reminder-form'
 
-interface EditReminderModalProps {
+interface EditReminderDrawerProps {
   reminder: Reminder
   isSaving: boolean
   onCancel: () => void
@@ -18,7 +19,7 @@ interface EditReminderModalProps {
   onSave: (id: string, input: ReminderInput) => Promise<boolean>
 }
 
-export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSave }: EditReminderModalProps) {
+export function EditReminderDrawer({ reminder, isSaving, onCancel, onDelete, onSave }: EditReminderDrawerProps) {
   const [form, setForm] = useState<ReminderInput>(() => toReminderInput(reminder))
   const [isDrawerOpen, setIsDrawerOpen] = useState(true)
   const isClosingRef = useRef(false)
@@ -62,31 +63,30 @@ export function EditReminderModal({ reminder, isSaving, onCancel, onDelete, onSa
   }
 
   return (
-    <SheetDrawer className="edit-dialog reminder-form-dialog" isOpen={isDrawerOpen} labelledBy="edit-reminder-heading" onClose={requestCancel}>
-        <div className="sheet-header">
-          <div>
-            <h2 id="edit-reminder-heading">{getEditHeading(form.reminder_type)}</h2>
-            <p>{getEditDescription(form.reminder_type)}</p>
-          </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={requestCancel} aria-label="Close edit reminder">
-            <X size={19} aria-hidden="true" />
+    <SheetDrawer
+      className="edit-dialog reminder-form-dialog"
+      closeLabel="Close edit reminder"
+      footer={(
+        <div className="sheet-footer-actions reminder-form-footer">
+          <button className="primary-button" type="submit" form={editReminderFormId} disabled={isSaving || !isReminderReady(form)}>
+            <Save size={18} aria-hidden="true" />
+            {isSaving ? 'Saving' : 'Save changes'}
+          </button>
+          <button type="button" className="text-danger-button" onClick={() => onDelete(reminder)}>
+            <Trash2 size={16} aria-hidden="true" />
+            Delete reminder
           </button>
         </div>
-
-        <form className="reminder-form sheet-body" onSubmit={handleSubmit}>
-          <ReminderFields form={form} setForm={setForm} />
-
-          <div className="modal-actions">
-            <button className="primary-button" type="submit" disabled={isSaving || !isReminderReady(form)}>
-              <Save size={18} aria-hidden="true" />
-              {isSaving ? 'Saving' : 'Save changes'}
-            </button>
-            <button type="button" className="text-danger-button" onClick={() => onDelete(reminder)}>
-              <Trash2 size={16} aria-hidden="true" />
-              Delete reminder
-            </button>
-          </div>
-        </form>
+      )}
+      isOpen={isDrawerOpen}
+      labelledBy="edit-reminder-heading"
+      onClose={requestCancel}
+      subtitle={getEditDescription(form.reminder_type)}
+      title={getEditHeading(form.reminder_type)}
+    >
+      <form id={editReminderFormId} className="reminder-form" onSubmit={handleSubmit}>
+        <ReminderFields form={form} setForm={setForm} />
+      </form>
     </SheetDrawer>
   )
 }
@@ -122,6 +122,7 @@ function getEditDescription(reminderType: ReminderInput['reminder_type']) {
 
   return 'Update details and keep the next due date clear.'
 }
+
 function toReminderInput(reminder: Reminder): ReminderInput {
   return buildReminderInputWithDefaultTiming({
     title: reminder.title,

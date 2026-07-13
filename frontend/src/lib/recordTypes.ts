@@ -47,7 +47,6 @@ export interface RecordTypeDefinition {
   fields: RecordField[]
   coreFields: Array<'title' | RecordField>
   defaultSuggestedFields: RecordField[]
-  optionalSuggestedFields: RecordField[]
   dynamicFieldPresets: DynamicFieldPreset[]
   protectedFields: ProtectedRecordField[]
   labels?: Partial<Record<RecordField, string>>
@@ -76,7 +75,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     ],
     coreFields: ['title'],
     defaultSuggestedFields: ['subtitle', 'owner_name', 'provider_or_brand'],
-    optionalSuggestedFields: ['start_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'date', label: 'Date', field_type: 'date', description: 'A useful date for this record.', display_order: 200 },
       { key: 'sensitive_notes', label: 'Sensitive notes', field_type: 'long_text', is_sensitive: true, description: 'Private notes shown masked by default.', display_order: 900 },
@@ -94,9 +92,8 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['owner_name', 'provider_or_brand', 'issue_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
     coreFields: ['title', 'owner_name', 'expiration_date'],
     defaultSuggestedFields: ['owner_name', 'provider_or_brand', 'expiration_date'],
-    optionalSuggestedFields: ['issue_date', 'location_hint', 'notes', 'tags'],
     dynamicFieldPresets: [
-      { key: 'passport_number', label: 'Passport number', field_type: 'short_text', is_sensitive: true, description: 'Masked by default.', display_order: 110 },
+      { key: 'document_number', label: 'Passport number', field_type: 'short_text', is_sensitive: true, description: 'Masked by default.', display_order: 110 },
       { key: 'nationality', label: 'Nationality', field_type: 'short_text', display_order: 140 },
     ],
     labels: { provider_or_brand: 'Issuing country' },
@@ -114,7 +111,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['owner_name', 'provider_or_brand', 'issue_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
     coreFields: ['title', 'owner_name', 'expiration_date'],
     defaultSuggestedFields: ['owner_name', 'provider_or_brand', 'expiration_date'],
-    optionalSuggestedFields: ['issue_date', 'location_hint', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'license_number', label: 'License number', field_type: 'short_text', is_sensitive: true, description: 'Masked by default.', display_order: 110 },
       { key: 'class', label: 'Class', field_type: 'short_text', display_order: 140 },
@@ -136,7 +132,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['subtitle', 'owner_name', 'provider_or_brand', 'purchase_date', 'location_hint', 'notes', 'tags'],
     coreFields: ['title', 'provider_or_brand'],
     defaultSuggestedFields: ['subtitle', 'provider_or_brand'],
-    optionalSuggestedFields: ['owner_name', 'purchase_date', 'location_hint', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'year', label: 'Year', field_type: 'number', display_order: 110 },
       { key: 'model', label: 'Model', field_type: 'short_text', display_order: 120 },
@@ -161,7 +156,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['subtitle', 'owner_name', 'provider_or_brand', 'start_date', 'renewal_date', 'expiration_date', 'notes', 'tags'],
     coreFields: ['title', 'provider_or_brand'],
     defaultSuggestedFields: ['provider_or_brand', 'renewal_date', 'expiration_date'],
-    optionalSuggestedFields: ['subtitle', 'owner_name', 'start_date', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'policy_number', label: 'Policy number', field_type: 'short_text', is_sensitive: true, display_order: 110 },
       { key: 'member_number', label: 'Member number', field_type: 'short_text', is_sensitive: true, display_order: 120 },
@@ -182,7 +176,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['subtitle', 'provider_or_brand', 'purchase_date', 'expiration_date', 'location_hint', 'notes', 'tags'],
     coreFields: ['title', 'provider_or_brand'],
     defaultSuggestedFields: ['provider_or_brand', 'purchase_date', 'expiration_date'],
-    optionalSuggestedFields: ['subtitle', 'location_hint', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'serial_number', label: 'Serial number', field_type: 'short_text', is_sensitive: true, display_order: 110 },
       { key: 'model_number', label: 'Model number', field_type: 'short_text', display_order: 120 },
@@ -202,7 +195,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['subtitle', 'owner_name', 'start_date', 'notes', 'tags'],
     coreFields: ['title'],
     defaultSuggestedFields: ['owner_name', 'start_date'],
-    optionalSuggestedFields: ['subtitle', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'microchip', label: 'Microchip', field_type: 'short_text', is_sensitive: true, display_order: 110 },
       { key: 'vet', label: 'Vet', field_type: 'short_text', display_order: 120 },
@@ -221,7 +213,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['subtitle', 'purchase_date', 'start_date', 'location_hint', 'notes', 'tags'],
     coreFields: ['title'],
     defaultSuggestedFields: ['location_hint', 'purchase_date'],
-    optionalSuggestedFields: ['subtitle', 'start_date', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'home_type', label: 'Home type', field_type: 'short_text', display_order: 110 },
       { key: 'year_built', label: 'Year built', field_type: 'number', display_order: 120 },
@@ -241,7 +232,6 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     fields: ['subtitle', 'provider_or_brand', 'start_date', 'renewal_date', 'notes', 'tags'],
     coreFields: ['title', 'provider_or_brand'],
     defaultSuggestedFields: ['provider_or_brand', 'renewal_date'],
-    optionalSuggestedFields: ['subtitle', 'start_date', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'account_reference', label: 'Account reference', field_type: 'short_text', is_sensitive: true, display_order: 110 },
       { key: 'cost', label: 'Cost', field_type: 'money', display_order: 120 },
@@ -255,14 +245,13 @@ export const recordTypeDefinitions: Record<RecordType, RecordTypeDefinition> = {
     label: 'Warranty',
     icon: Wrench,
     category: 'Warranty',
-    description: 'Track purchase and expiration dates without document uploads.',
+    description: 'Track purchase and expiration dates, warranty files, and service details.',
     defaultTitle: 'Warranty',
     tone: 'health',
     protectedFields: ['serial_number'],
     fields: ['subtitle', 'provider_or_brand', 'purchase_date', 'expiration_date', 'notes', 'tags'],
     coreFields: ['title', 'provider_or_brand'],
     defaultSuggestedFields: ['provider_or_brand', 'purchase_date', 'expiration_date'],
-    optionalSuggestedFields: ['subtitle', 'notes', 'tags'],
     dynamicFieldPresets: [
       { key: 'serial_number', label: 'Serial number', field_type: 'short_text', is_sensitive: true, display_order: 110 },
       { key: 'coverage', label: 'Coverage', field_type: 'short_text', display_order: 120 },
@@ -351,21 +340,6 @@ export function normalizeRecordInput(input: RecordInput): RecordInput {
     notes: normalizeOptionalText(input.notes),
     tags: normalizeTags(input.tags),
   }
-}
-
-export function createProtectedRecordInput(type: RecordType): ProtectedRecordInput {
-  return Object.fromEntries(getRecordTypeDefinition(type).protectedFields.map((field) => [field, null])) as ProtectedRecordInput
-}
-
-export function normalizeProtectedRecordInput(type: RecordType, input: ProtectedRecordInput): ProtectedRecordInput {
-  const normalized: ProtectedRecordInput = {}
-  for (const field of getRecordTypeDefinition(type).protectedFields) {
-    const value = normalizeOptionalText(input[field] ?? null)
-    if (value) {
-      normalized[field] = value
-    }
-  }
-  return normalized
 }
 
 export function hasProtectedRecordInput(input: ProtectedRecordInput) {
