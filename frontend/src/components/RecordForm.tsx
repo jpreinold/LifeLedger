@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { AlertCircle, Clock3, FileText, FileUp, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
+import { AlertCircle, Bell, Clock3, FileText, FileUp, Link2, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
 
 import {
   attachmentAccept,
@@ -17,9 +17,11 @@ import {
   tagsToText,
   type RecordField,
 } from '../lib/recordTypes'
+import { formatDueDateLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
+import type { LinkCreateRequest, RelationshipType } from '../types/linkedItem'
 import type { LifeRecord, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 import type { Reminder } from '../types/reminder'
-import { LinkedItemsPanel } from './LinkedItemsPanel'
+import { AddLinkedItemDrawer, LinkedItemsPanel, type LinkDraft } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -31,7 +33,7 @@ interface RecordFormProps {
   recordType: RecordType
   reminders: Reminder[]
   onClose: () => void
-  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[]) => Promise<boolean>
+  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[], links: LinkCreateRequest[]) => Promise<boolean>
   onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
 }
 
@@ -39,6 +41,14 @@ interface StagedAttachment {
   id: string
   file: File
   previewUrl: string | null
+}
+
+interface StagedLink {
+  id: string
+  targetType: LinkDraft['targetType']
+  targetId: string
+  relationshipType: RelationshipType
+  label: string | null
 }
 
 const dateFields: RecordField[] = ['start_date', 'issue_date', 'expiration_date', 'purchase_date', 'renewal_date']
@@ -61,6 +71,8 @@ export function RecordForm({
   const [validationError, setValidationError] = useState<string | null>(null)
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
   const [stagedError, setStagedError] = useState<string | null>(null)
+  const [stagedLinks, setStagedLinks] = useState<StagedLink[]>([])
+  const [isStagedLinkPickerOpen, setIsStagedLinkPickerOpen] = useState(false)
   const formBodyRef = useRef<HTMLFormElement | null>(null)
   const stagedFileInputRef = useRef<HTMLInputElement | null>(null)
   const [visibleOptionalFields, setVisibleOptionalFields] = useState<Set<RecordField>>(() => new Set())
@@ -87,6 +99,8 @@ export function RecordForm({
       setValidationError(null)
       setActiveTab('record')
       clearStagedAttachments()
+      setStagedLinks([])
+      setIsStagedLinkPickerOpen(false)
       return
     }
 
@@ -97,6 +111,8 @@ export function RecordForm({
     setValidationError(null)
     setActiveTab('record')
     clearStagedAttachments()
+    setStagedLinks([])
+    setIsStagedLinkPickerOpen(false)
   }, [isOpen, record, recordType])
 
   useEffect(() => {
@@ -126,7 +142,12 @@ export function RecordForm({
     const protectedInput: ProtectedRecordInput = {}
     const wasSaved = record
       ? await onUpdate(record.id, input, protectedInput)
-      : await onCreate(input, protectedInput, stagedAttachments.map((item) => item.file))
+      : await onCreate(
+        input,
+        protectedInput,
+        stagedAttachments.map((item) => item.file),
+        stagedLinks.map(toLinkCreateRequest),
+      )
 
     if (wasSaved) {
       onClose()
@@ -178,6 +199,21 @@ export function RecordForm({
       return current.filter((item) => item.id !== id)
     })
     setStagedError(null)
+  }
+
+  async function handleStageLink(input: LinkDraft) {
+    setStagedLinks((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        ...input,
+      },
+    ])
+    setIsStagedLinkPickerOpen(false)
+  }
+
+  function handleRemoveStagedLink(id: string) {
+    setStagedLinks((current) => current.filter((item) => item.id !== id))
   }
 
   function updateField(field: keyof RecordInput, value: string | null) {
@@ -232,7 +268,7 @@ export function RecordForm({
       </div>
 
       <form className="reminder-form sheet-body record-form" ref={formBodyRef} onSubmit={handleSubmit}>
-        <div className={record ? 'record-form-tabs record-form-tabs-three' : 'record-form-tabs'} role="tablist" aria-label="Edit record sections">
+        <div className="record-form-tabs record-form-tabs-three" role="tablist" aria-label="Edit record sections">
           <button
             type="button"
             className={activeTab === 'record' ? 'record-form-tab active' : 'record-form-tab'}
@@ -255,19 +291,17 @@ export function RecordForm({
           >
             Documents
           </button>
-          {record ? (
-            <button
-              type="button"
-              className={activeTab === 'links' ? 'record-form-tab active' : 'record-form-tab'}
-              id="record-form-links-tab"
-              role="tab"
-              aria-selected={activeTab === 'links'}
-              aria-controls="record-form-links-panel"
-              onClick={() => selectTab('links')}
-            >
-              Linked items
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className={activeTab === 'links' ? 'record-form-tab active' : 'record-form-tab'}
+            id="record-form-links-tab"
+            role="tab"
+            aria-selected={activeTab === 'links'}
+            aria-controls="record-form-links-panel"
+            onClick={() => selectTab('links')}
+          >
+            Linked items
+          </button>
         </div>
 
         <div
@@ -375,14 +409,14 @@ export function RecordForm({
           )}
         </div>
 
-        {record ? (
-          <div
-            className="record-form-tab-panel"
-            hidden={activeTab !== 'links'}
-            id="record-form-links-panel"
-            role="tabpanel"
-            aria-labelledby="record-form-links-tab"
-          >
+        <div
+          className="record-form-tab-panel"
+          hidden={activeTab !== 'links'}
+          id="record-form-links-panel"
+          role="tabpanel"
+          aria-labelledby="record-form-links-tab"
+        >
+          {record ? (
             <LinkedItemsPanel
               records={records}
               reminders={reminders}
@@ -391,9 +425,30 @@ export function RecordForm({
               sourceId={record.id}
               sourceType="record"
             />
-          </div>
-        ) : null}
+          ) : (
+            <StagedLinkedItemsPanel
+              records={records}
+              reminders={reminders}
+              stagedLinks={stagedLinks}
+              onAdd={() => setIsStagedLinkPickerOpen(true)}
+              onRemove={handleRemoveStagedLink}
+            />
+          )}
+        </div>
       </form>
+
+      {!record ? (
+        <AddLinkedItemDrawer
+          currentRecordId={null}
+          isOpen={isStagedLinkPickerOpen}
+          linkedRecordIds={new Set(stagedLinks.filter((item) => item.targetType === 'record').map((item) => item.targetId))}
+          linkedReminderIds={new Set(stagedLinks.filter((item) => item.targetType === 'reminder').map((item) => item.targetId))}
+          records={records}
+          reminders={reminders}
+          onClose={() => setIsStagedLinkPickerOpen(false)}
+          onCreate={handleStageLink}
+        />
+      ) : null}
 
       <input
         type="file"
@@ -405,6 +460,176 @@ export function RecordForm({
       />
     </SheetDrawer>
   )
+}
+
+function toLinkCreateRequest(link: StagedLink): LinkCreateRequest {
+  return {
+    target_type: link.targetType,
+    target_id: link.targetId,
+    relationship_type: link.relationshipType,
+    label: link.label,
+  }
+}
+
+function StagedLinkedItemsPanel({
+  onAdd,
+  onRemove,
+  records,
+  reminders,
+  stagedLinks,
+}: {
+  records: LifeRecord[]
+  reminders: Reminder[]
+  stagedLinks: StagedLink[]
+  onAdd: () => void
+  onRemove: (id: string) => void
+}) {
+  const recordLinks = stagedLinks.filter((link) => link.targetType === 'record')
+  const reminderLinks = stagedLinks.filter((link) => link.targetType === 'reminder')
+  const hasLinks = stagedLinks.length > 0
+
+  return (
+    <section className="detail-section linked-items-section linked-items-staged-section" aria-label="Linked items">
+      <div className="linked-items-header">
+        <div>
+          <h3>Linked items</h3>
+          <p>Choose records or reminders now. LifeLedger will link them after this record is saved.</p>
+        </div>
+        <button type="button" className="small-outline-button linked-items-add-button" onClick={onAdd}>
+          <Plus size={14} aria-hidden="true" />
+          Link item
+        </button>
+      </div>
+
+      {!hasLinks ? (
+        <div className="linked-items-empty-state">
+          <Link2 size={24} aria-hidden="true" />
+          <p>No linked items staged yet.</p>
+          <button type="button" className="secondary-button" onClick={onAdd}>
+            <Plus size={16} aria-hidden="true" />
+            Link an item
+          </button>
+        </div>
+      ) : null}
+
+      {recordLinks.length > 0 ? (
+        <StagedLinkGroup
+          records={records}
+          reminders={reminders}
+          stagedLinks={recordLinks}
+          title="Linked records"
+          onRemove={onRemove}
+        />
+      ) : null}
+
+      {reminderLinks.length > 0 ? (
+        <StagedLinkGroup
+          records={records}
+          reminders={reminders}
+          stagedLinks={reminderLinks}
+          title="Linked reminders"
+          onRemove={onRemove}
+        />
+      ) : null}
+    </section>
+  )
+}
+
+function StagedLinkGroup({
+  onRemove,
+  records,
+  reminders,
+  stagedLinks,
+  title,
+}: {
+  records: LifeRecord[]
+  reminders: Reminder[]
+  stagedLinks: StagedLink[]
+  title: string
+  onRemove: (id: string) => void
+}) {
+  return (
+    <div className="linked-items-group" aria-label={title}>
+      <div className="linked-items-group-header">
+        <h4>{title}</h4>
+        <span>{stagedLinks.length}</span>
+      </div>
+      <div className="linked-items-list">
+        {stagedLinks.map((link) => (
+          <StagedLinkCard
+            key={link.id}
+            link={link}
+            records={records}
+            reminders={reminders}
+            onRemove={() => onRemove(link.id)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function StagedLinkCard({
+  link,
+  onRemove,
+  records,
+  reminders,
+}: {
+  link: StagedLink
+  records: LifeRecord[]
+  reminders: Reminder[]
+  onRemove: () => void
+}) {
+  const record = link.targetType === 'record' ? records.find((item) => item.id === link.targetId) ?? null : null
+  const reminder = link.targetType === 'reminder' ? reminders.find((item) => item.id === link.targetId) ?? null : null
+  const title = record?.title ?? reminder?.title ?? 'Linked item'
+  const meta = getStagedLinkMeta(link, record, reminder)
+  const Icon = record ? getRecordTypeDefinition(record.record_type).icon : link.targetType === 'reminder' ? Bell : FileText
+  const toneClass = record ? `tone-${getRecordTypeDefinition(record.record_type).tone}` : 'tone-other'
+
+  return (
+    <article className="linked-item-card">
+      <div className="linked-item-main linked-item-main-static" aria-label={title}>
+        <span className={`linked-item-icon ${toneClass}`} aria-hidden="true">
+          <Icon size={19} />
+        </span>
+        <span className="linked-item-copy">
+          <strong>{title}</strong>
+          <span>{meta}</span>
+        </span>
+      </div>
+      <button type="button" className="icon-button linked-item-remove-button" onClick={onRemove} aria-label={`Remove link to ${title}`}>
+        <Trash2 size={15} aria-hidden="true" />
+      </button>
+    </article>
+  )
+}
+
+function getStagedLinkMeta(link: StagedLink, record: LifeRecord | null, reminder: Reminder | null) {
+  const relationship = link.label || relationshipLabels[link.relationshipType]
+
+  if (record) {
+    return `${getRecordTypeDefinition(record.record_type).label} - ${relationship}`
+  }
+
+  if (reminder) {
+    return `${getReminderTypeLabel(reminder.reminder_type)} - ${formatDueDateLabel(reminder.due_date)} - ${relationship}`
+  }
+
+  return relationship
+}
+
+const relationshipLabels: Record<RelationshipType, string> = {
+  related: 'Related to',
+  belongs_to: 'Belongs to',
+  covers: 'Covers',
+  renews: 'Reminder for',
+  maintains: 'Maintenance for',
+  insures: 'Insurance for',
+  warranty_for: 'Warranty for',
+  document_for: 'Document for',
+  appointment_for: 'Appointment for',
+  custom: 'Custom',
 }
 
 function getInitialVisibleFields(input: RecordInput, definition: ReturnType<typeof getRecordTypeDefinition>) {

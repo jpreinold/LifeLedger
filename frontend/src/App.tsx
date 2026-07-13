@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import { calendarApi, type GoogleCalendarOption, type GoogleCalendarStatus } from './api/calendarApi'
+import { linkedItemsApi } from './api/linkedItemsApi'
 import { recordsApi } from './api/recordsApi'
 import { remindersApi } from './api/remindersApi'
 import { preferencesApi } from './api/preferencesApi'
@@ -64,6 +65,7 @@ import {
 } from './types/preferences'
 import type { Reminder, ReminderAlert, ReminderInput } from './types/reminder'
 import type { LifeRecord, ProtectedRecordInput, ProtectedRecordStatus, RecordInput, RecordType } from './types/record'
+import type { LinkCreateRequest } from './types/linkedItem'
 import type { RecordFilter } from './lib/recordTypes'
 
 function App() {
@@ -379,7 +381,12 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleCreateRecord(input: RecordInput, protectedInput: ProtectedRecordInput, files: File[] = []) {
+  async function handleCreateRecord(
+    input: RecordInput,
+    protectedInput: ProtectedRecordInput,
+    files: File[] = [],
+    links: LinkCreateRequest[] = [],
+  ) {
     setIsSaving(true)
     setError(null)
     setNotice(null)
@@ -406,18 +413,29 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         }
       }
 
+      let linkFailures = 0
+      for (const link of links) {
+        try {
+          await linkedItemsApi.createRecordLink(created.id, link)
+        } catch {
+          linkFailures += 1
+        }
+      }
+
       await loadRecordData()
       setActivePage('records')
       setRecordBackStack([])
       setViewingRecord({ record: nextRecord, initialTab: 'details' })
       if (!protectedSaved) {
         setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
-      } else if (attachmentFailures > 0) {
-        setError(
-          `Record added, but ${attachmentFailures} attachment${attachmentFailures === 1 ? '' : 's'} could not be uploaded. Open the record to try again.`,
-        )
+      } else if (attachmentFailures > 0 || linkFailures > 0) {
+        setError(formatRecordCreatePartialError(attachmentFailures, linkFailures))
+      } else if (files.length > 0 && links.length > 0) {
+        setNotice('Record added. Attachments are uploading and linked items were saved.')
       } else if (files.length > 0) {
         setNotice('Record added. Attachments are uploading and will be scanned shortly.')
+      } else if (links.length > 0) {
+        setNotice('Record added with linked items.')
       } else {
         setNotice('Record added. Add a document when ready.')
       }
@@ -2182,6 +2200,18 @@ function getRecordDeleteConfirmationBody(record: LifeRecord | null) {
   }
 
   return 'Are you sure you want to delete this record? This cannot be undone.'
+}
+
+function formatRecordCreatePartialError(attachmentFailures: number, linkFailures: number) {
+  const failures: string[] = []
+  if (attachmentFailures > 0) {
+    failures.push(`${attachmentFailures} attachment${attachmentFailures === 1 ? '' : 's'} could not be uploaded`)
+  }
+  if (linkFailures > 0) {
+    failures.push(`${linkFailures} linked item${linkFailures === 1 ? '' : 's'} could not be saved`)
+  }
+
+  return `Record added, but ${failures.join(' and ')}. Open the record to try again.`
 }
 
 function withProtectedStatus(record: LifeRecord, protectedStatus: ProtectedRecordStatus): LifeRecord {

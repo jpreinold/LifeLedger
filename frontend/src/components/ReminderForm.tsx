@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
-import { Cake, LayoutTemplate, Plus, RefreshCcw, Wrench, X } from 'lucide-react'
+import { Cake, Check, LayoutTemplate, Plus, RefreshCcw, Wrench } from 'lucide-react'
 
 import {
   type BirthdayDetailsInput,
@@ -64,6 +64,7 @@ interface ReminderFormProps {
 }
 
 const today = new Date().toISOString().slice(0, 10)
+const reminderFormId = 'add-reminder-form'
 const monthOptions = [
   { value: 1, label: 'January' },
   { value: 2, label: 'February' },
@@ -148,21 +149,12 @@ export function ReminderForm({
   }
 
   return (
-    <SheetDrawer className="add-dialog reminder-form-dialog" isOpen={isOpen} labelledBy="add-reminder-heading" onClose={onClose}>
-        <div className="sheet-header">
-          <div>
-            <h2 id="add-reminder-heading">{getAddFormHeading(form.reminder_type)}</h2>
-            <p>{getAddFormDescription(form.reminder_type)}</p>
-          </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close add reminder">
-            <X size={19} aria-hidden="true" />
-          </button>
-        </div>
-
-        <form className="reminder-form sheet-body" onSubmit={handleSubmit}>
-          <ReminderFields form={form} setForm={setForm} />
-
-          <button className="primary-button" type="submit" disabled={isSaving || !isReminderReady(form)}>
+    <SheetDrawer
+      className="add-dialog reminder-form-dialog"
+      closeLabel="Close add reminder"
+      footer={(
+        <div className="sheet-footer-actions">
+          <button className="primary-button reminder-submit-button" type="submit" form={reminderFormId} disabled={isSaving || !isReminderReady(form)}>
             <Plus size={18} aria-hidden="true" />
             {isSaving ? 'Saving' : 'Add reminder'}
           </button>
@@ -171,6 +163,16 @@ export function ReminderForm({
             <LayoutTemplate size={15} aria-hidden="true" />
             Browse templates
           </button>
+        </div>
+      )}
+      isOpen={isOpen}
+      labelledBy="add-reminder-heading"
+      onClose={onClose}
+      subtitle={getAddFormDescription(form.reminder_type)}
+      title={getAddFormHeading(form.reminder_type)}
+    >
+        <form id={reminderFormId} className="reminder-form" onSubmit={handleSubmit}>
+          <ReminderFields form={form} setForm={setForm} />
         </form>
     </SheetDrawer>
   )
@@ -574,10 +576,18 @@ function MaintenanceFields({ form, setForm }: ReminderFieldsProps) {
 
 function RenewalFields({ form, setForm }: ReminderFieldsProps) {
   const details = form.renewal_details ?? emptyRenewalDetails()
+  const [touched, setTouched] = useState({ date: false, item: false })
   const displayKind = getRenewalDisplayKind(details, { title: form.title, category: form.category })
   const relevantDate = getRelevantRenewalFormDate(details, form.due_date)
   const preview = getRenewalPreview({ ...form, renewal_details: details })
   const validationMessage = getRenewalValidationMessage({ ...form, renewal_details: details })
+  const itemErrorId = 'renewal-item-name-error'
+  const dateErrorId = 'renewal-date-error'
+  const itemError = touched.item && !details.item_name.trim() ? 'Enter an item name.' : null
+  const dateError = touched.date && !relevantDate ? 'Choose the date you want to track.' : null
+  const safetyError = validationMessage && validationMessage !== 'Enter an item name.' && validationMessage !== 'Choose the date you want to track.'
+    ? validationMessage
+    : null
 
   function updateDetails(updates: Partial<RenewalDetailsInput>) {
     setForm((current) => {
@@ -603,6 +613,7 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
   }
 
   function handleKindChange(nextKind: RenewalDisplayKind) {
+    setTouched({ date: false, item: false })
     setForm((current) => {
       const currentDetails = current.renewal_details ?? emptyRenewalDetails()
       const defaults = getRenewalDefaults(nextKind)
@@ -647,11 +658,15 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
               type="button"
               className={isSelected ? 'renewal-kind-option active' : 'renewal-kind-option'}
               key={option.kind}
+              role="radio"
               onClick={() => handleKindChange(option.kind)}
-              aria-pressed={isSelected}
+              aria-checked={isSelected}
             >
-              <strong>{option.label}</strong>
-              <span>{option.description}</span>
+              <span className="renewal-kind-copy">
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+              {isSelected ? <Check size={15} aria-hidden="true" /> : null}
             </button>
           )
         })}
@@ -664,21 +679,29 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
           <span>{getRenewalItemLabel(displayKind)}</span>
           <input
             required
+            aria-describedby={itemError ? itemErrorId : undefined}
+            aria-invalid={Boolean(itemError)}
             maxLength={120}
             value={details.item_name}
             onChange={(event) => updateDetails({ item_name: event.target.value })}
+            onBlur={() => setTouched((current) => ({ ...current, item: true }))}
             placeholder={getRenewalItemPlaceholder(displayKind)}
           />
+          {itemError ? <span className="field-error" id={itemErrorId}>{itemError}</span> : null}
         </label>
 
         <label>
           <span>{getRenewalDateLabel(displayKind)}</span>
           <input
             required
+            aria-describedby={dateError ? dateErrorId : undefined}
+            aria-invalid={Boolean(dateError)}
             type="date"
             value={relevantDate}
             onChange={(event) => updateDetails(withRelevantRenewalDate(details, event.target.value))}
+            onBlur={() => setTouched((current) => ({ ...current, date: true }))}
           />
+          {dateError ? <span className="field-error" id={dateErrorId}>{dateError}</span> : null}
         </label>
       </div>
 
@@ -708,7 +731,7 @@ function RenewalFields({ form, setForm }: ReminderFieldsProps) {
         Do not store policy numbers, account numbers, passwords, or other sensitive details here.
       </p>
 
-      {validationMessage ? <p className="field-error">{validationMessage}</p> : null}
+      {safetyError ? <p className="field-error">{safetyError}</p> : null}
 
       <div className="renewal-preview" aria-live="polite">
         <strong>{preview.primary}</strong>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Archive,
-  ArrowLeft,
   Eye,
   EyeOff,
   LockKeyhole,
@@ -9,7 +8,6 @@ import {
   Plus,
   RotateCcw,
   Trash2,
-  X,
 } from 'lucide-react'
 
 import { recordsApi } from '../api/recordsApi'
@@ -97,7 +95,9 @@ export function RecordDetailDrawer({
   const Icon = definition.icon
   const providerLine = getRecordProviderLine(record)
   const keyDate = formatRecordKeyDate(record)
+  const updatedLabel = formatRecordTimestamp(record.updated_at)
   const isArchived = record.status === 'archived'
+  const showCategoryChip = definition.category.trim().toLowerCase() !== definition.label.trim().toLowerCase()
   const suggestedDynamicFields = definition.dynamicFieldPresets.filter(
     (field) => !record.dynamic_fields.some((existing) => existing.key === field.key),
   )
@@ -331,25 +331,35 @@ export function RecordDetailDrawer({
 
   return (
     <>
-      <SheetDrawer className="detail-dialog record-detail-dialog" isOpen={isDrawerOpen} labelledBy="record-detail-heading" onClose={requestClose}>
-        <div className="sheet-header detail-header">
-          <div className="detail-header-title-row">
-            {canGoBack ? (
-              <button type="button" className="icon-button ghost-icon-button detail-back-button" onClick={onBack} aria-label="Back to previous record">
-                <ArrowLeft size={18} aria-hidden="true" />
-              </button>
-            ) : null}
-            <div>
-              <h2 id="record-detail-heading">Record dashboard</h2>
-              <p>{definition.label}</p>
-            </div>
-          </div>
-          <button type="button" className="icon-button ghost-icon-button" onClick={requestClose} aria-label="Close record details">
-            <X size={19} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="detail-body" data-drawer-scroll ref={detailBodyRef}>
+      <SheetDrawer
+        bodyClassName="detail-body"
+        bodyRef={detailBodyRef}
+        className="detail-dialog record-detail-dialog"
+        closeLabel="Close record details"
+        footer={activeTab === 'details' ? (
+          <section className="detail-actions" aria-label="Record actions">
+            <button type="button" className="primary-button" onClick={handleEdit}>
+              <Pencil size={17} aria-hidden="true" />
+              Edit
+            </button>
+            <button type="button" className="secondary-button" onClick={() => void handleArchiveToggle()} disabled={isArchiving}>
+              {isArchived ? <RotateCcw size={17} aria-hidden="true" /> : <Archive size={17} aria-hidden="true" />}
+              {isArchiving ? 'Saving...' : isArchived ? 'Restore' : 'Archive'}
+            </button>
+            <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(record)}>
+              <Trash2 size={16} aria-hidden="true" />
+              Delete
+            </button>
+          </section>
+        ) : null}
+        isOpen={isDrawerOpen}
+        labelledBy="record-detail-heading"
+        onBack={canGoBack && onBack ? onBack : undefined}
+        onClose={requestClose}
+        backLabel="Back to previous record"
+        subtitle={definition.label}
+        title="Record dashboard"
+      >
           <section className={`detail-hero tone-${definition.tone}`} aria-labelledby="record-detail-title">
             <div className={`category-icon category-icon-large tone-${definition.tone}`} aria-hidden="true">
               <Icon size={30} />
@@ -357,10 +367,11 @@ export function RecordDetailDrawer({
             <div className="detail-hero-copy">
               <div className="card-chip-row">
                 <span className="type-chip">{definition.label}</span>
-                <span className="category-chip">{definition.category}</span>
+                {showCategoryChip ? <span className="category-chip">{definition.category}</span> : null}
                 <span className={`status-chip ${getRecordStatusClass(record)}`}>{getRecordStatusLabel(record)}</span>
               </div>
               <h3 id="record-detail-title">{record.title}</h3>
+              {updatedLabel ? <p className="detail-updated-label">Updated {updatedLabel}</p> : null}
               {record.subtitle ? <p>{record.subtitle}</p> : null}
               {keyDate ? (
                 <p className="detail-smart-label">
@@ -522,24 +533,6 @@ export function RecordDetailDrawer({
               onOpenReminder={onOpenLinkedReminder}
             />
           </div>
-        </div>
-
-        {activeTab === 'details' ? (
-          <section className="detail-actions" aria-label="Record actions">
-            <button type="button" className="primary-button" onClick={handleEdit}>
-              <Pencil size={17} aria-hidden="true" />
-              Edit
-            </button>
-            <button type="button" className="secondary-button" onClick={() => void handleArchiveToggle()} disabled={isArchiving}>
-              {isArchived ? <RotateCcw size={17} aria-hidden="true" /> : <Archive size={17} aria-hidden="true" />}
-              {isArchiving ? 'Saving...' : isArchived ? 'Restore' : 'Archive'}
-            </button>
-            <button type="button" className="text-danger-button detail-delete-button" onClick={() => onRequestDelete(record)}>
-              <Trash2 size={16} aria-hidden="true" />
-              Delete
-            </button>
-          </section>
-        ) : null}
       </SheetDrawer>
 
       <AddFieldDrawer

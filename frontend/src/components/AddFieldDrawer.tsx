@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject, RefObject } from 'react'
-import { ArrowLeft, Check, ListPlus, LockKeyhole, Plus, Type, X } from 'lucide-react'
+import { Check, ListPlus, LockKeyhole, Plus, Type } from 'lucide-react'
 
 import { recordsApi } from '../api/recordsApi'
 import { getDynamicFieldTypeLabel, getInputTypeForDynamicField, toFieldInputValue } from '../lib/fieldRendering'
@@ -73,6 +73,15 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
     setError(null)
   }
 
+  function selectMode(nextMode: Mode) {
+    setMode(nextMode)
+    setError(null)
+
+    if (nextMode === 'custom') {
+      window.requestAnimationFrame(() => firstInputRef.current?.focus())
+    }
+  }
+
   async function saveField() {
     if (!activeField.label) {
       setError('Field name is required.')
@@ -105,48 +114,66 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
   }
 
   return (
-    <SheetDrawer className="add-dialog add-field-dialog" isOpen={isOpen} labelledBy="add-field-heading" onClose={onClose}>
-      <div className="sheet-header add-field-header">
-        <div className="add-field-title-row">
-          {selectedPreset ? (
-            <button type="button" className="icon-button ghost-icon-button" onClick={backToSuggestedList} aria-label="Back to suggested fields">
-              <ArrowLeft size={18} aria-hidden="true" />
-            </button>
-          ) : null}
-          <div>
-            <h2 id="add-field-heading">Add field</h2>
-            <p>{record.title}</p>
-          </div>
-        </div>
-        <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close add field">
-          <X size={19} aria-hidden="true" />
+    <SheetDrawer
+      bodyClassName="sheet-body add-field-body"
+      className="add-dialog add-field-dialog"
+      closeLabel="Close add field"
+      footer={canSave ? (
+        <button type="button" className="primary-button add-field-save-button" disabled={isSaving} onClick={() => void saveField()}>
+          <Check size={17} aria-hidden="true" />
+          {isSaving ? 'Saving...' : 'Save field'}
         </button>
-      </div>
-
-      <div className="sheet-body add-field-body">
+      ) : null}
+      isOpen={isOpen}
+      labelledBy="add-field-heading"
+      onBack={selectedPreset ? backToSuggestedList : undefined}
+      onClose={onClose}
+      backLabel="Back to suggested fields"
+      subtitle={record.title}
+      title="Add field"
+    >
         {selectedPreset === null ? (
           <div className="add-field-mode-tabs" role="tablist" aria-label="Field source">
-            <button type="button" className={mode === 'suggested' ? 'active' : ''} onClick={() => setMode('suggested')}>Suggested</button>
-            <button type="button" className={mode === 'custom' ? 'active' : ''} onClick={() => setMode('custom')}>Custom</button>
+            <button
+              type="button"
+              className={mode === 'suggested' ? 'active' : ''}
+              role="tab"
+              aria-selected={mode === 'suggested'}
+              onClick={() => selectMode('suggested')}
+            >
+              Suggested
+            </button>
+            <button
+              type="button"
+              className={mode === 'custom' ? 'active' : ''}
+              role="tab"
+              aria-selected={mode === 'custom'}
+              onClick={() => selectMode('custom')}
+            >
+              Custom
+            </button>
           </div>
         ) : null}
 
         {mode === 'suggested' && selectedPreset === null ? (
           suggestedFields.length > 0 ? (
-            <div className="add-field-suggestions">
-              {suggestedFields.map((field) => (
-                <button type="button" className="add-field-suggestion" key={field.key} onClick={() => chooseSuggested(field)}>
-                  <span className="add-field-suggestion-icon" aria-hidden="true">
-                    {field.is_sensitive ? <LockKeyhole size={18} /> : <ListPlus size={18} />}
-                  </span>
-                  <span>
-                    <strong>{field.label}</strong>
-                    <small>{getDynamicFieldTypeLabel(field.field_type)}{field.description ? ` - ${field.description}` : ''}</small>
-                  </span>
-                  <Plus size={17} aria-hidden="true" />
-                </button>
-              ))}
-            </div>
+            <>
+              <p className="add-field-list-heading">Choose a suggested field</p>
+              <div className="add-field-suggestions">
+                {suggestedFields.map((field) => (
+                  <button type="button" className="add-field-suggestion" key={field.key} onClick={() => chooseSuggested(field)}>
+                    <span className="add-field-suggestion-icon" aria-hidden="true">
+                      {field.is_sensitive ? <LockKeyhole size={18} /> : <ListPlus size={18} />}
+                    </span>
+                    <span>
+                      <strong>{field.label}</strong>
+                      <small>{getDynamicFieldTypeLabel(field.field_type)}{field.description ? ` - ${field.description}` : ''}</small>
+                    </span>
+                    <Plus size={17} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            </>
           ) : (
             <div className="add-field-empty">
               <ListPlus size={22} aria-hidden="true" />
@@ -160,7 +187,7 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
           <div className="add-field-form">
             <label>
               <span>Field name</span>
-              <input ref={firstInputRef as RefObject<HTMLInputElement>} maxLength={80} value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} />
+              <input ref={firstInputRef as RefObject<HTMLInputElement>} maxLength={80} value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} placeholder="e.g. Insurance policy #" />
             </label>
             <label>
               <span>Type</span>
@@ -200,16 +227,6 @@ export function AddFieldDrawer({ isOpen, record, suggestedFields, onClose, onSav
         ) : null}
 
         {error ? <p className="field-error" role="alert">{error}</p> : null}
-
-        {canSave ? (
-          <div className="compact-action-bar">
-            <button type="button" className="primary-button add-field-save-button" disabled={isSaving} onClick={() => void saveField()}>
-              <Check size={17} aria-hidden="true" />
-              {isSaving ? 'Saving...' : 'Save field'}
-            </button>
-          </div>
-        ) : null}
-      </div>
     </SheetDrawer>
   )
 }
@@ -233,7 +250,7 @@ function DynamicValueControl({
     return (
       <label>
         <span>Value</span>
-        <textarea ref={inputRef as RefObject<HTMLTextAreaElement>} maxLength={1000} rows={4} value={toFieldInputValue(value)} onChange={(event) => onChange(event.target.value || null)} />
+        <textarea ref={inputRef as RefObject<HTMLTextAreaElement>} maxLength={1000} rows={4} value={toFieldInputValue(value)} onChange={(event) => onChange(event.target.value || null)} placeholder={getFieldValuePlaceholder(field)} />
       </label>
     )
   }
@@ -259,9 +276,15 @@ function DynamicValueControl({
         type={getInputTypeForDynamicField(field.field_type)}
         value={toFieldInputValue(value)}
         onChange={(event) => onChange(field.field_type === 'number' || field.field_type === 'money' ? event.target.value === '' ? null : Number(event.target.value) : event.target.value || null)}
+        placeholder={getFieldValuePlaceholder(field)}
       />
     </label>
   )
+}
+
+function getFieldValuePlaceholder(field: DynamicFieldPreset) {
+  const label = field.label.trim().toLowerCase()
+  return label ? `Enter ${label}` : 'Enter a value (optional)'
 }
 
 function SwitchRow({
@@ -285,6 +308,7 @@ function SwitchRow({
         type="button"
         className={checked ? 'privacy-toggle active' : 'privacy-toggle'}
         role="switch"
+        aria-label={label}
         aria-checked={checked}
         onClick={() => onChange(!checked)}
       >

@@ -34,7 +34,14 @@ interface LinkedItemsPanelProps {
 }
 
 type AddStep = 'type' | 'select' | 'relationship'
-type CandidateType = 'record' | 'reminder'
+export type CandidateType = 'record' | 'reminder'
+
+export interface LinkDraft {
+  targetType: CandidateType
+  targetId: string
+  relationshipType: RelationshipType
+  label: string | null
+}
 
 const emptyLinks: LinkedItemsResponse = { records: [], reminders: [] }
 
@@ -342,7 +349,7 @@ function LinkedItemCard({ item, onOpen, onRemove }: { item: LinkedItem; onOpen?:
   )
 }
 
-function AddLinkedItemDrawer({
+export function AddLinkedItemDrawer({
   currentRecordId,
   isOpen,
   linkedRecordIds,
@@ -352,14 +359,14 @@ function AddLinkedItemDrawer({
   onClose,
   onCreate,
 }: {
-  currentRecordId: string
+  currentRecordId: string | null
   isOpen: boolean
   linkedRecordIds: Set<string>
   linkedReminderIds: Set<string>
   records: LifeRecord[]
   reminders: Reminder[]
   onClose: () => void
-  onCreate: (input: { targetType: CandidateType; targetId: string; relationshipType: RelationshipType; label: string | null }) => Promise<void>
+  onCreate: (input: LinkDraft) => Promise<void>
 }) {
   const [step, setStep] = useState<AddStep>('type')
   const [targetType, setTargetType] = useState<CandidateType | null>(null)
