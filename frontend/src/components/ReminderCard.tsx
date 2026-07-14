@@ -1,4 +1,4 @@
-import { Cake, CalendarDays, CheckCircle2, Flag, RefreshCcw, Repeat2, Trash2, Wrench } from 'lucide-react'
+import { Cake, CalendarDays, CheckCircle2, Flag, Pencil, RefreshCcw, Repeat2, Trash2, Wrench } from 'lucide-react'
 
 import type { Reminder } from '../types/reminder'
 import {
@@ -15,6 +15,7 @@ interface ReminderCardProps {
   reminder: Reminder
   onComplete: (id: string) => Promise<void>
   onDelete: (reminder: Reminder) => void
+  onEdit: (reminder: Reminder) => void
   onView: (reminder: Reminder) => void
   isActionPending?: boolean
 }
@@ -28,7 +29,7 @@ const statusClassNames: Record<Reminder['status'], string> = {
   Scheduled: 'status-scheduled',
 }
 
-export function ReminderCard({ reminder, onComplete, onDelete, onView, isActionPending = false }: ReminderCardProps) {
+export function ReminderCard({ reminder, onComplete, onDelete, onEdit, onView, isActionPending = false }: ReminderCardProps) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = reminder.completed ? null : getSmartReminderLabel(reminder)
   const repeatLabel = formatRepeatLabel(reminder.repeat)
@@ -117,6 +118,10 @@ export function ReminderCard({ reminder, onComplete, onDelete, onView, isActionP
         >
           <CheckCircle2 size={18} aria-hidden="true" />
           {isActionPending ? 'Saving' : reminder.completed ? 'Completed' : 'Complete'}
+        </button>
+        <button type="button" className="action-button edit-button" onClick={() => onEdit(reminder)} disabled={isActionPending}>
+          <Pencil size={17} aria-hidden="true" />
+          Edit
         </button>
         <button type="button" className="action-button delete-button" onClick={() => onDelete(reminder)} disabled={isActionPending}>
           <Trash2 size={17} aria-hidden="true" />

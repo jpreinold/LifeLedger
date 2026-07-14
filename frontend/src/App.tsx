@@ -1078,6 +1078,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
               onTypeFilterChange={setReminderTypeFilter}
               onComplete={handleComplete}
               onDelete={requestDelete}
+              onEdit={openDetailEdit}
               onView={openReminderDetail}
               onBrowseTemplates={openTemplates}
               onAddReminder={openAddReminder}

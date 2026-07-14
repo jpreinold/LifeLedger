@@ -6712,11 +6712,27 @@ textarea:focus-visible {
 
 /* Phase 7 reminder lifecycle surfaces */
 .action-center-panel {
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.action-center-panel .section-heading {
+  padding: var(--space-2) 0;
+  border-bottom: 0;
+}
+
+.action-center-panel .filter-tabs {
+  margin-right: 0;
+  margin-left: 0;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.action-center-panel .reminder-type-tabs {
+  padding-bottom: var(--space-2);
 }
 
 .action-center-heading p {
@@ -6730,7 +6746,7 @@ textarea:focus-visible {
 .action-center-groups {
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-3);
+  padding: 0;
 }
 
 .action-center-group {
@@ -6739,12 +6755,16 @@ textarea:focus-visible {
 }
 
 .action-center-group-heading {
-  min-height: 34px;
+  min-height: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 0 var(--space-1);
+  padding: 0;
+}
+
+.action-center-group .reminder-list {
+  padding-bottom: 0;
 }
 
 .action-center-group-heading h3 {

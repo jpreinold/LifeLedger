@@ -24,6 +24,7 @@ interface ReminderListProps {
   onTypeFilterChange: (filter: ReminderTypeFilter) => void
   onComplete: (id: string) => Promise<void>
   onDelete: (reminder: Reminder) => void
+  onEdit: (reminder: Reminder) => void
   onView: (reminder: Reminder) => void
   onBrowseTemplates: () => void
   onAddReminder: () => void
@@ -39,6 +40,7 @@ export function ReminderList({
   onTypeFilterChange,
   onComplete,
   onDelete,
+  onEdit,
   onView,
   onBrowseTemplates,
   onAddReminder,
@@ -138,6 +140,7 @@ export function ReminderList({
               key={group.id}
               onComplete={onComplete}
               onDelete={onDelete}
+              onEdit={onEdit}
               onView={onView}
               pendingActionId={pendingActionId}
             />
@@ -154,6 +157,7 @@ export function ReminderList({
               isActionPending={pendingActionId === reminder.id}
               onComplete={onComplete}
               onDelete={onDelete}
+              onEdit={onEdit}
               onView={onView}
             />
           ))}
@@ -167,12 +171,14 @@ function ActionCenterGroupSection({
   group,
   onComplete,
   onDelete,
+  onEdit,
   onView,
   pendingActionId,
 }: {
   group: ActionCenterGroup
   onComplete: (id: string) => Promise<void>
   onDelete: (reminder: Reminder) => void
+  onEdit: (reminder: Reminder) => void
   onView: (reminder: Reminder) => void
   pendingActionId: string | null
 }) {
@@ -190,6 +196,7 @@ function ActionCenterGroupSection({
             isActionPending={pendingActionId === reminder.id}
             onComplete={onComplete}
             onDelete={onDelete}
+            onEdit={onEdit}
             onView={onView}
           />
         ))}
