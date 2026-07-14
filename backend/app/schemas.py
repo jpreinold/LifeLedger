@@ -39,9 +39,21 @@ class ReminderStatus(str, Enum):
     COMPLETED = "Completed"
     OVERDUE = "Overdue"
     DUE_TODAY = "Due today"
-    DUE_THIS_WEEK = "Due this week"
-    DUE_THIS_MONTH = "Due this month"
+    URGENT = "Urgent"
     UPCOMING = "Upcoming"
+    SCHEDULED = "Scheduled"
+
+
+class ReminderLifecycleEventType(str, Enum):
+    CREATED = "created"
+    EDITED = "edited"
+    DATE_CHANGED = "date_changed"
+    SNOOZED = "snoozed"
+    SNOOZE_CLEARED = "snooze_cleared"
+    COMPLETED = "completed"
+    RENEWED = "renewed"
+    ARCHIVED = "archived"
+    RESTORED = "restored"
 
 
 class ReminderAlertReason(str, Enum):
@@ -392,6 +404,37 @@ class ReminderUpdate(BaseModel):
         return value
 
 
+class ReminderLifecycleEvent(BaseModel):
+    event_id: str
+    event_type: ReminderLifecycleEventType
+    occurred_at: datetime
+    summary: str = Field(..., min_length=1, max_length=240)
+    actor: str = Field(default="user", max_length=40)
+    previous_due_date: date | None = None
+    new_due_date: date | None = None
+    snoozed_until: datetime | None = None
+
+
+class ReminderLinkedRecordSummary(BaseModel):
+    id: str
+    title: str
+    subtitle: str | None = None
+    record_type: RecordType
+    status: RecordStatus
+
+
+class ReminderSnoozeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snoozed_until: datetime
+
+
+class ReminderRenewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_due_date: date
+
+
 class ReminderResponse(ReminderBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -401,10 +444,15 @@ class ReminderResponse(ReminderBase):
     alert_last_seen_at: datetime | None = None
     alert_last_action_at: datetime | None = None
     alert_snoozed_until: datetime | None = None
+    snoozed_until: datetime | None = None
+    archived_at: datetime | None = None
     status: ReminderStatus
+    effective_attention_date: date
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    lifecycle_events: list[ReminderLifecycleEvent] = Field(default_factory=list)
+    linked_records: list[ReminderLinkedRecordSummary] = Field(default_factory=list)
     next_due_date: date | None = None
     computed_label: str | None = None
     birthday_age_label: str | None = None

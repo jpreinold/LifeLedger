@@ -21,7 +21,7 @@ def get_alert_eligibility(
     current_time = normalize_alert_datetime(now or datetime.now(timezone.utc))
     resolved_current_day = current_day or (current_time.date() if now is not None else date.today())
 
-    if reminder.completed:
+    if reminder.completed or reminder.archived_at is not None:
         return None
 
     if is_alert_muted(reminder, current_time):
@@ -68,9 +68,10 @@ def normalize_alert_datetime(value: datetime) -> datetime:
 
 def is_alert_muted(reminder: Reminder, now: datetime) -> bool:
     current_time = normalize_alert_datetime(now)
-    return is_future_datetime(reminder.alert_dismissed_until, current_time) or is_future_datetime(
-        reminder.alert_snoozed_until,
-        current_time,
+    return (
+        is_future_datetime(reminder.alert_dismissed_until, current_time)
+        or is_future_datetime(reminder.alert_snoozed_until, current_time)
+        or is_future_datetime(reminder.snoozed_until, current_time)
     )
 
 
@@ -109,6 +110,7 @@ def clear_alert_action_state(now: datetime) -> dict[str, datetime | None]:
     return {
         "alert_dismissed_until": None,
         "alert_snoozed_until": None,
+        "snoozed_until": None,
         "alert_last_action_at": now,
     }
 
@@ -127,6 +129,7 @@ def snooze_alert_state(now: datetime, snoozed_until: datetime | None = None) -> 
     )
     return {
         "alert_snoozed_until": resolved_until,
+        "snoozed_until": resolved_until,
         "alert_dismissed_until": None,
         "alert_last_action_at": now,
     }

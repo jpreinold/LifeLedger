@@ -69,7 +69,7 @@ from app.models import DynamicRecordField, GoogleCalendarConnection, GoogleOAuth
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
-from app.recurrence import advance_due_date, calculate_status, get_next_due_date
+from app.recurrence import advance_due_date, calculate_status, get_effective_attention_date, get_next_due_date
 from app.renewals import (
     advance_renewal_details,
     get_renewal_computed_label,
@@ -77,6 +77,7 @@ from app.renewals import (
     get_renewal_status_label,
     get_renewal_window_label,
 )
+from app.reminder_lifecycle import append_lifecycle_event, has_recent_lifecycle_action
 from app.repository import ReminderRepository
 from app.repository_factory import (
     create_google_calendar_connection_repository,
@@ -128,6 +129,10 @@ from app.schemas import (
     ReminderCreate,
     ReminderAlertResponse,
     ReminderLeadUnit,
+    ReminderLifecycleEventType,
+    ReminderLinkedRecordSummary,
+    ReminderRenewRequest,
+    ReminderSnoozeRequest,
     RecordAttachmentDownloadUrlResponse,
     RecordAttachmentResponse,
     RecordAttachmentUploadIntentRequest,
@@ -268,10 +273,23 @@ def health() -> dict[str, str]:
 def list_reminders(
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
 ) -> list[ReminderResponse]:
     reminders = repo.list_reminders(current_user.user_id)
     sorted_reminders = sorted(reminders, key=lambda item: (item.completed, item.due_date, item.created_at))
-    return [to_response(reminder) for reminder in sorted_reminders]
+    return [
+        to_response(
+            reminder,
+            linked_records=get_reminder_linked_record_summaries(
+                current_user.user_id,
+                reminder.id,
+                linked_repo,
+                record_repo,
+            ),
+        )
+        for reminder in sorted_reminders
+    ]
 
 
 @app.get("/alerts", response_model=list[ReminderAlertResponse])
@@ -1411,7 +1429,22 @@ def snooze_reminder_alert(
     if snoozed_until is not None and snoozed_until <= now:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Snooze time must be in the future")
 
-    updated = reminder.model_copy(update={**snooze_alert_state(now, snoozed_until), "updated_at": now})
+    resolved_snooze = snooze_alert_state(now, snoozed_until)["snoozed_until"]
+    updated = reminder.model_copy(
+        update={
+            **snooze_alert_state(now, snoozed_until),
+            "updated_at": now,
+            "lifecycle_events": append_lifecycle_event(
+                reminder,
+                event_type=ReminderLifecycleEventType.SNOOZED,
+                occurred_at=now,
+                summary=f"Snoozed until {resolved_snooze.date().isoformat()}.",
+                previous_due_date=reminder.due_date,
+                new_due_date=reminder.due_date,
+                snoozed_until=resolved_snooze,
+            ),
+        }
+    )
     return to_response(repo.update_reminder(updated))
 
 
@@ -1505,6 +1538,17 @@ def create_reminder(
         updated_at=now,
         completed_at=None,
     )
+    reminder = reminder.model_copy(
+        update={
+            "lifecycle_events": append_lifecycle_event(
+                reminder,
+                event_type=ReminderLifecycleEventType.CREATED,
+                occurred_at=now,
+                summary="Reminder created.",
+                new_due_date=reminder.due_date,
+            )
+        }
+    )
 
     return to_response(repo.create_reminder(reminder))
 
@@ -1514,8 +1558,19 @@ def get_reminder(
     reminder_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
 ) -> ReminderResponse:
-    return to_response(require_reminder(repo, current_user.user_id, reminder_id))
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
+    return to_response(
+        reminder,
+        linked_records=get_reminder_linked_record_summaries(
+            current_user.user_id,
+            reminder.id,
+            linked_repo,
+            record_repo,
+        ),
+    )
 
 
 @app.get("/reminders/{reminder_id}/links", response_model=LinkedItemsResponse)
@@ -1576,6 +1631,29 @@ def update_reminder(
     updates = payload.model_dump(exclude_unset=True)
     prepared_updates = prepare_update_fields(reminder, updates)
     now = utc_now()
+    previous_due_date = reminder.due_date
+    next_due_date = prepared_updates.get("due_date", reminder.due_date)
+    date_changed = next_due_date != previous_due_date
+
+    if date_changed:
+        prepared_updates["snoozed_until"] = None
+        prepared_updates["alert_snoozed_until"] = None
+
+    if prepared_updates:
+        event_type = ReminderLifecycleEventType.DATE_CHANGED if date_changed else ReminderLifecycleEventType.EDITED
+        summary = (
+            f"Important date changed from {previous_due_date.isoformat()} to {next_due_date.isoformat()}."
+            if date_changed
+            else "Reminder edited."
+        )
+        prepared_updates["lifecycle_events"] = append_lifecycle_event(
+            reminder,
+            event_type=event_type,
+            occurred_at=now,
+            summary=summary,
+            previous_due_date=previous_due_date,
+            new_due_date=next_due_date,
+        )
 
     updated = Reminder.model_validate({**reminder.model_dump(), **prepared_updates, "updated_at": now})
     saved = repo.update_reminder(updated)
@@ -1617,6 +1695,129 @@ def delete_reminder(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.post("/reminders/{reminder_id}/snooze/clear", response_model=ReminderResponse)
+def clear_reminder_snooze(
+    reminder_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    repo: ReminderRepository = Depends(get_repository),
+) -> ReminderResponse:
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
+    now = utc_now()
+    had_snooze = reminder.snoozed_until is not None or reminder.alert_snoozed_until is not None
+    updates: dict[str, object] = {
+        "snoozed_until": None,
+        "alert_snoozed_until": None,
+        "alert_last_action_at": now,
+        "updated_at": now,
+    }
+    if had_snooze:
+        updates["lifecycle_events"] = append_lifecycle_event(
+            reminder,
+            event_type=ReminderLifecycleEventType.SNOOZE_CLEARED,
+            occurred_at=now,
+            summary="Snooze cleared.",
+            previous_due_date=reminder.due_date,
+            new_due_date=reminder.due_date,
+        )
+
+    return to_response(repo.update_reminder(reminder.model_copy(update=updates)))
+
+
+@app.post("/reminders/{reminder_id}/snooze", response_model=ReminderResponse)
+def snooze_reminder(
+    reminder_id: str,
+    payload: ReminderSnoozeRequest,
+    current_user: UserContext = Depends(get_current_user),
+    repo: ReminderRepository = Depends(get_repository),
+) -> ReminderResponse:
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
+    if reminder.completed:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Completed reminders cannot be snoozed.")
+    if reminder.archived_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Archived reminders cannot be snoozed.")
+
+    now = utc_now()
+    snoozed_until = normalize_alert_datetime(payload.snoozed_until)
+    if snoozed_until <= now:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Choose a future snooze time.")
+
+    updated = reminder.model_copy(
+        update={
+            **snooze_alert_state(now, snoozed_until),
+            "updated_at": now,
+            "lifecycle_events": append_lifecycle_event(
+                reminder,
+                event_type=ReminderLifecycleEventType.SNOOZED,
+                occurred_at=now,
+                summary=f"Snoozed until {snoozed_until.date().isoformat()}.",
+                previous_due_date=reminder.due_date,
+                new_due_date=reminder.due_date,
+                snoozed_until=snoozed_until,
+            ),
+        }
+    )
+    return to_response(repo.update_reminder(updated))
+
+
+@app.post("/reminders/{reminder_id}/renew", response_model=ReminderResponse)
+def renew_reminder(
+    reminder_id: str,
+    payload: ReminderRenewRequest,
+    current_user: UserContext = Depends(get_current_user),
+    repo: ReminderRepository = Depends(get_repository),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
+    app_settings: Settings = Depends(get_app_settings),
+    calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+) -> ReminderResponse:
+    reminder = require_reminder(repo, current_user.user_id, reminder_id)
+    if reminder.archived_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Archived reminders cannot be renewed.")
+    if not is_renewable_reminder(reminder):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This reminder does not support renewal.")
+
+    now = utc_now()
+    if payload.new_due_date < now.date():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Choose today or a future renewal date.")
+    if has_recent_lifecycle_action(reminder, ReminderLifecycleEventType.RENEWED, now):
+        return to_response(reminder)
+
+    previous_due_date = reminder.due_date
+    renewal_details = renewal_details_for_new_date(reminder, payload.new_due_date)
+    maintenance_details = maintenance_details_for_new_date(reminder, payload.new_due_date, now.date())
+    updated = reminder.model_copy(
+        update={
+            **clear_alert_action_state(now),
+            "completed": False,
+            "completed_at": now,
+            "due_date": payload.new_due_date,
+            "renewal_details": renewal_details,
+            "maintenance_details": maintenance_details,
+            "updated_at": now,
+            "lifecycle_events": append_lifecycle_event(
+                reminder,
+                event_type=ReminderLifecycleEventType.RENEWED,
+                occurred_at=now,
+                summary=f"Renewed from {previous_due_date.isoformat()} to {payload.new_due_date.isoformat()}.",
+                previous_due_date=previous_due_date,
+                new_due_date=payload.new_due_date,
+            ),
+        }
+    )
+    saved = repo.update_reminder(updated)
+    update_linked_record_dates(current_user.user_id, reminder.id, previous_due_date, payload.new_due_date, now, linked_repo, record_repo)
+    synced = sync_existing_calendar_event_after_change(
+        repo,
+        connection_repo,
+        app_settings,
+        calendar_service,
+        saved,
+        now,
+    )
+    return to_response(synced)
+
+
 @app.post("/reminders/{reminder_id}/complete", response_model=ReminderResponse)
 def complete_reminder(
     reminder_id: str,
@@ -1628,6 +1829,13 @@ def complete_reminder(
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
+    if reminder.archived_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Archived reminders cannot be completed.")
+    if reminder.completed:
+        return to_response(reminder)
+    if has_recent_lifecycle_action(reminder, ReminderLifecycleEventType.COMPLETED, now):
+        return to_response(reminder)
+
     alert_updates = clear_alert_action_state(now)
 
     if (
@@ -1647,6 +1855,14 @@ def complete_reminder(
                     "due_date": next_due_date,
                     "maintenance_details": maintenance_details,
                     "updated_at": now,
+                    "lifecycle_events": append_lifecycle_event(
+                        reminder,
+                        event_type=ReminderLifecycleEventType.COMPLETED,
+                        occurred_at=now,
+                        summary=f"Completed maintenance; next due {next_due_date.isoformat()}.",
+                        previous_due_date=reminder.due_date,
+                        new_due_date=next_due_date,
+                    ),
                 }
             )
             saved = repo.update_reminder(advanced_reminder)
@@ -1667,6 +1883,14 @@ def complete_reminder(
                 "completed": True,
                 "completed_at": now,
                 "updated_at": now,
+                "lifecycle_events": append_lifecycle_event(
+                    reminder,
+                    event_type=ReminderLifecycleEventType.COMPLETED,
+                    occurred_at=now,
+                    summary="Reminder completed.",
+                    previous_due_date=reminder.due_date,
+                    new_due_date=reminder.due_date,
+                ),
             }
         )
         return to_response(repo.update_reminder(completed_reminder))
@@ -1690,6 +1914,14 @@ def complete_reminder(
             "renewal_details": renewal_details,
             "maintenance_details": maintenance_details,
             "updated_at": now,
+            "lifecycle_events": append_lifecycle_event(
+                reminder,
+                event_type=ReminderLifecycleEventType.COMPLETED,
+                occurred_at=now,
+                summary=f"Completed recurring reminder; next due {next_due_date.isoformat()}.",
+                previous_due_date=reminder.due_date,
+                new_due_date=next_due_date,
+            ),
         }
     )
     saved = repo.update_reminder(advanced_reminder)
@@ -1703,6 +1935,62 @@ def complete_reminder(
     )
     return to_response(synced)
 
+
+def is_renewable_reminder(reminder: Reminder) -> bool:
+    return reminder.reminder_type in {ReminderType.RENEWAL, ReminderType.MAINTENANCE} or reminder.repeat != RepeatOption.NONE
+
+
+def renewal_details_for_new_date(reminder: Reminder, new_due_date: date) -> RenewalDetails | None:
+    details = reminder.renewal_details
+    if reminder.reminder_type != ReminderType.RENEWAL or details is None:
+        return details
+
+    data = details.model_dump()
+    if str(details.renewal_kind) == "RenewalKind.EXPIRATION" or getattr(details.renewal_kind, "value", None) == "expiration":
+        data["expiration_date"] = new_due_date
+    else:
+        data["renewal_date"] = new_due_date
+    return RenewalDetails.model_validate(data)
+
+
+def maintenance_details_for_new_date(reminder: Reminder, new_due_date: date, completed_on: date) -> MaintenanceDetails | None:
+    details = reminder.maintenance_details
+    if reminder.reminder_type != ReminderType.MAINTENANCE or details is None:
+        return details
+
+    data = details.model_dump()
+    data["last_completed_date"] = completed_on
+    data["next_due_date"] = new_due_date
+    return MaintenanceDetails.model_validate(data)
+
+
+def update_linked_record_dates(
+    user_id: str,
+    reminder_id: str,
+    previous_due_date: date,
+    new_due_date: date,
+    now: datetime,
+    linked_repo: LinkedItemRepository,
+    record_repo: RecordRepository,
+) -> None:
+    for summary in get_reminder_linked_record_summaries(user_id, reminder_id, linked_repo, record_repo):
+        record = record_repo.get_record(user_id, summary.id)
+        if record is None or record.status == RecordStatus.ARCHIVED:
+            continue
+
+        updates: dict[str, object] = {}
+        if record.renewal_date == previous_due_date:
+            updates["renewal_date"] = new_due_date
+        if record.expiration_date == previous_due_date:
+            updates["expiration_date"] = new_due_date
+
+        if not updates:
+            continue
+
+        try:
+            record_repo.update_record(record.model_copy(update={**updates, "updated_at": now}))
+        except Exception:
+            logger.exception("Failed to update linked record dates for renewed reminder", extra={"reminder_id": reminder_id})
 
 def to_google_calendar_status_response(
     settings: Settings,
@@ -2441,11 +2729,55 @@ def clear_record_protected_fields(record: Record, now: datetime) -> Record:
     )
 
 
-def to_response(reminder: Reminder) -> ReminderResponse:
+
+def get_reminder_linked_record_summaries(
+    user_id: str,
+    reminder_id: str,
+    linked_repo: LinkedItemRepository,
+    record_repo: RecordRepository,
+) -> list[ReminderLinkedRecordSummary]:
+    summaries: list[ReminderLinkedRecordSummary] = []
+    seen_record_ids: set[str] = set()
+    links = linked_repo.list_links_for_entity(user_id, LinkedEntityType.REMINDER, reminder_id)
+
+    for link in sorted(links, key=lambda item: item.created_at):
+        record_id: str | None = None
+        if link.source_type == LinkedEntityType.RECORD and link.target_type == LinkedEntityType.REMINDER and link.target_id == reminder_id:
+            record_id = link.source_id
+        elif link.target_type == LinkedEntityType.RECORD and link.source_type == LinkedEntityType.REMINDER and link.source_id == reminder_id:
+            record_id = link.target_id
+
+        if record_id is None or record_id in seen_record_ids:
+            continue
+
+        record = record_repo.get_record(user_id, record_id)
+        if record is None:
+            continue
+
+        seen_record_ids.add(record.id)
+        summaries.append(
+            ReminderLinkedRecordSummary(
+                id=record.id,
+                title=record.title,
+                subtitle=record.subtitle or record.provider_or_brand or record.owner_name or record.category,
+                record_type=record.record_type,
+                status=record.status,
+            )
+        )
+
+    return summaries
+def to_response(
+    reminder: Reminder,
+    *,
+    linked_records: list[ReminderLinkedRecordSummary] | None = None,
+) -> ReminderResponse:
+    now = utc_now()
     return ReminderResponse.model_validate(
         {
             **reminder.model_dump(),
-            "status": calculate_status(reminder),
+            "status": calculate_status(reminder, now=now),
+            "effective_attention_date": get_effective_attention_date(reminder, now=now),
+            "linked_records": linked_records or [],
             "next_due_date": get_response_next_due_date(reminder),
             "computed_label": get_computed_label(reminder),
             "birthday_age_label": get_birthday_age_label(reminder.birthday_details)
@@ -2462,7 +2794,6 @@ def to_response(reminder: Reminder) -> ReminderResponse:
             else None,
         }
     )
-
 
 def to_alert_response(reminder: Reminder, eligibility) -> ReminderAlertResponse:
     return ReminderAlertResponse.model_validate(

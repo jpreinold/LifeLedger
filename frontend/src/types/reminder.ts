@@ -18,11 +18,22 @@ export const reminderStatuses = [
   'Completed',
   'Overdue',
   'Due today',
-  'Due this week',
-  'Due this month',
+  'Urgent',
   'Upcoming',
+  'Scheduled',
 ] as const
 
+export const reminderLifecycleEventTypes = [
+  'created',
+  'edited',
+  'date_changed',
+  'snoozed',
+  'snooze_cleared',
+  'completed',
+  'renewed',
+  'archived',
+  'restored',
+] as const
 export const reminderTypes = ['generic', 'birthday', 'renewal', 'maintenance'] as const
 
 export const reminderAlertReasons = ['Overdue', 'Due today', 'Reminder window'] as const
@@ -40,6 +51,7 @@ export type RepeatOption = (typeof repeatOptions)[number]
 export type PriorityOption = (typeof priorityOptions)[number]
 export type ReminderLeadUnit = (typeof reminderLeadUnits)[number]
 export type ReminderStatus = (typeof reminderStatuses)[number]
+export type ReminderLifecycleEventType = (typeof reminderLifecycleEventTypes)[number]
 export type ReminderType = (typeof reminderTypes)[number]
 export type ReminderAlertReason = (typeof reminderAlertReasons)[number]
 export type CalendarSyncStatus = (typeof calendarSyncStatuses)[number]
@@ -90,6 +102,7 @@ export interface RenewalDetailsInput {
   review_lead_days: number | null
   frequency: string | null
 }
+
 export interface MaintenanceDetails {
   item_name: string
   maintenance_area: MaintenanceArea
@@ -108,6 +121,25 @@ export interface MaintenanceDetailsInput {
   interval_unit: MaintenanceIntervalUnit | null
   next_due_date: string | null
   instructions: string | null
+}
+
+export interface ReminderLifecycleEvent {
+  event_id: string
+  event_type: ReminderLifecycleEventType
+  occurred_at: string
+  summary: string
+  actor: string
+  previous_due_date: string | null
+  new_due_date: string | null
+  snoozed_until: string | null
+}
+
+export interface ReminderLinkedRecordSummary {
+  id: string
+  title: string
+  subtitle: string | null
+  record_type: 'general' | 'passport' | 'driver_license' | 'vehicle' | 'insurance' | 'appliance' | 'pet' | 'home' | 'subscription' | 'warranty'
+  status: 'active' | 'archived'
 }
 export interface Reminder {
   id: string
@@ -129,10 +161,15 @@ export interface Reminder {
   alert_last_seen_at: string | null
   alert_last_action_at: string | null
   alert_snoozed_until: string | null
+  snoozed_until: string | null
+  archived_at: string | null
   status: ReminderStatus
+  effective_attention_date: string
   created_at: string
   updated_at: string
   completed_at: string | null
+  lifecycle_events: ReminderLifecycleEvent[]
+  linked_records: ReminderLinkedRecordSummary[]
   next_due_date: string | null
   computed_label: string | null
   birthday_age_label: string | null

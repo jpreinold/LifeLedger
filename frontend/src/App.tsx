@@ -161,6 +161,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [viewingRecord, setViewingRecord] = useState<ViewingRecordState | null>(null)
   const [recordBackStack, setRecordBackStack] = useState<ViewingRecordState[]>([])
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
+  const [pendingReminderActionId, setPendingReminderActionId] = useState<string | null>(null)
   const [pendingRecordDelete, setPendingRecordDelete] = useState<LifeRecord | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
   const [activePage, setActivePage] = useState<AppPage>('home')
@@ -350,16 +351,93 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   async function handleComplete(id: string) {
+    if (pendingReminderActionId === id) {
+      return
+    }
+
+    setPendingReminderActionId(id)
     setError(null)
     setNotice(null)
     const reminder = reminders.find((item) => item.id === id)
 
     try {
       const completedReminder = await remindersApi.complete(id)
+      replaceReminder(completedReminder)
       await loadReminderData()
       setNotice(formatCompletionNotice(reminder, completedReminder))
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to complete reminder.')
+    } finally {
+      setPendingReminderActionId(null)
+    }
+  }
+
+  async function handleSnoozeReminder(id: string, snoozedUntil: string) {
+    if (pendingReminderActionId === id) {
+      return false
+    }
+
+    setPendingReminderActionId(id)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const updated = await remindersApi.snooze(id, snoozedUntil)
+      replaceReminder(updated)
+      await loadReminderData()
+      setNotice('Reminder snoozed.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to snooze reminder.')
+      return false
+    } finally {
+      setPendingReminderActionId(null)
+    }
+  }
+
+  async function handleClearReminderSnooze(id: string) {
+    if (pendingReminderActionId === id) {
+      return false
+    }
+
+    setPendingReminderActionId(id)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const updated = await remindersApi.clearSnooze(id)
+      replaceReminder(updated)
+      await loadReminderData()
+      setNotice('Snooze cleared.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to clear snooze.')
+      return false
+    } finally {
+      setPendingReminderActionId(null)
+    }
+  }
+
+  async function handleRenewReminder(id: string, newDueDate: string) {
+    if (pendingReminderActionId === id) {
+      return false
+    }
+
+    setPendingReminderActionId(id)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const updated = await remindersApi.renew(id, newDueDate)
+      replaceReminder(updated)
+      await loadReminderData()
+      setNotice('Reminder renewed.')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to renew reminder.')
+      return false
+    } finally {
+      setPendingReminderActionId(null)
     }
   }
 
@@ -524,15 +602,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   async function handleSnoozeAlert(id: string) {
-    setError(null)
-    setNotice(null)
-
-    try {
-      await remindersApi.snoozeAlert(id, getTomorrowMorningIso())
-      await loadReminderData()
+    const snoozed = await handleSnoozeReminder(id, getTomorrowMorningIso())
+    if (snoozed) {
       setNotice('Reminder snoozed until tomorrow morning.')
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to snooze alert.')
     }
   }
 
@@ -1009,6 +1081,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
               onView={openReminderDetail}
               onBrowseTemplates={openTemplates}
               onAddReminder={openAddReminder}
+              pendingActionId={pendingReminderActionId}
             />
           </section>
 
@@ -1147,14 +1220,17 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           isCalendarStatusLoading={isCalendarStatusLoading}
           isAlertEligible={viewingReminder.fromAlert || alerts.some((alert) => alert.id === viewingReminder.reminder.id)}
           onClose={() => setViewingReminder(null)}
+          onClearSnooze={handleClearReminderSnooze}
           onComplete={handleComplete}
           onDisableCalendarSync={handleDisableCalendarSync}
           onEnableCalendarSync={handleEnableCalendarSync}
           onDismiss={handleDismissAlert}
           onEdit={openDetailEdit}
           onOpenLinkedRecord={openLinkedRecord}
+          onRenew={handleRenewReminder}
           onRequestDelete={requestDelete}
-          onSnooze={handleSnoozeAlert}
+          onSnooze={handleSnoozeReminder}
+          isActionPending={pendingReminderActionId === viewingReminder.reminder.id}
         />
       ) : null}
       {viewingRecord ? (
@@ -1165,6 +1241,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           canGoBack={recordBackStack.length > 0}
           initialTab={viewingRecord.initialTab}
           onArchive={handleArchiveRecord}
+          onAddReminder={openAddReminder}
           onBack={goBackRecordDetail}
           onClose={() => {
             setViewingRecord(null)

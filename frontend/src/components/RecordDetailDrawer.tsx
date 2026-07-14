@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Archive,
+  Bell,
+  CalendarDays,
+  CheckCircle2,
+  ChevronRight,
   Eye,
   EyeOff,
   LockKeyhole,
@@ -19,6 +23,14 @@ import {
   getRecordStatusClass,
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
+import {
+  formatLongDate,
+  formatReminderAttentionLabel,
+  formatReminderStatusLabel,
+  getReminderEffectiveDate,
+  isActionableReminder,
+  sortActionCenterReminders,
+} from '../lib/reminderDisplay'
 import { formatDynamicFieldValue, getVisibleDynamicFieldCount, hasDisplayValue, hasSensitiveDynamicFields, maskedValue } from '../lib/fieldRendering'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
 import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
@@ -38,6 +50,7 @@ interface RecordDetailDrawerProps {
   records: LifeRecord[]
   reminders: Reminder[]
   onArchive: (record: LifeRecord) => Promise<void>
+  onAddReminder: () => void
   onBack?: () => void
   onClose: () => void
   onEdit: (record: LifeRecord) => void
@@ -59,6 +72,7 @@ export function RecordDetailDrawer({
   records,
   reminders,
   onArchive,
+  onAddReminder,
   onBack,
   onClose,
   onEdit,
@@ -101,6 +115,13 @@ export function RecordDetailDrawer({
     (field) => !record.dynamic_fields.some((existing) => existing.key === field.key),
   )
 
+  const recordReminders = reminders.filter((reminder) =>
+    reminder.linked_records.some((linkedRecord) => linkedRecord.id === record.id),
+  )
+  const activeRecordReminders = recordReminders.filter(isActionableReminder).sort(sortActionCenterReminders)
+  const nextRecordReminder = activeRecordReminders[0] ?? null
+  const overdueRecordReminderCount = activeRecordReminders.filter((reminder) => reminder.status === 'Overdue').length
+  const recentReminderEvents = getRecentRecordReminderEvents(recordReminders)
   const resetDetailScroll = useCallback(() => {
     detailBodyRef.current?.scrollTo({ top: 0 })
   }, [])
@@ -455,6 +476,15 @@ export function RecordDetailDrawer({
               ]}
             />
 
+            <RecordReminderActivitySection
+              activeReminders={activeRecordReminders}
+              overdueCount={overdueRecordReminderCount}
+              recentEvents={recentReminderEvents}
+              nextReminder={nextRecordReminder}
+              onAddReminder={onAddReminder}
+              onOpenReminder={onOpenLinkedReminder}
+            />
+
             <DynamicFieldsSection
               error={fieldError}
               fields={record.dynamic_fields}
@@ -553,6 +583,151 @@ export function RecordDetailDrawer({
   )
 }
 
+interface RecordReminderEventSummary {
+  eventId: string
+  label: string
+  occurredAt: string
+  reminderId: string
+  reminderTitle: string
+  summary: string
+}
+
+function RecordReminderActivitySection({
+  activeReminders,
+  nextReminder,
+  onAddReminder,
+  onOpenReminder,
+  overdueCount,
+  recentEvents,
+}: {
+  activeReminders: Reminder[]
+  nextReminder: Reminder | null
+  overdueCount: number
+  recentEvents: RecordReminderEventSummary[]
+  onAddReminder: () => void
+  onOpenReminder: (reminderId: string) => void
+}) {
+  return (
+    <section className="detail-section record-reminder-section" aria-labelledby="record-reminders-heading">
+      <div className="record-reminder-header">
+        <div>
+          <h3 id="record-reminders-heading">Reminder activity</h3>
+          <p>{activeReminders.length === 0 ? 'No active linked reminders.' : `${activeReminders.length} active linked reminder${activeReminders.length === 1 ? '' : 's'}.`}</p>
+        </div>
+        <button type="button" className="small-outline-button" onClick={onAddReminder}>
+          <Bell size={14} aria-hidden="true" />
+          Add reminder
+        </button>
+      </div>
+
+      <div className="record-reminder-stats" aria-label="Reminder summary">
+        <div>
+          <span>Next date</span>
+          <strong>{nextReminder ? formatLongDate(getReminderEffectiveDate(nextReminder)) : 'None'}</strong>
+        </div>
+        <div>
+          <span>Active</span>
+          <strong>{activeReminders.length}</strong>
+        </div>
+        <div>
+          <span>Overdue</span>
+          <strong>{overdueCount}</strong>
+        </div>
+      </div>
+
+      {activeReminders.length > 0 ? (
+        <div className="record-reminder-list">
+          {activeReminders.slice(0, 3).map((reminder) => (
+            <button type="button" className="record-reminder-row" key={reminder.id} onClick={() => onOpenReminder(reminder.id)}>
+              <span className="record-reminder-row-icon" aria-hidden="true">
+                <CalendarDays size={16} />
+              </span>
+              <span className="record-reminder-row-copy">
+                <strong>{reminder.title}</strong>
+                <span>{formatReminderStatusLabel(reminder)} {'\u2022'} {formatReminderAttentionLabel(reminder, { includeDate: false })}</span>
+              </span>
+              <span className="record-reminder-row-action">
+                {isRenewableReminder(reminder) ? 'Renew' : 'Open'}
+                <ChevronRight size={15} aria-hidden="true" />
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="linked-items-state">Link a reminder to keep this record visible in the Action Center.</p>
+      )}
+
+      <div className="record-reminder-history">
+        <h4>Recent lifecycle history</h4>
+        {recentEvents.length === 0 ? <p className="linked-items-state">No completed or renewed activity yet.</p> : null}
+        {recentEvents.length > 0 ? (
+          <ol>
+            {recentEvents.map((event) => (
+              <li key={event.eventId}>
+                <CheckCircle2 size={15} aria-hidden="true" />
+                <span>
+                  <strong>{event.label}</strong>
+                  <small>{event.reminderTitle} {'\u2022'} {event.summary}</small>
+                </span>
+                <time dateTime={event.occurredAt}>{formatReminderEventDate(event.occurredAt)}</time>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function getRecentRecordReminderEvents(reminders: Reminder[]): RecordReminderEventSummary[] {
+  const visibleTypes = new Set(['completed', 'renewed', 'date_changed', 'snoozed', 'snooze_cleared'])
+
+  return reminders
+    .flatMap((reminder) => reminder.lifecycle_events
+      .filter((event) => visibleTypes.has(event.event_type))
+      .map((event) => ({
+        eventId: event.event_id,
+        label: formatReminderEventType(event.event_type),
+        occurredAt: event.occurred_at,
+        reminderId: reminder.id,
+        reminderTitle: reminder.title,
+        summary: event.summary,
+      })))
+    .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
+    .slice(0, 4)
+}
+
+function formatReminderEventType(type: Reminder['lifecycle_events'][number]['event_type']) {
+  const labels: Record<Reminder['lifecycle_events'][number]['event_type'], string> = {
+    created: 'Created',
+    edited: 'Edited',
+    date_changed: 'Date changed',
+    snoozed: 'Snoozed',
+    snooze_cleared: 'Snooze cleared',
+    completed: 'Completed',
+    renewed: 'Renewed',
+    archived: 'Archived',
+    restored: 'Restored',
+  }
+
+  return labels[type]
+}
+
+function formatReminderEventDate(value: string) {
+  const timestamp = new Date(value)
+  if (Number.isNaN(timestamp.getTime())) {
+    return 'Date unknown'
+  }
+
+  return timestamp.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function isRenewableReminder(reminder: Reminder) {
+  return reminder.reminder_type === 'renewal' || reminder.reminder_type === 'maintenance' || reminder.repeat !== 'None'
+}
 function DynamicFieldsSection({
   error,
   fields,

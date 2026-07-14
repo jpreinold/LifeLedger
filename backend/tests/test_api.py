@@ -7,9 +7,10 @@ from fastapi.testclient import TestClient
 from app.alerts import get_alert_eligibility
 from app.auth import UserContext, get_current_user
 from app.config import get_settings
-from app.main import app, get_linked_item_repository, get_preferences_repository, get_repository
+from app.main import app, get_linked_item_repository, get_preferences_repository, get_record_repository, get_repository
 from app.linked_items_repository import LocalLinkedItemRepository
 from app.preferences_repository import LocalPreferencesRepository
+from app.records_repository import LocalRecordRepository
 from app.repository import LocalReminderRepository
 from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
 
@@ -18,9 +19,11 @@ from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, R
 def client(tmp_path):
     repo = LocalReminderRepository(tmp_path / "reminders.json")
     preferences_repo = LocalPreferencesRepository(tmp_path / "preferences.json")
+    record_repo = LocalRecordRepository(tmp_path / "records.json")
     linked_repo = LocalLinkedItemRepository(tmp_path / "linked-items.json")
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_preferences_repository] = lambda: preferences_repo
+    app.dependency_overrides[get_record_repository] = lambda: record_repo
     app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
 
     with TestClient(app) as test_client:
@@ -47,6 +50,19 @@ def create_reminder(client: TestClient, **overrides):
     assert response.status_code == 201
     return response.json()
 
+
+
+def create_record(client: TestClient, **overrides):
+    payload = {
+        "record_type": "general",
+        "title": "Renewal record",
+        "category": "General",
+        "renewal_date": date.today().isoformat(),
+    }
+    payload.update(overrides)
+    response = client.post("/records", json=payload)
+    assert response.status_code == 201
+    return response.json()
 
 def set_auth_user(user_id: str):
     app.dependency_overrides[get_current_user] = lambda: UserContext(user_id=user_id)
@@ -98,6 +114,9 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
         ("post", "/reminders/example-id/alert/snooze", None),
         ("post", "/reminders/example-id/calendar-sync/enable", None),
         ("post", "/reminders/example-id/calendar-sync/disable", None),
+        ("post", "/reminders/example-id/snooze", {"snoozed_until": "2030-01-01T09:00:00+00:00"}),
+        ("post", "/reminders/example-id/snooze/clear", None),
+        ("post", "/reminders/example-id/renew", {"new_due_date": "2030-01-01"}),
         ("post", "/reminders/example-id/complete", None),
         ("get", "/records", None),
         ("post", "/records", {"record_type": "general", "title": "Emergency folder"}),
@@ -937,20 +956,183 @@ def test_complete_recurring_reminder_advances_due_date(client):
     [
         (date.today() - timedelta(days=1), "Overdue"),
         (date.today(), "Due today"),
-        (date.today() + timedelta(days=3), "Due this week"),
-        (date.today().replace(day=28), "Due this month"),
-        (date.today() + timedelta(days=45), "Upcoming"),
+        (date.today() + timedelta(days=3), "Urgent"),
+        (date.today() + timedelta(days=14), "Upcoming"),
+        (date.today() + timedelta(days=45), "Scheduled"),
     ],
 )
 def test_status_logic(client, due_date, expected_status):
-    if expected_status == "Due this month" and due_date <= date.today() + timedelta(days=7):
-        pytest.skip("Current date leaves no later-in-month day outside the week window.")
-
     created = create_reminder(client, due_date=due_date.isoformat())
 
     assert created["status"] == expected_status
+    assert created["effective_attention_date"] == due_date.isoformat()
+
+def test_snooze_defers_attention_without_changing_due_date(client):
+    created = create_reminder(client, title="Snooze lifecycle", due_date=date.today().isoformat())
+    snoozed_until = datetime.now(timezone.utc) + timedelta(days=3)
+
+    snooze_response = client.post(
+        f"/reminders/{created['id']}/snooze",
+        json={"snoozed_until": snoozed_until.isoformat()},
+    )
+    body = snooze_response.json()
+
+    assert snooze_response.status_code == 200
+    assert body["due_date"] == date.today().isoformat()
+    assert body["snoozed_until"] is not None
+    assert body["effective_attention_date"] == snoozed_until.date().isoformat()
+    assert [event["event_type"] for event in body["lifecycle_events"]][-1] == "snoozed"
+    assert client.get("/alerts").json() == []
+
+    clear_response = client.post(f"/reminders/{created['id']}/snooze/clear")
+    cleared = clear_response.json()
+
+    assert clear_response.status_code == 200
+    assert cleared["snoozed_until"] is None
+    assert cleared["alert_snoozed_until"] is None
+    assert cleared["effective_attention_date"] == date.today().isoformat()
+    assert [event["event_type"] for event in cleared["lifecycle_events"]][-1] == "snooze_cleared"
 
 
+def test_snooze_rejects_completed_reminder(client):
+    created = create_reminder(client, repeat="None")
+    complete_response = client.post(f"/reminders/{created['id']}/complete")
+    assert complete_response.status_code == 200
+
+    response = client.post(
+        f"/reminders/{created['id']}/snooze",
+        json={"snoozed_until": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()},
+    )
+
+    assert response.status_code == 409
+
+
+def test_complete_is_idempotent_and_preserves_history(client):
+    created = create_reminder(client, repeat="None")
+
+    first = client.post(f"/reminders/{created['id']}/complete")
+    second = client.post(f"/reminders/{created['id']}/complete")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["completed"] is True
+    assert [event["event_type"] for event in second.json()["lifecycle_events"]].count("completed") == 1
+
+
+def test_renew_advances_current_cycle_and_updates_linked_record_date(client):
+    previous_due_date = date.today() + timedelta(days=2)
+    new_due_date = date.today() + timedelta(days=365)
+    record = create_record(client, title="Car registration", renewal_date=previous_due_date.isoformat())
+    reminder = create_reminder(
+        client,
+        title="Renew registration",
+        category="Car",
+        due_date=previous_due_date.isoformat(),
+        repeat="Yearly",
+        reminder_type="renewal",
+        renewal_details={
+            "item_name": "Car registration",
+            "renewal_kind": "renewal",
+            "renewal_date": previous_due_date.isoformat(),
+            "frequency": "Yearly",
+        },
+    )
+    link_response = client.post(
+        f"/records/{record['id']}/links",
+        json={"target_type": "reminder", "target_id": reminder["id"], "relationship_type": "renews"},
+    )
+    assert link_response.status_code == 201
+
+    snooze_response = client.post(
+        f"/reminders/{reminder['id']}/snooze",
+        json={"snoozed_until": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()},
+    )
+    assert snooze_response.status_code == 200
+
+    renew_response = client.post(
+        f"/reminders/{reminder['id']}/renew",
+        json={"new_due_date": new_due_date.isoformat()},
+    )
+    body = renew_response.json()
+
+    assert renew_response.status_code == 200
+    assert body["completed"] is False
+    assert body["completed_at"] is not None
+    assert body["due_date"] == new_due_date.isoformat()
+    assert body["snoozed_until"] is None
+    assert body["alert_snoozed_until"] is None
+    assert body["renewal_details"]["renewal_date"] == new_due_date.isoformat()
+    renewed_event = body["lifecycle_events"][-1]
+    assert renewed_event["event_type"] == "renewed"
+    assert renewed_event["previous_due_date"] == previous_due_date.isoformat()
+    assert renewed_event["new_due_date"] == new_due_date.isoformat()
+
+    updated_record = client.get(f"/records/{record['id']}").json()
+    assert updated_record["renewal_date"] == new_due_date.isoformat()
+
+
+def test_renew_rejects_one_time_generic_reminder(client):
+    created = create_reminder(client, repeat="None", reminder_type="generic")
+
+    response = client.post(
+        f"/reminders/{created['id']}/renew",
+        json={"new_due_date": (date.today() + timedelta(days=30)).isoformat()},
+    )
+
+    assert response.status_code == 409
+
+
+def test_archived_linked_record_reminders_are_returned_but_marked_for_client_filtering(client):
+    record = create_record(client, title="Archived record")
+    reminder = create_reminder(client, title="Archived linked reminder", due_date=date.today().isoformat())
+    link_response = client.post(
+        f"/records/{record['id']}/links",
+        json={"target_type": "reminder", "target_id": reminder["id"]},
+    )
+    assert link_response.status_code == 201
+    archive_response = client.post(f"/records/{record['id']}/archive")
+    assert archive_response.status_code == 200
+
+    fetched = client.get(f"/reminders/{reminder['id']}").json()
+
+    assert fetched["linked_records"][0]["id"] == record["id"]
+    assert fetched["linked_records"][0]["status"] == "archived"
+
+
+def test_legacy_reminder_response_defaults_lifecycle_fields(client, tmp_path):
+    legacy_path = tmp_path / "legacy-reminders.json"
+    legacy_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "legacy-lifecycle-reminder",
+                    "user_id": "local-dev-user",
+                    "title": "Legacy lifecycle reminder",
+                    "category": "Other",
+                    "due_date": date.today().isoformat(),
+                    "repeat": "None",
+                    "priority": "Medium",
+                    "notes": None,
+                    "completed": False,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                    "completed_at": None,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    repo = LocalReminderRepository(legacy_path)
+    app.dependency_overrides[get_repository] = lambda: repo
+
+    response = client.get("/reminders/legacy-lifecycle-reminder")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["snoozed_until"] is None
+    assert body["archived_at"] is None
+    assert body["lifecycle_events"] == []
+    assert body["effective_attention_date"] == date.today().isoformat()
 
 def test_alerts_include_due_today_reminders(client):
     created = create_reminder(client, title="Due today alert", due_date=date.today().isoformat())

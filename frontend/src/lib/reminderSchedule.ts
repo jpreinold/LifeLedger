@@ -188,7 +188,7 @@ function hasReminderTiming(input: ReminderTimingFields) {
 }
 
 function isAlertMuted(reminder: Reminder, now: Date) {
-  return isFutureDateTime(reminder.alert_dismissed_until, now) || isFutureDateTime(reminder.alert_snoozed_until, now)
+  return isFutureDateTime(reminder.alert_dismissed_until, now) || isFutureDateTime(reminder.alert_snoozed_until, now) || isFutureDateTime(reminder.snoozed_until, now)
 }
 
 function isFutureDateTime(value: string | null, now: Date) {

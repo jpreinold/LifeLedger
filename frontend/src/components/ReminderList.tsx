@@ -3,10 +3,13 @@ import { LayoutTemplate, Plus } from 'lucide-react'
 
 import { ReminderCard } from './ReminderCard'
 import {
+  getActionCenterGroups,
   getReminderTypeFilterLabel,
   matchesReminderStatusFilter,
   matchesReminderTypeFilter,
   reminderTypeFilters,
+  sortActionCenterReminders,
+  type ActionCenterGroup,
   type ReminderStatusFilter,
   type ReminderTypeFilter,
 } from '../lib/reminderDisplay'
@@ -24,6 +27,7 @@ interface ReminderListProps {
   onView: (reminder: Reminder) => void
   onBrowseTemplates: () => void
   onAddReminder: () => void
+  pendingActionId?: string | null
 }
 
 export function ReminderList({
@@ -38,10 +42,23 @@ export function ReminderList({
   onView,
   onBrowseTemplates,
   onAddReminder,
+  pendingActionId = null,
 }: ReminderListProps) {
+  const typedReminders = useMemo(
+    () => reminders.filter((reminder) => matchesReminderTypeFilter(reminder, activeTypeFilter)),
+    [activeTypeFilter, reminders],
+  )
   const visibleReminders = useMemo(
-    () => reminders.filter((reminder) => matchesReminderStatusFilter(reminder, activeStatusFilter) && matchesReminderTypeFilter(reminder, activeTypeFilter)),
-    [activeStatusFilter, activeTypeFilter, reminders],
+    () => typedReminders
+      .filter((reminder) => matchesReminderStatusFilter(reminder, activeStatusFilter))
+      .sort(sortActionCenterReminders),
+    [activeStatusFilter, typedReminders],
+  )
+  const actionGroups = useMemo(
+    () => activeStatusFilter === 'active'
+      ? getActionCenterGroups(typedReminders).filter((group) => group.reminders.length > 0)
+      : [],
+    [activeStatusFilter, typedReminders],
   )
   const emptyState = getEmptyState(activeStatusFilter, activeTypeFilter, reminders)
   const hasDefaultFilters = activeStatusFilter === 'active' && activeTypeFilter === 'all'
@@ -52,9 +69,12 @@ export function ReminderList({
   }
 
   return (
-    <section className="reminders-panel" aria-labelledby="reminders-heading">
-      <div className="section-heading sr-only">
-        <h2 id="reminders-heading">Reminders</h2>
+    <section className="reminders-panel action-center-panel" aria-labelledby="reminders-heading">
+      <div className="section-heading action-center-heading">
+        <div>
+          <h2 id="reminders-heading">Action Center</h2>
+          <p>{activeStatusFilter === 'completed' ? 'Completed reminder history.' : 'Reminders that need attention, grouped by urgency.'}</p>
+        </div>
         <span>{isLoading ? 'Loading' : `${visibleReminders.length} shown`}</span>
       </div>
 
@@ -110,11 +130,64 @@ export function ReminderList({
         </div>
       ) : null}
 
+      {!isLoading && activeStatusFilter === 'active' && actionGroups.length > 0 ? (
+        <div className="action-center-groups">
+          {actionGroups.map((group) => (
+            <ActionCenterGroupSection
+              group={group}
+              key={group.id}
+              onComplete={onComplete}
+              onDelete={onDelete}
+              onView={onView}
+              pendingActionId={pendingActionId}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {!isLoading && activeStatusFilter !== 'active' && visibleReminders.length > 0 ? (
+        <div className="reminder-list">
+          {visibleReminders.map((reminder) => (
+            <ReminderCard
+              reminder={reminder}
+              key={reminder.id}
+              isActionPending={pendingActionId === reminder.id}
+              onComplete={onComplete}
+              onDelete={onDelete}
+              onView={onView}
+            />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function ActionCenterGroupSection({
+  group,
+  onComplete,
+  onDelete,
+  onView,
+  pendingActionId,
+}: {
+  group: ActionCenterGroup
+  onComplete: (id: string) => Promise<void>
+  onDelete: (reminder: Reminder) => void
+  onView: (reminder: Reminder) => void
+  pendingActionId: string | null
+}) {
+  return (
+    <section className={`action-center-group action-center-group-${group.id}`} aria-labelledby={`action-group-${group.id}`}>
+      <div className="action-center-group-heading">
+        <h3 id={`action-group-${group.id}`}>{group.title}</h3>
+        <span>{group.reminders.length}</span>
+      </div>
       <div className="reminder-list">
-        {visibleReminders.map((reminder) => (
+        {group.reminders.map((reminder) => (
           <ReminderCard
             reminder={reminder}
             key={reminder.id}
+            isActionPending={pendingActionId === reminder.id}
             onComplete={onComplete}
             onDelete={onDelete}
             onView={onView}
@@ -141,7 +214,11 @@ function getEmptyState(filter: ReminderStatusFilter, typeFilter: ReminderTypeFil
       return `No overdue ${typeNoun}.`
     }
 
-    return `No ${typeNoun} ${getStatusEmptyPhrase(filter)}.`
+    if (filter === 'completed') {
+      return `No completed ${typeNoun}.`
+    }
+
+    return `No upcoming ${typeNoun}.`
   }
 
   if (filter === 'active') {
@@ -152,11 +229,11 @@ function getEmptyState(filter: ReminderStatusFilter, typeFilter: ReminderTypeFil
     return 'No overdue reminders.'
   }
 
-  if (filter === 'today') {
-    return 'Nothing due today.'
+  if (filter === 'completed') {
+    return 'No completed reminder history.'
   }
 
-  return 'No reminders due this month.'
+  return 'No upcoming reminders.'
 }
 
 function getTypeEmptyNoun(typeFilter: ReminderTypeFilter) {
@@ -165,16 +242,4 @@ function getTypeEmptyNoun(typeFilter: ReminderTypeFilter) {
   }
 
   return getReminderTypeFilterLabel(typeFilter).toLowerCase()
-}
-
-function getStatusEmptyPhrase(filter: ReminderStatusFilter) {
-  if (filter === 'today') {
-    return 'due today'
-  }
-
-  if (filter === 'month') {
-    return 'due this month'
-  }
-
-  return 'matching this filter'
 }

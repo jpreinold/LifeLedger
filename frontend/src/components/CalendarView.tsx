@@ -465,15 +465,19 @@ function getStatusRank(reminder: Reminder) {
     return 1
   }
 
-  if (reminder.status === 'Due this week') {
+  if (reminder.status === 'Urgent') {
     return 2
   }
 
-  if (reminder.status === 'Due this month') {
+  if (reminder.status === 'Upcoming') {
     return 3
   }
 
-  return 4
+  if (reminder.status === 'Scheduled') {
+    return 4
+  }
+
+  return 5
 }
 
 function getDefaultAddDate(visibleMonth: Date, todayKey: string) {

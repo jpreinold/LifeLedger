@@ -1,10 +1,17 @@
-import type { Reminder, ReminderType } from '../types/reminder'
+import type { Reminder, ReminderStatus, ReminderType } from '../types/reminder'
 
 const dayMs = 86_400_000
 
 export type ReminderTypeFilter = 'all' | ReminderType
+export type ReminderStatusFilter = 'active' | 'overdue' | 'upcoming' | 'completed'
+export type ActionCenterGroupId = 'overdue' | 'today' | 'soon' | 'later'
 
-export type ReminderStatusFilter = 'active' | 'overdue' | 'today' | 'month'
+export interface ActionCenterGroup {
+  id: ActionCenterGroupId
+  title: string
+  emptyText: string
+  reminders: Reminder[]
+}
 
 export const reminderTypeFilters: Array<{ id: ReminderTypeFilter; label: string }> = [
   { id: 'all', label: 'All types' },
@@ -21,12 +28,25 @@ const reminderTypeLabels: Record<ReminderType, string> = {
   maintenance: 'Maintenance',
 }
 
+const statusRanks: Record<ReminderStatus, number> = {
+  Completed: 5,
+  Overdue: 0,
+  'Due today': 1,
+  Urgent: 2,
+  Upcoming: 3,
+  Scheduled: 4,
+}
+
 export function getReminderTypeLabel(type: ReminderType | null | undefined) {
   return reminderTypeLabels[type ?? 'generic']
 }
 
 export function matchesReminderStatusFilter(reminder: Reminder, filter: ReminderStatusFilter) {
-  if (reminder.completed) {
+  if (filter === 'completed') {
+    return reminder.completed || reminder.status === 'Completed'
+  }
+
+  if (!isActionableReminder(reminder)) {
     return false
   }
 
@@ -38,11 +58,7 @@ export function matchesReminderStatusFilter(reminder: Reminder, filter: Reminder
     return reminder.status === 'Overdue'
   }
 
-  if (filter === 'today') {
-    return reminder.status === 'Due today'
-  }
-
-  return isDueThisMonth(reminder.due_date)
+  return reminder.status === 'Urgent' || reminder.status === 'Upcoming' || reminder.status === 'Scheduled'
 }
 
 export function getReminderTypeFilterLabel(filter: ReminderTypeFilter) {
@@ -53,24 +69,82 @@ export function matchesReminderTypeFilter(reminder: Reminder, filter: ReminderTy
   return filter === 'all' || (reminder.reminder_type ?? 'generic') === filter
 }
 
-function isDueThisMonth(value: string) {
-  const dueDate = parseDateOnly(value)
-  const today = startOfDay(new Date())
+export function getActionCenterGroups(reminders: Reminder[]): ActionCenterGroup[] {
+  const groups: ActionCenterGroup[] = [
+    { id: 'overdue', title: 'Overdue', emptyText: 'No overdue reminders.', reminders: [] },
+    { id: 'today', title: 'Due today', emptyText: 'Nothing due today.', reminders: [] },
+    { id: 'soon', title: 'Due soon', emptyText: 'No reminders due in the next 30 days.', reminders: [] },
+    { id: 'later', title: 'Later', emptyText: 'No reminders scheduled later.', reminders: [] },
+  ]
+  const groupById = new Map(groups.map((group) => [group.id, group]))
 
-  return (
-    dueDate >= today &&
-    dueDate.getFullYear() === today.getFullYear() &&
-    dueDate.getMonth() === today.getMonth()
-  )
+  reminders.filter(isActionableReminder).forEach((reminder) => {
+    const groupId = getActionCenterGroupId(reminder)
+    groupById.get(groupId)?.reminders.push(reminder)
+  })
+
+  groups.forEach((group) => {
+    group.reminders.sort(sortActionCenterReminders)
+  })
+
+  return groups
+}
+
+export function getActionCenterGroupId(reminder: Reminder): ActionCenterGroupId {
+  if (reminder.status === 'Overdue') {
+    return 'overdue'
+  }
+
+  if (reminder.status === 'Due today') {
+    return 'today'
+  }
+
+  if (reminder.status === 'Urgent' || reminder.status === 'Upcoming') {
+    return 'soon'
+  }
+
+  return 'later'
+}
+
+export function sortActionCenterReminders(left: Reminder, right: Reminder) {
+  const leftDate = parseDateOnly(getReminderEffectiveDate(left)).getTime()
+  const rightDate = parseDateOnly(getReminderEffectiveDate(right)).getTime()
+
+  if (left.status === 'Overdue' && right.status === 'Overdue' && leftDate !== rightDate) {
+    return leftDate - rightDate
+  }
+
+  if (leftDate !== rightDate) {
+    return leftDate - rightDate
+  }
+
+  const statusDifference = statusRanks[left.status] - statusRanks[right.status]
+  if (statusDifference !== 0) {
+    return statusDifference
+  }
+
+  return left.title.localeCompare(right.title)
+}
+
+export function isActionableReminder(reminder: Reminder) {
+  return !reminder.completed && reminder.status !== 'Completed' && !reminder.archived_at && !hasOnlyArchivedLinkedRecords(reminder)
+}
+
+export function hasOnlyArchivedLinkedRecords(reminder: Reminder) {
+  return reminder.linked_records.length > 0 && reminder.linked_records.every((record) => record.status === 'archived')
+}
+
+export function getReminderEffectiveDate(reminder: Reminder) {
+  return reminder.effective_attention_date || reminder.due_date
 }
 
 export function formatReminderStatusLabel(reminder: Reminder) {
-  if (reminder.completed) {
+  if (reminder.completed || reminder.status === 'Completed') {
     return 'Completed'
   }
 
   if (reminder.status === 'Overdue') {
-    return formatOverdueLabel(reminder.due_date)
+    return formatOverdueLabel(getReminderEffectiveDate(reminder))
   }
 
   return reminder.status
@@ -82,6 +156,19 @@ export function formatReminderDueLabel(reminder: Reminder, options: { includeDat
   }
 
   return formatDueDateLabel(reminder.due_date, options)
+}
+
+export function formatReminderAttentionLabel(reminder: Reminder, options: { includeDate?: boolean } = {}) {
+  if (reminder.completed) {
+    return formatReminderDueLabel(reminder, options)
+  }
+
+  const effectiveDate = getReminderEffectiveDate(reminder)
+  if (effectiveDate !== reminder.due_date && isFutureDateOnly(effectiveDate)) {
+    return `Snoozed until ${formatLongDate(effectiveDate)}`
+  }
+
+  return formatDueDateLabel(effectiveDate, options)
 }
 
 export function formatDueDateLabel(value: string, options: { includeDate?: boolean } = {}) {
@@ -184,6 +271,15 @@ export function formatOverdueLabel(value: string) {
   return `Overdue by ${formatCount(overdueDays, 'day')}`
 }
 
+export function isDueWithinDays(reminder: Reminder, days: number) {
+  if (!isActionableReminder(reminder)) {
+    return false
+  }
+
+  const daysUntil = getDaysUntilDate(getReminderEffectiveDate(reminder))
+  return daysUntil >= 0 && daysUntil <= days
+}
+
 export function getDaysUntilDate(value: string, today = new Date()) {
   const targetDate = parseDateOnly(value)
   const currentDay = startOfDay(today)
@@ -225,4 +321,8 @@ export function parseDateOnly(value: string) {
 
 export function startOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate())
+}
+
+function isFutureDateOnly(value: string) {
+  return parseDateOnly(value).getTime() > startOfDay(new Date()).getTime()
 }

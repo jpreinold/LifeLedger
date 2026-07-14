@@ -2,6 +2,7 @@ import { Cake, CalendarDays, CheckCircle2, Flag, RefreshCcw, Repeat2, Trash2, Wr
 
 import type { Reminder } from '../types/reminder'
 import {
+  formatReminderAttentionLabel,
   formatReminderDueLabel,
   formatReminderStatusLabel,
   formatRepeatLabel,
@@ -15,24 +16,28 @@ interface ReminderCardProps {
   onComplete: (id: string) => Promise<void>
   onDelete: (reminder: Reminder) => void
   onView: (reminder: Reminder) => void
+  isActionPending?: boolean
 }
 
 const statusClassNames: Record<Reminder['status'], string> = {
   Completed: 'status-completed',
   Overdue: 'status-overdue',
   'Due today': 'status-today',
-  'Due this week': 'status-week',
-  'Due this month': 'status-month',
+  Urgent: 'status-urgent',
   Upcoming: 'status-upcoming',
+  Scheduled: 'status-scheduled',
 }
 
-export function ReminderCard({ reminder, onComplete, onDelete, onView }: ReminderCardProps) {
+export function ReminderCard({ reminder, onComplete, onDelete, onView, isActionPending = false }: ReminderCardProps) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = reminder.completed ? null : getSmartReminderLabel(reminder)
   const repeatLabel = formatRepeatLabel(reminder.repeat)
   const shouldShowRepeat = repeatLabel && reminder.reminder_type !== 'birthday' && reminder.reminder_type !== 'maintenance'
   const shouldShowPriority = reminder.priority === 'High'
-  const summaryLabel = smartLabel ?? formatReminderDueLabel(reminder, { includeDate: false })
+  const attentionLabel = formatReminderAttentionLabel(reminder, { includeDate: false })
+  const summaryLabel = smartLabel ?? attentionLabel
+  const linkedRecord = reminder.linked_records.find((record) => record.status !== 'archived') ?? reminder.linked_records[0]
+  const ownerLine = getReminderOwnerLine(reminder)
   const SmartIcon = reminder.reminder_type === 'maintenance'
     ? Wrench
     : reminder.reminder_type === 'renewal'
@@ -63,8 +68,8 @@ export function ReminderCard({ reminder, onComplete, onDelete, onView }: Reminde
             <div>
               <h3>{reminder.title}</h3>
               <p className="reminder-summary-line">
-                <span>{reminder.category}</span>
-                <span aria-hidden="true">{'\u2022'}</span>
+                <span>{linkedRecord ? linkedRecord.title : reminder.category}</span>
+                <span aria-hidden="true">{`\u2022`}</span>
                 <span className={smartLabel ? 'smart-summary-text' : undefined}>
                   {smartLabel ? (
                     <>
@@ -74,12 +79,11 @@ export function ReminderCard({ reminder, onComplete, onDelete, onView }: Reminde
                   ) : summaryLabel}
                 </span>
               </p>
-              {smartLabel ? (
-                <p className="due-date">
-                  <CalendarDays size={15} aria-hidden="true" />
-                  {formatReminderDueLabel(reminder)}
-                </p>
-              ) : null}
+              <p className="due-date">
+                <CalendarDays size={15} aria-hidden="true" />
+                {formatReminderDueLabel(reminder)}
+              </p>
+              {ownerLine ? <p className="reminder-owner-line">{ownerLine}</p> : null}
             </div>
 
             {shouldShowRepeat || shouldShowPriority ? (
@@ -109,16 +113,32 @@ export function ReminderCard({ reminder, onComplete, onDelete, onView }: Reminde
           type="button"
           className="action-button complete-button"
           onClick={() => void onComplete(reminder.id)}
-          disabled={reminder.completed}
+          disabled={reminder.completed || isActionPending}
         >
           <CheckCircle2 size={18} aria-hidden="true" />
-          {reminder.completed ? 'Completed' : 'Complete'}
+          {isActionPending ? 'Saving' : reminder.completed ? 'Completed' : 'Complete'}
         </button>
-        <button type="button" className="action-button delete-button" onClick={() => onDelete(reminder)}>
+        <button type="button" className="action-button delete-button" onClick={() => onDelete(reminder)} disabled={isActionPending}>
           <Trash2 size={17} aria-hidden="true" />
           Delete
         </button>
       </div>
     </article>
   )
+}
+
+function getReminderOwnerLine(reminder: Reminder) {
+  if (reminder.reminder_type === 'birthday') {
+    return reminder.birthday_details?.relationship || reminder.birthday_details?.person_name || null
+  }
+
+  if (reminder.reminder_type === 'renewal') {
+    return [reminder.renewal_details?.owner_name, reminder.renewal_details?.provider].filter(Boolean).join(' - ') || null
+  }
+
+  if (reminder.reminder_type === 'maintenance') {
+    return reminder.maintenance_details?.item_name ?? null
+  }
+
+  return null
 }

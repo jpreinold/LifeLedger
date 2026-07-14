@@ -15,6 +15,7 @@ from app.schemas import (
     RelationshipType,
     ReminderCategory,
     ReminderLeadUnit,
+    ReminderLifecycleEvent,
     RecordStatus,
     RecordType,
     ReminderType,
@@ -45,6 +46,9 @@ class Reminder(BaseModel):
     alert_last_seen_at: datetime | None = None
     alert_last_action_at: datetime | None = None
     alert_snoozed_until: datetime | None = None
+    snoozed_until: datetime | None = None
+    archived_at: datetime | None = None
+    lifecycle_events: list[ReminderLifecycleEvent] = Field(default_factory=list)
     calendar_sync_enabled: bool = False
     calendar_provider: str | None = None
     calendar_id: str | None = None

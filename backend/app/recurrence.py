@@ -1,30 +1,85 @@
 import calendar
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app.models import Reminder
 from app.schemas import ReminderStatus, RepeatOption
 
+URGENT_WINDOW_DAYS = 7
+UPCOMING_WINDOW_DAYS = 30
 
-def calculate_status(reminder: Reminder, today: date | None = None) -> ReminderStatus:
-    current_day = today or date.today()
 
-    if reminder.completed and reminder.repeat == RepeatOption.NONE:
+def calculate_status(
+    reminder: Reminder,
+    today: date | None = None,
+    now: datetime | None = None,
+) -> ReminderStatus:
+    current_day = today or local_today(now)
+
+    if reminder.completed:
         return ReminderStatus.COMPLETED
 
-    if reminder.due_date < current_day:
+    effective_attention_date = get_effective_attention_date(reminder, now=now, today=current_day)
+
+    if effective_attention_date < current_day:
         return ReminderStatus.OVERDUE
 
-    if reminder.due_date == current_day:
+    if effective_attention_date == current_day:
         return ReminderStatus.DUE_TODAY
 
-    days_until_due = (reminder.due_date - current_day).days
-    if days_until_due <= 7:
-        return ReminderStatus.DUE_THIS_WEEK
+    days_until_due = (effective_attention_date - current_day).days
+    if days_until_due <= URGENT_WINDOW_DAYS:
+        return ReminderStatus.URGENT
 
-    if reminder.due_date.year == current_day.year and reminder.due_date.month == current_day.month:
-        return ReminderStatus.DUE_THIS_MONTH
+    if days_until_due <= UPCOMING_WINDOW_DAYS:
+        return ReminderStatus.UPCOMING
 
-    return ReminderStatus.UPCOMING
+    return ReminderStatus.SCHEDULED
+
+
+def get_effective_attention_date(
+    reminder: Reminder,
+    *,
+    now: datetime | None = None,
+    today: date | None = None,
+) -> date:
+    """Return the date used for attention grouping.
+
+    ``due_date`` is the meaningful renewal, expiration, review, or task date.
+    ``snoozed_until`` is a temporary attention deferral. While the snooze is
+    still in the future, the reminder is grouped by the snooze date without
+    changing the underlying due date.
+    """
+
+    current_time = normalize_datetime(now or datetime.now(timezone.utc))
+    current_day = today or local_today(current_time)
+    snoozed_until = reminder.snoozed_until or reminder.alert_snoozed_until
+
+    if snoozed_until is None:
+        return reminder.due_date
+
+    normalized_snooze = normalize_datetime(snoozed_until)
+    if normalized_snooze <= current_time:
+        return reminder.due_date
+
+    snooze_date = normalized_snooze.date()
+    return snooze_date if snooze_date >= current_day else reminder.due_date
+
+
+def normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
+
+
+def local_today(now: datetime | None = None) -> date:
+    if now is None:
+        return date.today()
+
+    if now.tzinfo is None:
+        return now.date()
+
+    return now.astimezone().date()
 
 
 def get_next_due_date(due_date: date, repeat: RepeatOption) -> date | None:

@@ -90,10 +90,15 @@ const baseReminder: Reminder = {
   alert_last_seen_at: null,
   alert_last_action_at: null,
   alert_snoozed_until: null,
+  snoozed_until: null,
+  archived_at: null,
   status: 'Upcoming',
+  effective_attention_date: '2026-07-14',
   created_at: '2026-07-11T22:54:00.000Z',
   updated_at: '2026-07-11T22:54:00.000Z',
   completed_at: null,
+  lifecycle_events: [],
+  linked_records: [],
   next_due_date: null,
   computed_label: null,
   birthday_age_label: null,
@@ -251,6 +256,7 @@ describe('Phase 6 mobile flows', () => {
         records={[]}
         reminders={[]}
         onArchive={onArchive}
+        onAddReminder={vi.fn()}
         onClose={vi.fn()}
         onEdit={onEdit}
         onOpenLinkedRecord={vi.fn()}

@@ -11,10 +11,16 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-import { getAttentionDetail, getAttentionTone } from '../lib/attentionDisplay'
 import { getDigestSummaryText, hasDigestItems, type DailyDigest } from '../lib/digest'
-import { formatReminderDueLabel, parseDateOnly, startOfDay } from '../lib/reminderDisplay'
-import { toAttentionReminder, type AttentionReminder } from '../lib/reminderSchedule'
+import {
+  formatReminderAttentionLabel,
+  formatReminderStatusLabel,
+  getReminderEffectiveDate,
+  isActionableReminder,
+  isDueWithinDays,
+  parseDateOnly,
+  sortActionCenterReminders,
+} from '../lib/reminderDisplay'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import type { DigestPreferences } from '../types/preferences'
 import type { Reminder, ReminderAlert, ReminderType } from '../types/reminder'
@@ -54,7 +60,6 @@ const maxUpcomingItems = 4
 
 export function HomeDashboard({
   reminders,
-  alerts,
   digest,
   digestPreferences,
   isLoading,
@@ -65,24 +70,25 @@ export function HomeDashboard({
   onBrowseTemplates,
   onViewCalendar,
   onViewReminders,
-  onViewAlerts,
   onOpenDigest,
   onViewRecords,
   onViewReminder,
 }: HomeDashboardProps) {
-  const activeReminders = reminders.filter((reminder) => !reminder.completed)
+  const activeReminders = reminders.filter(isActionableReminder)
   const genericReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'generic')
   const birthdayReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'birthday')
   const renewalReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'renewal')
   const maintenanceReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'maintenance')
-  const attentionItems = alerts.map(toAttentionReminder)
+  const attentionItems = [...activeReminders].sort(sortActionCenterReminders)
   const visibleAttentionItems = attentionItems.slice(0, maxAttentionItems)
+  const overdueCount = activeReminders.filter((reminder) => reminder.status === 'Overdue').length
+  const dueWithin30Count = activeReminders.filter((reminder) => isDueWithinDays(reminder, 30)).length
   const upcomingItems = getUpcomingReminders(activeReminders).slice(0, maxUpcomingItems)
   const overviewTiles: OverviewTileData[] = [
     {
       label: 'Reminders',
       value: String(genericReminders.length),
-      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'generic'), 'need attention'),
+      sublabel: formatOverviewSublabel(countRemindersByType(activeReminders, 'generic'), 'need attention'),
       icon: ListChecks,
       tone: 'blue',
       onClick: onViewReminders,
@@ -90,7 +96,7 @@ export function HomeDashboard({
     {
       label: 'Birthdays',
       value: String(birthdayReminders.length),
-      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'birthday'), 'coming up'),
+      sublabel: formatOverviewSublabel(countRemindersByType(activeReminders, 'birthday'), 'coming up'),
       icon: Gift,
       tone: 'purple',
       onClick: onViewReminders,
@@ -98,7 +104,7 @@ export function HomeDashboard({
     {
       label: 'Renewals',
       value: String(renewalReminders.length),
-      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'renewal'), 'need attention'),
+      sublabel: formatOverviewSublabel(countRemindersByType(activeReminders, 'renewal'), 'need attention'),
       icon: RefreshCcw,
       tone: 'orange',
       onClick: onViewReminders,
@@ -106,7 +112,7 @@ export function HomeDashboard({
     {
       label: 'Maintenance',
       value: String(maintenanceReminders.length),
-      sublabel: formatOverviewSublabel(countAlertsByType(alerts, 'maintenance'), 'due'),
+      sublabel: formatOverviewSublabel(countRemindersByType(activeReminders, 'maintenance'), 'due'),
       icon: Wrench,
       tone: 'teal',
       onClick: onViewReminders,
@@ -129,9 +135,9 @@ export function HomeDashboard({
         </div>
         <div className="home-hero-copy">
           <h2>{getGreeting(userName)}</h2>
-          <p>{formatAttentionSummary(attentionItems.length)}</p>
+          <p>{formatAttentionSummary(attentionItems.length, overdueCount, dueWithin30Count)}</p>
         </div>
-        <button type="button" className="home-hero-link" onClick={onViewAlerts} aria-label="View alerts">
+        <button type="button" className="home-hero-link" onClick={onViewReminders} aria-label="Open Action Center">
           <ChevronRight size={21} aria-hidden="true" />
         </button>
       </section>
@@ -176,11 +182,11 @@ export function HomeDashboard({
           <>
             <div className="home-list">
               {visibleAttentionItems.map((item) => (
-                <AttentionRow item={item} key={item.reminder.id} onClick={onViewAlerts} />
+                <DashboardReminderRow reminder={item} key={item.id} onClick={() => onViewReminder(item)} />
               ))}
             </div>
             {attentionItems.length > maxAttentionItems ? (
-              <button type="button" className="home-card-link" onClick={onViewAlerts}>
+              <button type="button" className="home-card-link" onClick={onViewReminders}>
                 View all
               </button>
             ) : null}
@@ -190,14 +196,14 @@ export function HomeDashboard({
 
       <section className="home-card" aria-labelledby="upcoming-heading">
         <div className="home-card-header">
-          <h2 id="upcoming-heading">Upcoming this month</h2>
+          <h2 id="upcoming-heading">Due within 30 days</h2>
           {upcomingItems.length > 0 ? <span className="count-badge">{upcomingItems.length}</span> : null}
         </div>
 
         {isLoading ? <p className="home-empty-state">Loading reminders...</p> : null}
 
         {!isLoading && upcomingItems.length === 0 ? (
-          <p className="home-empty-state">No upcoming reminders this month.</p>
+          <p className="home-empty-state">No active reminders due within 30 days.</p>
         ) : null}
 
         {!isLoading && upcomingItems.length > 0 ? (
@@ -207,7 +213,7 @@ export function HomeDashboard({
                 <UpcomingRow reminder={reminder} key={reminder.id} onClick={() => onViewReminder(reminder)} />
               ))}
             </div>
-            <button type="button" className="home-card-link" onClick={() => onViewCalendar(upcomingItems[0]?.due_date)}>
+            <button type="button" className="home-card-link" onClick={() => onViewCalendar(upcomingItems[0] ? getReminderEffectiveDate(upcomingItems[0]) : null)}>
               View calendar
             </button>
           </>
@@ -229,9 +235,10 @@ export function HomeDashboard({
   )
 }
 
-function countAlertsByType(alerts: ReminderAlert[], type: ReminderType) {
-  return alerts.filter((alert) => alert.reminder_type === type).length
+function countRemindersByType(reminders: Reminder[], type: ReminderType) {
+  return reminders.filter((reminder) => reminder.reminder_type === type).length
 }
+
 function QuickAction({
   label,
   icon: Icon,
@@ -262,10 +269,8 @@ function QuickAction({
   )
 }
 
-function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () => void }) {
-  const { reminder } = item
+function DashboardReminderRow({ reminder, onClick }: { reminder: Reminder; onClick: () => void }) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
-  const detail = getAttentionDetail(item)
 
   return (
     <button type="button" className="home-list-row" onClick={onClick}>
@@ -275,9 +280,9 @@ function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () 
       <span className="home-row-copy">
         <strong>{reminder.title}</strong>
         <span>
-          {reminder.category}
+          {formatReminderStatusLabel(reminder)}
           {' \u2022 '}
-          <em className={`attention-text attention-text-${getAttentionTone(item)}`}>{detail}</em>
+          {formatReminderAttentionLabel(reminder, { includeDate: false })}
         </span>
       </span>
       <ChevronRight size={18} aria-hidden="true" className="home-row-chevron" />
@@ -288,7 +293,7 @@ function AttentionRow({ item, onClick }: { item: AttentionReminder; onClick: () 
 function UpcomingRow({ reminder, onClick }: { reminder: Reminder; onClick: () => void }) {
   const { Icon, tone } = getCategoryVisual(reminder.category)
   const smartLabel = getSmartReminderLabel(reminder)
-  const detail = smartLabel ?? formatReminderDueLabel(reminder, { includeDate: false })
+  const detail = smartLabel ?? formatReminderAttentionLabel(reminder, { includeDate: false })
 
   return (
     <button type="button" className="home-list-row" onClick={onClick}>
@@ -333,8 +338,12 @@ function getGreeting(userName?: string | null) {
   return userName ? `${greeting}, ${userName}` : greeting
 }
 
-function formatAttentionSummary(count: number) {
-  return `${count} ${count === 1 ? 'item needs' : 'items need'} attention today.`
+function formatAttentionSummary(count: number, overdueCount: number, dueWithin30Count: number) {
+  if (count === 0) {
+    return 'No reminders need attention today.'
+  }
+
+  return `${count} active ${count === 1 ? 'reminder' : 'reminders'}; ${overdueCount} overdue; ${dueWithin30Count} due within 30 days.`
 }
 
 function getDigestCardSummary(digest: DailyDigest, isEnabled: boolean) {
@@ -375,18 +384,10 @@ function formatOverviewSublabel(count: number, label: string) {
 }
 
 function getUpcomingReminders(reminders: Reminder[]) {
-  const today = startOfDay(new Date())
-  const thirtyDaysFromNow = addDays(today, 30)
-
   return reminders
-    .filter((reminder) => {
-      const dueDate = parseDateOnly(reminder.due_date)
-      const isCurrentMonth = dueDate.getFullYear() === today.getFullYear() && dueDate.getMonth() === today.getMonth()
-
-      return dueDate >= today && (isCurrentMonth || dueDate <= thirtyDaysFromNow)
-    })
+    .filter((reminder) => isDueWithinDays(reminder, 30))
     .sort((left, right) => {
-      const dueDifference = parseDateOnly(left.due_date).getTime() - parseDateOnly(right.due_date).getTime()
+      const dueDifference = parseDateOnly(getReminderEffectiveDate(left)).getTime() - parseDateOnly(getReminderEffectiveDate(right)).getTime()
 
       if (dueDifference !== 0) {
         return dueDifference
@@ -394,12 +395,6 @@ function getUpcomingReminders(reminders: Reminder[]) {
 
       return left.title.localeCompare(right.title)
     })
-}
-
-function addDays(value: Date, days: number) {
-  const next = new Date(value)
-  next.setDate(next.getDate() + days)
-  return startOfDay(next)
 }
 
 function sameCalendarDate(left: Date, right: Date) {

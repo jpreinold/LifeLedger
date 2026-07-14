@@ -31,7 +31,7 @@ export function Dashboard({
   const stats: Array<{ id: ReminderStatusFilter; label: string; value: number; icon: typeof ListChecks; tone: string }> = [
     {
       id: 'active',
-      label: 'All active',
+      label: 'Action Center',
       value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'active')).length,
       icon: ListChecks,
       tone: 'blue',
@@ -43,17 +43,17 @@ export function Dashboard({
       icon: AlertTriangle,
       tone: 'red',
     },
-    {
-      id: 'today',
-      label: 'Due today',
-      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'today')).length,
+        {
+      id: 'upcoming',
+      label: 'Upcoming',
+      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'upcoming')).length,
       icon: CalendarClock,
       tone: 'orange',
     },
     {
-      id: 'month',
-      label: 'Due this month',
-      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'month')).length,
+      id: 'completed',
+      label: 'Completed',
+      value: scopedReminders.filter((reminder) => matchesReminderStatusFilter(reminder, 'completed')).length,
       icon: CalendarCheck,
       tone: 'green',
     },

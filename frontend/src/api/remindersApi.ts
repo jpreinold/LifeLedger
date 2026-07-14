@@ -63,6 +63,24 @@ export const remindersApi = {
       method: 'POST',
     }),
 
+
+  snooze: (id: string, snoozedUntil: string) =>
+    request<Reminder>(`/reminders/${id}/snooze`, {
+      method: 'POST',
+      body: JSON.stringify({ snoozed_until: snoozedUntil }),
+    }),
+
+  clearSnooze: (id: string) =>
+    request<Reminder>(`/reminders/${id}/snooze/clear`, {
+      method: 'POST',
+    }),
+
+  renew: (id: string, newDueDate: string) =>
+    request<Reminder>(`/reminders/${id}/renew`, {
+      method: 'POST',
+      body: JSON.stringify({ new_due_date: newDueDate }),
+    }),
+
   dismissAlert: (id: string) =>
     request<Reminder>(`/reminders/${id}/alert/dismiss`, {
       method: 'POST',
