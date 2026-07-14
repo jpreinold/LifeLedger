@@ -34,6 +34,7 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `PUT /reminders/{id}` requires authentication in Cognito mode.
 - `DELETE /reminders/{id}` requires authentication in Cognito mode.
 - `POST /reminders/{id}/complete` requires authentication in Cognito mode.
+- `POST /reminders/{id}/snooze`, `POST /reminders/{id}/snooze/clear`, and `POST /reminders/{id}/renew` require authentication in Cognito mode, verify reminder ownership, validate dates/transitions, and append lightweight lifecycle history.
 - `GET /preferences/digest` and `PUT /preferences/digest` require authentication in Cognito mode.
 - `GET /records`, `POST /records`, `GET /records/{id}`, `PUT /records/{id}`, `POST /records/{id}/archive`, `POST /records/{id}/restore`, and `DELETE /records/{id}` require authentication in Cognito mode and are scoped to the authenticated user.
 - `GET /records/{id}/links`, `POST /records/{id}/links`, and `DELETE /records/{id}/links/{link_id}` require authentication, verify record ownership, and manage only explicit relationship rows.
@@ -51,7 +52,8 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `app/schemas.py` owns Pydantic validation and API shapes.
 - `app/models.py` owns the internal reminder model, including internal `user_id`.
 - `app/models.py` also owns the internal record model, including internal `user_id`.
-- `app/recurrence.py` owns status calculation, recurrence, and `next_due_date`.
+- `app/recurrence.py` owns derived reminder status calculation, effective attention date, recurrence, and `next_due_date`.
+- `app/reminder_lifecycle.py` appends lightweight lifecycle events and guards repeated lifecycle actions.
 - `app/repository.py` defines the repository protocol and local JSON repository.
 - `app/records_repository.py` defines the record repository protocol and local JSON repository.
 - `app/linked_items_repository.py` defines linked item local JSON and DynamoDB repositories with user-scoped source/target indexes.
@@ -70,6 +72,7 @@ Local backend auth defaults to `AUTH_MODE=local`, so reminder routes use `LOCAL_
 - `template.yaml` defines the AWS SAM deployment shape.
 
 The route layer stays unaware of whether reminders, records, or linked items are stored in JSON files or DynamoDB. It only receives a current user context and passes `user_id` into the repository layer. The frontend never sends or controls `user_id`.
+Reminder lifecycle APIs keep persisted state backward compatible. Existing reminder rows missing `snoozed_until`, `archived_at`, `effective_attention_date`, or `lifecycle_events` still validate with safe defaults. The API response derives `status` and `effective_attention_date` on read, so the database does not store redundant urgency labels that can drift from date rules.
 
 Normal record schemas are safe-by-default. They support `general`, `passport`, `driver_license`, `vehicle`, `insurance`, `appliance`, `pet`, `home`, `subscription`, and `warranty` types, plus safe text/date/tag fields. Linked item responses use safe summaries only and never include protected values, attachment objects, or `user_id`. Protected fields are handled by dedicated write/reveal schemas and encrypted before storage. Attachments are not zero-knowledge storage: authorized backend services, S3, KMS, and GuardDuty can access decrypted file contents for storage, scanning, validation, preview, download, and deletion. Do not store SSNs, payment card data, banking data, passwords, PINs, recovery codes, private keys, API keys, authentication credentials, highly sensitive medical records, secret/recovery documents, OCR, or AI/RAG data.
 
