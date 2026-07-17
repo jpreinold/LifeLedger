@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import calendar
 from datetime import date, datetime
 from enum import Enum
@@ -116,18 +118,24 @@ class DynamicFieldType(str, Enum):
 class LinkedEntityType(str, Enum):
     RECORD = "record"
     REMINDER = "reminder"
+    DOCUMENT = "document"
 
 
 class RelationshipType(str, Enum):
+    RELATED_TO = "related_to"
     RELATED = "related"
     BELONGS_TO = "belongs_to"
+    OWNED_BY = "owned_by"
     COVERS = "covers"
+    PROVIDED_BY = "provided_by"
+    REMINDER_FOR = "reminder_for"
     RENEWS = "renews"
     MAINTAINS = "maintains"
     INSURES = "insures"
     WARRANTY_FOR = "warranty_for"
     DOCUMENT_FOR = "document_for"
     APPOINTMENT_FOR = "appointment_for"
+    ASSOCIATED_WITH = "associated_with"
     CUSTOM = "custom"
 
 
@@ -891,6 +899,65 @@ class LinkCreateRequest(BaseModel):
         return value
 
 
+class RelationshipCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_item_type: LinkedEntityType
+    source_item_id: str = Field(..., min_length=1, max_length=240)
+    target_item_type: LinkedEntityType
+    target_item_id: str = Field(..., min_length=1, max_length=240)
+    relationship_type: RelationshipType = RelationshipType.RELATED
+    custom_label: str | None = Field(default=None, max_length=40)
+
+    @field_validator("source_item_id", "target_item_id", mode="before")
+    @classmethod
+    def normalize_item_id(cls, value: str) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("custom_label", mode="before")
+    @classmethod
+    def normalize_custom_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("custom_label")
+    @classmethod
+    def validate_custom_label(cls, value: str | None) -> str | None:
+        if value is not None and any(character in value for character in "\r\n\t"):
+            raise ValueError("Relationship label can only be a short single-line label")
+        return value
+
+
+class RelationshipUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relationship_type: RelationshipType | None = None
+    custom_label: str | None = Field(default=None, max_length=40)
+
+    @field_validator("custom_label", mode="before")
+    @classmethod
+    def normalize_custom_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("custom_label")
+    @classmethod
+    def validate_custom_label(cls, value: str | None) -> str | None:
+        if value is not None and any(character in value for character in "\r\n\t"):
+            raise ValueError("Relationship label can only be a short single-line label")
+        return value
+
+
 class LinkedEntitySummary(BaseModel):
     entity_type: LinkedEntityType
     id: str
@@ -900,6 +967,10 @@ class LinkedEntitySummary(BaseModel):
     reminder_type: ReminderType | None = None
     status: str | None = None
     due_date: date | None = None
+    item_date: date | None = Field(default=None, alias="date")
+    document_record_id: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
 
 
 class LinkedItemResponse(BaseModel):
@@ -914,6 +985,34 @@ class LinkedItemResponse(BaseModel):
 class LinkedItemsResponse(BaseModel):
     records: list[LinkedItemResponse] = Field(default_factory=list)
     reminders: list[LinkedItemResponse] = Field(default_factory=list)
+    documents: list[LinkedItemResponse] = Field(default_factory=list)
+
+
+class RelationshipResponse(BaseModel):
+    relationship_id: str
+    relationship_type: RelationshipType
+    custom_label: str | None = None
+    source_item: LinkedEntitySummary
+    target_item: LinkedEntitySummary
+    created_at: datetime
+    updated_at: datetime
+
+
+class RelationshipCandidate(BaseModel):
+    item_type: LinkedEntityType
+    item_id: str
+    title: str
+    subtitle: str | None = None
+    status: str | None = None
+    item_date: date | None = Field(default=None, alias="date")
+    record_type: RecordType | None = None
+    reminder_type: ReminderType | None = None
+    document_record_id: str | None = None
+    disabled_reason: str | None = None
+
+
+class RelationshipCandidatesResponse(BaseModel):
+    items: list[RelationshipCandidate] = Field(default_factory=list)
 
 
 class RecordAttachmentUploadIntentRequest(BaseModel):
@@ -1104,3 +1203,89 @@ class PushStatusResponse(BaseModel):
 
 class PushTestResponse(BaseModel):
     sent: int
+
+
+class SearchSort(str, Enum):
+    RELEVANCE = "relevance"
+    UPDATED_DESC = "updated_desc"
+    CREATED_DESC = "created_desc"
+    RELEVANT_DATE_ASC = "relevant_date_asc"
+    RELEVANT_DATE_DESC = "relevant_date_desc"
+    TITLE_ASC = "title_asc"
+
+
+class SearchResultItem(BaseModel):
+    source_item_id: str
+    source_item_type: LinkedEntityType
+    title: str
+    subtitle: str | None = None
+    status: str | None = None
+    category: str | None = None
+    relevant_date: date | None = None
+    archived: bool = False
+    match_context: list[str] = Field(default_factory=list)
+    linked_context: list[str] = Field(default_factory=list)
+    navigation_metadata: dict[str, str] = Field(default_factory=dict)
+    updated_at: datetime
+
+
+class SearchResponse(BaseModel):
+    items: list[SearchResultItem] = Field(default_factory=list)
+    next_cursor: str | None = None
+    applied_filters: dict[str, object] = Field(default_factory=dict)
+    result_count: int
+
+
+class SavedSearchViewCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=80)
+    query: str = Field(default="", max_length=120)
+    filters: dict[str, object] = Field(default_factory=dict)
+    sort: SearchSort = SearchSort.RELEVANCE
+    icon: str | None = Field(default=None, max_length=40)
+    is_pinned: bool = False
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class SavedSearchViewUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    query: str | None = Field(default=None, max_length=120)
+    filters: dict[str, object] | None = None
+    sort: SearchSort | None = None
+    icon: str | None = Field(default=None, max_length=40)
+    is_pinned: bool | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class SavedSearchViewResponse(BaseModel):
+    saved_view_id: str
+    name: str
+    query: str
+    filters: dict[str, object] = Field(default_factory=dict)
+    sort: SearchSort
+    icon: str | None = None
+    is_pinned: bool = False
+    created_at: datetime
+    updated_at: datetime
+

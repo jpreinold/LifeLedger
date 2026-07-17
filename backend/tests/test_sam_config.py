@@ -84,6 +84,14 @@ def test_sam_template_defaults_to_local_persistence():
     assert "OwnerHashRecordAttachmentIndex" in template
     assert "LinkedItemsTableName:" in template
     assert "LinkedItemsTable:" in template
+    assert "SearchIndexTableName:" in template
+    assert "SavedViewsTableName:" in template
+    assert "SearchIndexTable:" in template
+    assert "SavedViewsTable:" in template
+    assert "SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable" in template
+    assert "SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable" in template
+    assert "LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json" in template
+    assert "LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json" in template
     assert "SourceLinksIndex" in template
     assert "TargetLinksIndex" in template
     assert "AttributeName: source_link_key" in template
@@ -119,6 +127,14 @@ def test_sam_template_defaults_to_local_persistence():
     assert "DocumentsQuarantineBucketName:" in template
     assert "RecordAttachmentsTableName:" in template
     assert "LinkedItemsTable:" in template
+    assert "SearchIndexTableName:" in template
+    assert "SavedViewsTableName:" in template
+    assert "SearchIndexTable:" in template
+    assert "SavedViewsTable:" in template
+    assert "SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable" in template
+    assert "SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable" in template
+    assert "LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json" in template
+    assert "LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json" in template
 
     digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "RemindersTable:")
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
@@ -148,7 +164,9 @@ def test_sam_kms_permissions_split_app_and_dynamodb_access():
     assert "s3:PutObjectTagging" in api_section
     assert "s3:PutObjectTagging" in finalizer_section
     assert "LinkedItemsTable" not in digest_section
-    assert "LinkedItemsTable" not in finalizer_section
+    assert "LinkedItemsTable" in finalizer_section
+    assert "SearchIndexTable" in finalizer_section
+    assert "SavedViewsTable" not in finalizer_section
     assert "Resource: !Sub \"${DocumentsCleanBucket.Arn}/clean/*\"" in finalizer_section
 
     for section in (api_section, digest_section):
@@ -186,6 +204,10 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["RECORDS_TABLE_NAME"] == "lifeledger-records-auth"
     assert function_env["RECORD_ATTACHMENTS_TABLE_NAME"] == "lifeledger-record-attachments-auth"
     assert function_env["LINKED_ITEMS_TABLE_NAME"] == "lifeledger-linked-items-auth"
+    assert function_env["LOCAL_SEARCH_INDEX_FILE"] == "/tmp/lifeledger-search-index.json"
+    assert function_env["LOCAL_SAVED_VIEWS_FILE"] == "/tmp/lifeledger-saved-views.json"
+    assert function_env["SEARCH_INDEX_TABLE_NAME"] == "lifeledger-search-index-auth"
+    assert function_env["SAVED_VIEWS_TABLE_NAME"] == "lifeledger-saved-views-auth"
     assert function_env["GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME"] == "lifeledger-google-calendar-connections-auth"
     assert function_env["GOOGLE_OAUTH_STATES_TABLE_NAME"] == "lifeledger-google-oauth-states-auth"
     assert function_env["LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE"] == "/tmp/lifeledger-google-calendar-connections.json"
@@ -227,10 +249,19 @@ def test_sam_local_env_file_uses_local_persistence():
     assert "LOCAL_LINKED_ITEMS_FILE" not in digest_env
     assert "DOCUMENTS_KMS_KEY_ARN" not in digest_env
 
+
     finalizer_env = env_file["LifeLedgerAttachmentScanFinalizerFunction"]
     assert finalizer_env["PERSISTENCE_MODE"] == "local"
+    assert finalizer_env["LOCAL_DATA_FILE"] == "/tmp/lifeledger-reminders.json"
+    assert finalizer_env["LOCAL_RECORDS_FILE"] == "/tmp/lifeledger-records.json"
     assert finalizer_env["LOCAL_RECORD_ATTACHMENTS_FILE"] == "/tmp/lifeledger-record-attachments.json"
+    assert finalizer_env["LOCAL_LINKED_ITEMS_FILE"] == "/tmp/lifeledger-linked-items.json"
+    assert finalizer_env["LOCAL_SEARCH_INDEX_FILE"] == "/tmp/lifeledger-search-index.json"
+    assert finalizer_env["REMINDERS_TABLE_NAME"] == "lifeledger-reminders-auth"
+    assert finalizer_env["RECORDS_TABLE_NAME"] == "lifeledger-records-auth"
     assert finalizer_env["RECORD_ATTACHMENTS_TABLE_NAME"] == "lifeledger-record-attachments-auth"
+    assert finalizer_env["LINKED_ITEMS_TABLE_NAME"] == "lifeledger-linked-items-auth"
+    assert finalizer_env["SEARCH_INDEX_TABLE_NAME"] == "lifeledger-search-index-auth"
     assert finalizer_env["DOCUMENT_STORAGE_MODE"] == "disabled"
-    assert "LINKED_ITEMS_TABLE_NAME" not in finalizer_env
-    assert "LOCAL_LINKED_ITEMS_FILE" not in finalizer_env
+    assert "SAVED_VIEWS_TABLE_NAME" not in finalizer_env
+    assert "LOCAL_SAVED_VIEWS_FILE" not in finalizer_env

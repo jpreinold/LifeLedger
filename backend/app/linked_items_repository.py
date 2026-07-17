@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import threading
@@ -9,6 +10,12 @@ from app.schemas import LinkedEntityType
 
 SOURCE_LINKS_INDEX = "SourceLinksIndex"
 TARGET_LINKS_INDEX = "TargetLinksIndex"
+PAIR_MARKER_PREFIX = "PAIR#"
+PAIR_MARKER_KIND = "linked_item_pair"
+
+
+class DuplicateLinkedItemError(Exception):
+    pass
 
 
 def linked_item_lookup_key(entity_type: LinkedEntityType | str, entity_id: str, link_id: str) -> str:
@@ -21,6 +28,47 @@ def linked_item_lookup_prefix(entity_type: LinkedEntityType | str, entity_id: st
 
 def linked_entity_type_value(entity_type: LinkedEntityType | str) -> str:
     return entity_type.value if isinstance(entity_type, LinkedEntityType) else entity_type
+
+
+def linked_item_member_key(entity_type: LinkedEntityType | str, entity_id: str) -> str:
+    return f"{linked_entity_type_value(entity_type)}#{entity_id}"
+
+
+def canonical_pair_key(
+    source_type: LinkedEntityType | str,
+    source_id: str,
+    target_type: LinkedEntityType | str,
+    target_id: str,
+) -> str:
+    first = linked_item_member_key(source_type, source_id)
+    second = linked_item_member_key(target_type, target_id)
+    left, right = sorted([first, second])
+    return f"{left}|{right}"
+
+
+def canonical_pair_key_for_link(link: LinkedItem) -> str:
+    return link.canonical_pair_key or canonical_pair_key(
+        link.source_type,
+        link.source_id,
+        link.target_type,
+        link.target_id,
+    )
+
+
+def duplicate_marker_link_id(pair_key: str) -> str:
+    digest = hashlib.sha256(pair_key.encode("utf-8")).hexdigest()
+    return f"{PAIR_MARKER_PREFIX}{digest}"
+
+
+def with_canonical_pair_key(link: LinkedItem) -> LinkedItem:
+    pair_key = canonical_pair_key_for_link(link)
+    if link.canonical_pair_key == pair_key:
+        return link
+    return link.model_copy(update={"canonical_pair_key": pair_key})
+
+
+def is_pair_marker(item: dict[str, Any]) -> bool:
+    return item.get("entity_kind") == PAIR_MARKER_KIND or str(item.get("link_id", "")).startswith(PAIR_MARKER_PREFIX)
 
 
 class LinkedItemRepository(Protocol):
@@ -48,6 +96,9 @@ class LinkedItemRepository(Protocol):
     ) -> bool:
         ...
 
+    def update_link(self, link: LinkedItem) -> LinkedItem | None:
+        ...
+
     def delete_link(self, user_id: str, link_id: str) -> bool:
         ...
 
@@ -70,8 +121,17 @@ class LocalLinkedItemRepository:
             self._write_all_unlocked([])
 
     def create_link(self, link: LinkedItem) -> LinkedItem:
+        link = with_canonical_pair_key(link)
         with self._lock:
             links = self._read_all_unlocked()
+            if any(existing.user_id == link.user_id and existing.link_id == link.link_id for existing in links):
+                raise DuplicateLinkedItemError()
+            if any(
+                existing.user_id == link.user_id
+                and canonical_pair_key_for_link(existing) == link.canonical_pair_key
+                for existing in links
+            ):
+                raise DuplicateLinkedItemError()
             links.append(link)
             self._write_all_unlocked(links)
             return link
@@ -93,7 +153,7 @@ class LocalLinkedItemRepository:
         target_prefix = linked_item_lookup_prefix(entity_type, entity_id)
         with self._lock:
             return [
-                link
+                with_canonical_pair_key(link)
                 for link in self._read_all_unlocked()
                 if link.user_id == user_id
                 and (
@@ -110,15 +170,23 @@ class LocalLinkedItemRepository:
         target_type: LinkedEntityType | str,
         target_id: str,
     ) -> bool:
+        pair_key = canonical_pair_key(source_type, source_id, target_type, target_id)
         with self._lock:
             return any(
-                link.user_id == user_id
-                and link.source_type == source_type
-                and link.source_id == source_id
-                and link.target_type == target_type
-                and link.target_id == target_id
+                link.user_id == user_id and canonical_pair_key_for_link(link) == pair_key
                 for link in self._read_all_unlocked()
             )
+
+    def update_link(self, link: LinkedItem) -> LinkedItem | None:
+        link = with_canonical_pair_key(link)
+        with self._lock:
+            links = self._read_all_unlocked()
+            for index, existing in enumerate(links):
+                if existing.user_id == link.user_id and existing.link_id == link.link_id:
+                    links[index] = link
+                    self._write_all_unlocked(links)
+                    return link
+            return None
 
     def delete_link(self, user_id: str, link_id: str) -> bool:
         with self._lock:
@@ -161,10 +229,10 @@ class LocalLinkedItemRepository:
             return []
 
         raw_data = json.loads(self.file_path.read_text(encoding="utf-8") or "[]")
-        return [LinkedItem.model_validate(item) for item in raw_data]
+        return [with_canonical_pair_key(LinkedItem.model_validate(item)) for item in raw_data]
 
     def _write_all_unlocked(self, links: list[LinkedItem]) -> None:
-        serialized = [link.model_dump(mode="json") for link in links]
+        serialized = [with_canonical_pair_key(link).model_dump(mode="json") for link in links]
         temp_path = self.file_path.with_suffix(".tmp")
         temp_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
         os.replace(temp_path, self.file_path)
@@ -177,13 +245,34 @@ class DynamoLinkedItemRepository:
         self.table = table or self._build_table(table_name, region_name)
 
     def create_link(self, link: LinkedItem) -> LinkedItem:
-        self.table.put_item(Item=self._to_item(link))
+        link = with_canonical_pair_key(link)
+        marker = self._pair_marker_item(link)
+        try:
+            self.table.put_item(
+                Item=marker,
+                ConditionExpression="attribute_not_exists(user_id) AND attribute_not_exists(link_id)",
+            )
+        except Exception as exc:
+            if self._is_conditional_check_failed(exc):
+                raise DuplicateLinkedItemError() from exc
+            raise
+
+        try:
+            self.table.put_item(
+                Item=self._to_item(link),
+                ConditionExpression="attribute_not_exists(user_id) AND attribute_not_exists(link_id)",
+            )
+        except Exception as exc:
+            self.table.delete_item(Key={"user_id": link.user_id, "link_id": marker["link_id"]})
+            if self._is_conditional_check_failed(exc):
+                raise DuplicateLinkedItemError() from exc
+            raise
         return link
 
     def get_link(self, user_id: str, link_id: str) -> LinkedItem | None:
         response = self.table.get_item(Key={"user_id": user_id, "link_id": link_id})
         item = response.get("Item")
-        if item is None:
+        if item is None or is_pair_marker(item):
             return None
 
         return self._from_item(item)
@@ -199,10 +288,14 @@ class DynamoLinkedItemRepository:
         target_prefix = linked_item_lookup_prefix(entity_type, entity_id)
 
         for item in self._query_lookup_index(user_id, SOURCE_LINKS_INDEX, "source_link_key", source_prefix):
+            if is_pair_marker(item):
+                continue
             link = self._from_item(item)
             links_by_id[link.link_id] = link
 
         for item in self._query_lookup_index(user_id, TARGET_LINKS_INDEX, "target_link_key", target_prefix):
+            if is_pair_marker(item):
+                continue
             link = self._from_item(item)
             links_by_id[link.link_id] = link
 
@@ -216,20 +309,45 @@ class DynamoLinkedItemRepository:
         target_type: LinkedEntityType | str,
         target_id: str,
     ) -> bool:
+        pair_key = canonical_pair_key(source_type, source_id, target_type, target_id)
+        marker_id = duplicate_marker_link_id(pair_key)
+        response = self.table.get_item(Key={"user_id": user_id, "link_id": marker_id})
+        if response.get("Item") is not None:
+            return True
+
         for link in self.list_links_for_entity(user_id, source_type, source_id):
-            if (
-                link.source_type == source_type
-                and link.source_id == source_id
-                and link.target_type == target_type
-                and link.target_id == target_id
-            ):
+            if canonical_pair_key_for_link(link) == pair_key:
                 return True
 
         return False
 
+    def update_link(self, link: LinkedItem) -> LinkedItem | None:
+        link = with_canonical_pair_key(link)
+        try:
+            self.table.put_item(
+                Item=self._to_item(link),
+                ConditionExpression="attribute_exists(user_id) AND attribute_exists(link_id)",
+            )
+        except Exception as exc:
+            if self._is_conditional_check_failed(exc):
+                return None
+            raise
+        return link
+
     def delete_link(self, user_id: str, link_id: str) -> bool:
         response = self.table.delete_item(Key={"user_id": user_id, "link_id": link_id}, ReturnValues="ALL_OLD")
-        return "Attributes" in response
+        attributes = response.get("Attributes")
+        if not attributes or is_pair_marker(attributes):
+            return False
+
+        pair_key = attributes.get("canonical_pair_key") or canonical_pair_key(
+            attributes["source_type"],
+            attributes["source_id"],
+            attributes["target_type"],
+            attributes["target_id"],
+        )
+        self.table.delete_item(Key={"user_id": user_id, "link_id": duplicate_marker_link_id(pair_key)})
+        return True
 
     def delete_links_for_entity(
         self,
@@ -268,13 +386,28 @@ class DynamoLinkedItemRepository:
 
         return items
 
+    def _pair_marker_item(self, link: LinkedItem) -> dict[str, Any]:
+        return {
+            "user_id": link.user_id,
+            "link_id": duplicate_marker_link_id(link.canonical_pair_key),
+            "entity_kind": PAIR_MARKER_KIND,
+            "canonical_pair_key": link.canonical_pair_key,
+            "relationship_link_id": link.link_id,
+            "created_at": link.created_at.isoformat(),
+        }
+
     def _build_table(self, table_name: str, region_name: str) -> Any:
         import boto3
 
         return boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def _to_item(self, link: LinkedItem) -> dict[str, Any]:
-        return link.model_dump(mode="json")
+        return with_canonical_pair_key(link).model_dump(mode="json")
 
     def _from_item(self, item: dict[str, Any]) -> LinkedItem:
-        return LinkedItem.model_validate(item)
+        return with_canonical_pair_key(LinkedItem.model_validate(item))
+
+    def _is_conditional_check_failed(self, exc: Exception) -> bool:
+        response = getattr(exc, "response", {})
+        error = response.get("Error", {}) if isinstance(response, dict) else {}
+        return error.get("Code") == "ConditionalCheckFailedException"

@@ -4,9 +4,9 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.attachments_repository import LocalRecordAttachmentRepository
+from app.attachments_repository import LocalRecordAttachmentRepository, record_attachment_key
 from app.auth import UserContext, get_current_user
-from app.linked_items_repository import DynamoLinkedItemRepository, LocalLinkedItemRepository
+from app.linked_items_repository import DynamoLinkedItemRepository, LocalLinkedItemRepository, canonical_pair_key
 from app.main import (
     app,
     get_linked_item_repository,
@@ -14,10 +14,10 @@ from app.main import (
     get_record_repository,
     get_repository,
 )
-from app.models import LinkedItem
+from app.models import LinkedItem, RecordAttachment
 from app.records_repository import LocalRecordRepository
 from app.repository import LocalReminderRepository
-from app.schemas import LinkedEntityType, RelationshipType
+from app.schemas import AttachmentStatus, LinkedEntityType, RelationshipType
 
 
 @pytest.fixture()
@@ -33,7 +33,7 @@ def link_context(tmp_path):
     app.dependency_overrides[get_record_attachment_repository] = lambda: attachment_repo
 
     with TestClient(app) as client:
-        yield client, record_repo, reminder_repo, linked_repo
+        yield client, record_repo, reminder_repo, linked_repo, attachment_repo
 
     app.dependency_overrides.clear()
 
@@ -78,6 +78,38 @@ def create_reminder(client: TestClient, **overrides):
     response = client.post("/reminders", json=reminder_payload(**overrides))
     assert response.status_code == 201
     return response.json()
+
+
+def create_attachment_metadata(attachment_repo, record_id: str, *, name: str = "Adoption papers.pdf") -> RecordAttachment:
+    now = datetime.now(timezone.utc)
+    attachment = RecordAttachment(
+        attachment_id=str(uuid4()),
+        user_id="local-dev-user",
+        owner_hash="owner-hash",
+        record_id=record_id,
+        record_attachment_key=record_attachment_key(record_id, "attachment-1"),
+        display_name=name,
+        content_type="application/pdf",
+        size_bytes=1234,
+        status=AttachmentStatus.AVAILABLE,
+        scan_result=None,
+        quarantine_object_key=None,
+        clean_object_key=None,
+        upload_expires_at=None,
+        created_at=now,
+        uploaded_at=now,
+        scan_completed_at=now,
+        available_at=now,
+        deleted_at=None,
+        etag=None,
+        encryption_key_arn=None,
+    )
+    attachment = attachment.model_copy(
+        update={
+            "record_attachment_key": record_attachment_key(record_id, attachment.attachment_id),
+        }
+    )
+    return attachment_repo.create_attachment(attachment)
 
 
 def test_record_links_resolve_records_reminders_and_reverse_record_view(link_context):
@@ -125,6 +157,114 @@ def test_record_links_resolve_records_reminders_and_reverse_record_view(link_con
     assert reminder_links.status_code == 200
     assert reminder_links.json()["records"][0]["linked_entity"]["title"] == "2018 Honda Accord"
     assert reminder_links.json()["reminders"] == []
+
+
+def test_generic_relationship_routes_update_and_prevent_reversed_mixed_duplicate(link_context):
+    client, *_ = link_context
+    record = create_record(client, title="Baxter", record_type="pet")
+    reminder = create_reminder(client, title="Rabies vaccination")
+
+    created = client.post(
+        "/relationships",
+        json={
+            "source_item_type": "record",
+            "source_item_id": record["id"],
+            "target_item_type": "reminder",
+            "target_item_id": reminder["id"],
+            "relationship_type": "reminder_for",
+        },
+    )
+    assert created.status_code == 201
+    relationship_id = created.json()["relationship_id"]
+
+    reversed_duplicate = client.post(
+        "/relationships",
+        json={
+            "source_item_type": "reminder",
+            "source_item_id": reminder["id"],
+            "target_item_type": "record",
+            "target_item_id": record["id"],
+        },
+    )
+    assert reversed_duplicate.status_code == 409
+
+    updated = client.patch(
+        f"/relationships/{relationship_id}",
+        json={"relationship_type": "provided_by", "custom_label": "Annual vaccine"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["relationship_type"] == "provided_by"
+    assert updated.json()["custom_label"] == "Annual vaccine"
+
+    record_links = client.get(f"/records/{record['id']}/links").json()
+    assert record_links["reminders"][0]["relationship_type"] == "provided_by"
+    assert record_links["reminders"][0]["label"] == "Annual vaccine"
+
+    assert client.get(f"/relationships/{relationship_id}").status_code == 200
+    removed = client.delete(f"/relationships/{relationship_id}")
+    assert removed.status_code == 204
+    assert client.get(f"/records/{record['id']}/links").json()["reminders"] == []
+    assert client.get(f"/reminders/{reminder['id']}").status_code == 200
+
+
+def test_document_relationships_hydrate_and_cleanup_when_attachment_is_deleted(link_context):
+    client, _record_repo, _reminder_repo, _linked_repo, attachment_repo = link_context
+    record = create_record(client, title="Baxter", record_type="pet")
+    attachment = create_attachment_metadata(attachment_repo, record["id"], name="Adoption document.pdf")
+    document_id = record_attachment_key(record["id"], attachment.attachment_id)
+
+    created = client.post(
+        "/relationships",
+        json={
+            "source_item_type": "record",
+            "source_item_id": record["id"],
+            "target_item_type": "document",
+            "target_item_id": document_id,
+            "relationship_type": "document_for",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["target_item"]["title"] == "Adoption document.pdf"
+    assert created.json()["target_item"]["document_record_id"] == record["id"]
+
+    links = client.get(f"/records/{record['id']}/links")
+    assert links.status_code == 200
+    assert links.json()["documents"][0]["linked_entity"]["title"] == "Adoption document.pdf"
+    assert links.json()["documents"][0]["linked_entity"]["document_record_id"] == record["id"]
+
+    delete_document = client.delete(f"/records/{record['id']}/attachments/{attachment.attachment_id}")
+    assert delete_document.status_code == 204
+    assert client.get(f"/records/{record['id']}/links").json()["documents"] == []
+    assert client.get(f"/records/{record['id']}").status_code == 200
+
+
+def test_relationship_candidates_search_excludes_current_linked_and_archived_items(link_context):
+    client, _record_repo, _reminder_repo, _linked_repo, attachment_repo = link_context
+    source = create_record(client, title="Vehicle", record_type="vehicle")
+    linked = create_record(client, title="Already linked", record_type="insurance")
+    visible = create_record(client, title="Queen City Animal Hospital", record_type="general")
+    archived = create_record(client, title="Archived policy", record_type="insurance")
+    assert client.post(f"/records/{archived['id']}/archive").status_code == 200
+    attachment = create_attachment_metadata(attachment_repo, source["id"], name="Registration.pdf")
+
+    assert client.post(f"/records/{source['id']}/links", json={"target_type": "record", "target_id": linked["id"]}).status_code == 201
+
+    response = client.get(
+        f"/relationships/candidates?source_item_type=record&source_item_id={source['id']}&q=city"
+    )
+    assert response.status_code == 200
+    titles = [item["title"] for item in response.json()["items"]]
+    assert titles == ["Queen City Animal Hospital"]
+
+    all_candidates = client.get(
+        f"/relationships/candidates?source_item_type=record&source_item_id={source['id']}"
+    ).json()["items"]
+    ids = {item["item_id"] for item in all_candidates}
+    assert source["id"] not in ids
+    assert linked["id"] not in ids
+    assert archived["id"] not in ids
+    assert record_attachment_key(source["id"], attachment.attachment_id) in ids
+    assert visible["id"] in ids
 
 
 def test_link_create_rejects_frontend_user_id(link_context):
@@ -224,14 +364,21 @@ def test_local_linked_item_repository_persists_across_instances(tmp_path):
     assert second_repo.list_links_for_entity("user-a", LinkedEntityType.RECORD, "source-record") == [loaded]
 
 
+class FakeConditionalCheckFailed(Exception):
+    response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+
+
 class FakeLinkedItemsTable:
     def __init__(self):
         self.items = {}
         self.query_calls = []
         self.scan_called = False
 
-    def put_item(self, Item):
-        self.items[(Item["user_id"], Item["link_id"])] = dict(Item)
+    def put_item(self, Item, **kwargs):
+        key = (Item["user_id"], Item["link_id"])
+        if kwargs.get("ConditionExpression") and key in self.items:
+            raise FakeConditionalCheckFailed()
+        self.items[key] = dict(Item)
         return {}
 
     def get_item(self, Key):
@@ -248,7 +395,7 @@ class FakeLinkedItemsTable:
             "Items": [
                 item
                 for item in self.items.values()
-                if item["user_id"] == user_id and item[key].startswith(prefix)
+                if item["user_id"] == user_id and item.get(key, "").startswith(prefix)
             ]
         }
 
@@ -289,6 +436,12 @@ def build_link():
         target_id="target-record",
         relationship_type=RelationshipType.RELATED,
         label=None,
+        canonical_pair_key=canonical_pair_key(
+            LinkedEntityType.RECORD,
+            "source-record",
+            LinkedEntityType.RECORD,
+            "target-record",
+        ),
         source_link_key=f"record#source-record#{link_id}",
         target_link_key=f"record#target-record#{link_id}",
         created_at=now,

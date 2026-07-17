@@ -25,6 +25,14 @@ from app.linked_items_repository import (
 from app.preferences_repository import DynamoPreferencesRepository, LocalPreferencesRepository, PreferencesRepository
 from app.push_repository import DynamoPushSubscriptionRepository, LocalPushSubscriptionRepository, PushSubscriptionRepository
 from app.records_repository import LocalRecordRepository, RecordRepository
+from app.search_repository import (
+    DynamoSavedSearchViewRepository,
+    DynamoSearchIndexRepository,
+    LocalSavedSearchViewRepository,
+    LocalSearchIndexRepository,
+    SavedSearchViewRepository,
+    SearchIndexRepository,
+)
 from app.repository import LocalReminderRepository, ReminderRepository
 
 
@@ -180,3 +188,39 @@ def create_google_oauth_state_repository(
 
 def create_encryption_service(settings: Settings | None = None) -> EncryptionService:
     return EncryptionService(settings or get_settings())
+
+
+def create_search_index_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> SearchIndexRepository:
+    resolved_settings = settings or get_settings()
+
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoSearchIndexRepository(
+            table_name=resolved_settings.search_index_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+
+    return LocalSearchIndexRepository(local_file_path or resolved_settings.local_search_index_file)
+
+
+def create_saved_search_view_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> SavedSearchViewRepository:
+    resolved_settings = settings or get_settings()
+
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoSavedSearchViewRepository(
+            table_name=resolved_settings.saved_views_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+
+    return LocalSavedSearchViewRepository(local_file_path or resolved_settings.local_saved_views_file)

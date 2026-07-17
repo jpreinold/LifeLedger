@@ -54,6 +54,7 @@ interface RecordDetailDrawerProps {
   onBack?: () => void
   onClose: () => void
   onEdit: (record: LifeRecord) => void
+  onOpenLinkedDocument?: (recordId: string, documentId: string) => void
   onOpenLinkedRecord: (recordId: string) => void
   onOpenLinkedReminder: (reminderId: string) => void
   onProtectedStatusChange: (id: string, status: ProtectedRecordStatus) => void
@@ -76,6 +77,7 @@ export function RecordDetailDrawer({
   onBack,
   onClose,
   onEdit,
+  onOpenLinkedDocument,
   onOpenLinkedRecord,
   onOpenLinkedReminder,
   onProtectedStatusChange,
@@ -561,7 +563,9 @@ export function RecordDetailDrawer({
               showAdd
               tabLayout
               sourceId={record.id}
+              sourceTitle={record.title}
               sourceType="record"
+              onOpenDocument={onOpenLinkedDocument}
               onOpenRecord={onOpenLinkedRecord}
               onOpenReminder={onOpenLinkedReminder}
             />

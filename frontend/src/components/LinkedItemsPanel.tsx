@@ -5,6 +5,7 @@ import {
   ChevronRight,
   FileText,
   Link2,
+  Pencil,
   Plus,
   Search,
   Trash2,
@@ -14,7 +15,7 @@ import {
 import { linkedItemsApi } from '../api/linkedItemsApi'
 import { formatDueDateLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
 import { getRecordTypeDefinition } from '../lib/recordTypes'
-import { relationshipLabels, type LinkedItem, type LinkedItemsResponse, type RelationshipType } from '../types/linkedItem'
+import { relationshipLabels, type LinkedEntityType, type LinkedItem, type LinkedItemsResponse, type RelationshipCandidate, type RelationshipType } from '../types/linkedItem'
 import type { LifeRecord } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -26,15 +27,17 @@ interface LinkedItemsPanelProps {
   reminders: Reminder[]
   showAdd?: boolean
   sourceId: string
+  sourceTitle?: string
   sourceType: 'record' | 'reminder'
   title?: string
   tabLayout?: boolean
+  onOpenDocument?: (recordId: string, documentId: string) => void
   onOpenRecord?: (recordId: string) => void
   onOpenReminder?: (reminderId: string) => void
 }
 
 type AddStep = 'type' | 'select' | 'relationship'
-export type CandidateType = 'record' | 'reminder'
+export type CandidateType = LinkedEntityType
 
 export interface LinkDraft {
   targetType: CandidateType
@@ -43,17 +46,20 @@ export interface LinkDraft {
   label: string | null
 }
 
-const emptyLinks: LinkedItemsResponse = { records: [], reminders: [] }
+const emptyLinks: LinkedItemsResponse = { records: [], reminders: [], documents: [] }
 
 const relationshipOptions: Array<{ label: string; value: RelationshipType }> = [
   { label: 'Related to', value: 'related' },
   { label: 'Belongs to', value: 'belongs_to' },
+  { label: 'Owned by', value: 'owned_by' },
+  { label: 'Covers', value: 'covers' },
+  { label: 'Provided by', value: 'provided_by' },
+  { label: 'Reminder for', value: 'reminder_for' },
+  { label: 'Document for', value: 'document_for' },
+  { label: 'Associated with', value: 'associated_with' },
   { label: 'Insurance for', value: 'insures' },
   { label: 'Warranty for', value: 'warranty_for' },
   { label: 'Maintenance for', value: 'maintains' },
-  { label: 'Reminder for', value: 'renews' },
-  { label: 'Covers', value: 'covers' },
-  { label: 'Document for', value: 'document_for' },
   { label: 'Appointment for', value: 'appointment_for' },
   { label: 'Custom', value: 'custom' },
 ]
@@ -64,9 +70,11 @@ export function LinkedItemsPanel({
   reminders,
   showAdd = false,
   sourceId,
+  sourceTitle,
   sourceType,
   title = 'Linked items',
   tabLayout = false,
+  onOpenDocument,
   onOpenRecord,
   onOpenReminder,
 }: LinkedItemsPanelProps) {
@@ -74,6 +82,7 @@ export function LinkedItemsPanel({
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
+  const [editingLink, setEditingLink] = useState<LinkedItem | null>(null)
   const [pendingRemove, setPendingRemove] = useState<LinkedItem | null>(null)
   const [isRemoving, setIsRemoving] = useState(false)
 
@@ -88,7 +97,7 @@ export function LinkedItemsPanel({
           ? await linkedItemsApi.listRecordLinks(sourceId)
           : await linkedItemsApi.listReminderLinks(sourceId)
         if (!isCancelled) {
-          setLinks(response)
+          setLinks(normalizeLinks(response))
         }
       } catch (requestError) {
         if (!isCancelled) {
@@ -114,23 +123,35 @@ export function LinkedItemsPanel({
     const response = sourceType === 'record'
       ? await linkedItemsApi.listRecordLinks(sourceId)
       : await linkedItemsApi.listReminderLinks(sourceId)
-    setLinks(response)
+    setLinks(normalizeLinks(response))
   }
 
   async function handleCreateLink(input: { targetType: CandidateType; targetId: string; relationshipType: RelationshipType; label: string | null }) {
-    if (sourceType !== 'record') {
+    setError(null)
+    await linkedItemsApi.createRelationship({
+      source_item_type: sourceType,
+      source_item_id: sourceId,
+      target_item_type: input.targetType,
+      target_item_id: input.targetId,
+      relationship_type: input.relationshipType,
+      custom_label: input.label,
+    })
+    await reloadLinks()
+    setIsPickerOpen(false)
+  }
+
+  async function handleEditLink(input: { relationshipType: RelationshipType; label: string | null }) {
+    if (!editingLink) {
       return
     }
 
     setError(null)
-    await linkedItemsApi.createRecordLink(sourceId, {
-      target_type: input.targetType,
-      target_id: input.targetId,
+    await linkedItemsApi.updateRelationship(editingLink.link_id, {
       relationship_type: input.relationshipType,
-      label: input.label,
+      custom_label: input.label,
     })
     await reloadLinks()
-    setIsPickerOpen(false)
+    setEditingLink(null)
   }
 
   async function confirmRemoveLink() {
@@ -141,11 +162,7 @@ export function LinkedItemsPanel({
     setIsRemoving(true)
     setError(null)
     try {
-      if (sourceType === 'record') {
-        await linkedItemsApi.deleteRecordLink(sourceId, pendingRemove.link_id)
-      } else {
-        await linkedItemsApi.deleteReminderLink(sourceId, pendingRemove.link_id)
-      }
+      await linkedItemsApi.deleteRelationship(pendingRemove.link_id)
       await reloadLinks()
       setPendingRemove(null)
     } catch (requestError) {
@@ -157,13 +174,15 @@ export function LinkedItemsPanel({
 
   const linkedRecordIds = useMemo(() => new Set(links.records.map((item) => item.linked_entity.id)), [links.records])
   const linkedReminderIds = useMemo(() => new Set(links.reminders.map((item) => item.linked_entity.id)), [links.reminders])
-  const hasLinks = links.records.length > 0 || links.reminders.length > 0
-  const canAdd = showAdd && sourceType === 'record'
+  const linkedDocumentIds = useMemo(() => new Set(links.documents.map((item) => item.linked_entity.id)), [links.documents])
+  const hasLinks = links.records.length > 0 || links.reminders.length > 0 || links.documents.length > 0
+  const canAdd = showAdd
   const usesTabLayout = tabLayout && sourceType === 'record'
   const overview = sourceType === 'record' ? (
     <div className="linked-overview" aria-label="Linked items overview">
       <span><strong>{links.records.length}</strong> Linked records</span>
       <span><strong>{links.reminders.length}</strong> Linked reminders</span>
+      <span><strong>{links.documents.length}</strong> Linked documents</span>
       {documentsCount !== null ? <span><strong>{documentsCount}</strong> Documents</span> : null}
     </div>
   ) : null
@@ -174,7 +193,7 @@ export function LinkedItemsPanel({
         <div className="linked-items-header">
           <div>
             <h3>{title}</h3>
-            <p>{sourceType === 'record' ? 'Records and reminders connected to this record.' : 'Records connected to this reminder.'}</p>
+            <p>{sourceType === 'record' ? 'Records, reminders, and documents connected to this record.' : 'Items connected to this reminder.'}</p>
           </div>
           {canAdd ? (
             <button type="button" className="small-outline-button linked-items-add-button" onClick={() => setIsPickerOpen(true)}>
@@ -189,30 +208,27 @@ export function LinkedItemsPanel({
       {isLoading ? <p className="linked-items-state">Loading linked items...</p> : null}
       {error ? <p className="field-error linked-items-error" role="alert">{error}</p> : null}
 
-      {!isLoading && !error && sourceType === 'record' && !hasLinks && !usesTabLayout ? (
+      {!isLoading && !error && !hasLinks ? (
         <div className="linked-items-empty-state">
           <Link2 size={24} aria-hidden="true" />
-          <p>Nothing is linked to this record yet.</p>
+          <p>No linked items yet. Connect this item to documents, reminders, or other records so related information stays together.</p>
           {canAdd ? (
             <button type="button" className="secondary-button" onClick={() => setIsPickerOpen(true)}>
               <Plus size={16} aria-hidden="true" />
-              Link an item
+              Add linked item
             </button>
           ) : null}
         </div>
       ) : null}
 
-      {!isLoading && !error && sourceType === 'reminder' && links.records.length === 0 ? (
-        <p className="linked-items-state">This reminder is not linked to a record.</p>
-      ) : null}
-
-      {!isLoading && !error && sourceType === 'record' ? (
+      {!isLoading && !error && hasLinks ? (
         <>
           <LinkedItemsGroup
             action={canAdd && usesTabLayout ? <AddGroupButton onClick={() => setIsPickerOpen(true)} /> : undefined}
             emptyText="No linked records."
             items={links.records}
             title="Linked records"
+            onEdit={setEditingLink}
             onOpen={onOpenRecord}
             onRemove={setPendingRemove}
           />
@@ -221,43 +237,51 @@ export function LinkedItemsPanel({
             emptyText="No linked reminders."
             items={links.reminders}
             title="Linked reminders"
+            onEdit={setEditingLink}
             onOpen={onOpenReminder}
+            onRemove={setPendingRemove}
+          />
+          <LinkedItemsGroup
+            action={canAdd && usesTabLayout ? <AddGroupButton onClick={() => setIsPickerOpen(true)} /> : undefined}
+            emptyText="No linked documents."
+            items={links.documents}
+            title="Linked documents"
+            onEdit={setEditingLink}
+            onOpenDocument={onOpenDocument}
             onRemove={setPendingRemove}
           />
           {usesTabLayout ? overview : null}
         </>
       ) : null}
 
-      {!isLoading && !error && sourceType === 'reminder' && links.records.length > 0 ? (
-        <LinkedItemsGroup
-          emptyText="This reminder is not linked to a record."
-          items={links.records}
-          title="Linked to"
-          onOpen={onOpenRecord}
-          onRemove={setPendingRemove}
-        />
-      ) : null}
+      <AddLinkedItemDrawer
+        currentRecordId={sourceType === 'record' ? sourceId : null}
+        isOpen={isPickerOpen}
+        linkedDocumentIds={linkedDocumentIds}
+        linkedRecordIds={linkedRecordIds}
+        linkedReminderIds={linkedReminderIds}
+        records={records}
+        reminders={reminders}
+        sourceId={sourceId}
+        sourceType={sourceType}
+        onClose={() => setIsPickerOpen(false)}
+        onCreate={handleCreateLink}
+      />
 
-      {sourceType === 'record' ? (
-        <AddLinkedItemDrawer
-          currentRecordId={sourceId}
-          isOpen={isPickerOpen}
-          linkedRecordIds={linkedRecordIds}
-          linkedReminderIds={linkedReminderIds}
-          records={records}
-          reminders={reminders}
-          onClose={() => setIsPickerOpen(false)}
-          onCreate={handleCreateLink}
-        />
-      ) : null}
+      <EditRelationshipDrawer
+        isOpen={editingLink !== null}
+        link={editingLink}
+        onClose={() => setEditingLink(null)}
+        onSave={handleEditLink}
+      />
 
       <ConfirmDialog
-        body="Remove this link? The record or reminder itself will not be deleted."
+        body={getRemoveLinkBody(sourceTitle, pendingRemove)}
         busyLabel="Removing"
         confirmLabel="Remove link"
         isBusy={isRemoving}
         isOpen={pendingRemove !== null}
-        title="Remove link"
+        title="Remove link?"
         onCancel={() => setPendingRemove(null)}
         onConfirm={() => void confirmRemoveLink()}
       />
@@ -269,7 +293,9 @@ function LinkedItemsGroup({
   action,
   emptyText,
   items,
+  onEdit,
   onOpen,
+  onOpenDocument,
   onRemove,
   title,
 }: {
@@ -277,7 +303,9 @@ function LinkedItemsGroup({
   emptyText: string
   items: LinkedItem[]
   title: string
+  onEdit: (item: LinkedItem) => void
   onOpen?: (id: string) => void
+  onOpenDocument?: (recordId: string, documentId: string) => void
   onRemove: (item: LinkedItem) => void
 }) {
   return (
@@ -290,7 +318,14 @@ function LinkedItemsGroup({
       {items.length > 0 ? (
         <div className="linked-items-list">
           {items.map((item) => (
-            <LinkedItemCard item={item} key={item.link_id} onOpen={onOpen} onRemove={() => onRemove(item)} />
+            <LinkedItemCard
+              item={item}
+              key={item.link_id}
+              onEdit={() => onEdit(item)}
+              onOpen={onOpen}
+              onOpenDocument={onOpenDocument}
+              onRemove={() => onRemove(item)}
+            />
           ))}
         </div>
       ) : null}
@@ -307,12 +342,31 @@ function AddGroupButton({ onClick }: { onClick: () => void }) {
   )
 }
 
-function LinkedItemCard({ item, onOpen, onRemove }: { item: LinkedItem; onOpen?: (id: string) => void; onRemove: () => void }) {
+function LinkedItemCard({
+  item,
+  onEdit,
+  onOpen,
+  onOpenDocument,
+  onRemove,
+}: {
+  item: LinkedItem
+  onEdit: () => void
+  onOpen?: (id: string) => void
+  onOpenDocument?: (recordId: string, documentId: string) => void
+  onRemove: () => void
+}) {
   const entity = item.linked_entity
-  const isRecord = entity.entity_type === 'record'
   const Icon = getLinkedItemIcon(item)
   const meta = getLinkedItemMeta(item)
-  const canOpen = Boolean(onOpen)
+  const canOpen = entity.entity_type === 'document' ? Boolean(entity.document_record_id && onOpenDocument) : Boolean(onOpen)
+
+  function openLinkedItem() {
+    if (entity.entity_type === 'document' && entity.document_record_id) {
+      onOpenDocument?.(entity.document_record_id, entity.id)
+      return
+    }
+    onOpen?.(entity.id)
+  }
 
   return (
     <article className="linked-item-card">
@@ -320,10 +374,10 @@ function LinkedItemCard({ item, onOpen, onRemove }: { item: LinkedItem; onOpen?:
         type="button"
         className="linked-item-main"
         disabled={!canOpen}
-        onClick={() => onOpen?.(entity.id)}
+        onClick={openLinkedItem}
         aria-label={`Open ${entity.title}`}
       >
-        <span className={`linked-item-icon ${isRecord ? getRecordToneClass(entity.record_type) : 'tone-other'}`} aria-hidden="true">
+        <span className={`linked-item-icon ${getLinkedItemToneClass(item)}`} aria-hidden="true">
           <Icon size={19} />
         </span>
         <span className="linked-item-copy">
@@ -332,9 +386,14 @@ function LinkedItemCard({ item, onOpen, onRemove }: { item: LinkedItem; onOpen?:
         </span>
         {canOpen ? <ChevronRight size={17} aria-hidden="true" className="linked-item-chevron" /> : null}
       </button>
-      <button type="button" className="icon-button linked-item-remove-button" onClick={onRemove} aria-label={`Remove link to ${entity.title}`}>
-        <Trash2 size={15} aria-hidden="true" />
-      </button>
+      <span className="linked-item-actions">
+        <button type="button" className="icon-button linked-item-edit-button" onClick={onEdit} aria-label={`Edit relationship to ${entity.title}`}>
+          <Pencil size={15} aria-hidden="true" />
+        </button>
+        <button type="button" className="icon-button linked-item-remove-button" onClick={onRemove} aria-label={`Remove link to ${entity.title}`}>
+          <Trash2 size={15} aria-hidden="true" />
+        </button>
+      </span>
     </article>
   )
 }
@@ -342,19 +401,25 @@ function LinkedItemCard({ item, onOpen, onRemove }: { item: LinkedItem; onOpen?:
 export function AddLinkedItemDrawer({
   currentRecordId,
   isOpen,
+  linkedDocumentIds = new Set<string>(),
   linkedRecordIds,
   linkedReminderIds,
   records,
   reminders,
+  sourceId = currentRecordId,
+  sourceType = 'record',
   onClose,
   onCreate,
 }: {
   currentRecordId: string | null
   isOpen: boolean
+  linkedDocumentIds?: Set<string>
   linkedRecordIds: Set<string>
   linkedReminderIds: Set<string>
   records: LifeRecord[]
   reminders: Reminder[]
+  sourceId?: string | null
+  sourceType?: 'record' | 'reminder'
   onClose: () => void
   onCreate: (input: LinkDraft) => Promise<void>
 }) {
@@ -364,6 +429,9 @@ export function AddLinkedItemDrawer({
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('related')
   const [label, setLabel] = useState('')
   const [search, setSearch] = useState('')
+  const [documentCandidates, setDocumentCandidates] = useState<RelationshipCandidate[]>([])
+  const [isSearchingDocuments, setIsSearchingDocuments] = useState(false)
+  const [selectedDocument, setSelectedDocument] = useState<RelationshipCandidate | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -372,13 +440,51 @@ export function AddLinkedItemDrawer({
       setStep('type')
       setTargetType(null)
       setSelectedId(null)
+      setSelectedDocument(null)
       setRelationshipType('related')
       setLabel('')
       setSearch('')
+      setDocumentCandidates([])
+      setSelectedDocument(null)
       setError(null)
       setIsSaving(false)
+      setIsSearchingDocuments(false)
     }
   }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen || step !== 'select' || targetType !== 'document' || !sourceId) {
+      return undefined
+    }
+
+    let isCancelled = false
+    setIsSearchingDocuments(true)
+    setError(null)
+    void linkedItemsApi.listCandidates({
+      sourceItemType: sourceType,
+      sourceItemId: sourceId,
+      itemType: 'document',
+      query: search,
+      limit: 30,
+    }).then((response) => {
+      if (!isCancelled) {
+        setDocumentCandidates(response.items.filter((item) => !linkedDocumentIds.has(item.item_id)))
+      }
+    }).catch((requestError) => {
+      if (!isCancelled) {
+        setDocumentCandidates([])
+        setError(requestError instanceof Error ? requestError.message : 'Unable to search documents.')
+      }
+    }).finally(() => {
+      if (!isCancelled) {
+        setIsSearchingDocuments(false)
+      }
+    })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [isOpen, linkedDocumentIds, search, sourceId, sourceType, step, targetType])
 
   const recordCandidates = useMemo(
     () => records
@@ -394,7 +500,7 @@ export function AddLinkedItemDrawer({
 
   const selectedRecord = targetType === 'record' ? recordCandidates.find((record) => record.id === selectedId) ?? null : null
   const selectedReminder = targetType === 'reminder' ? reminderCandidates.find((reminder) => reminder.id === selectedId) ?? null : null
-  const selectedTitle = selectedRecord?.title ?? selectedReminder?.title ?? ''
+  const selectedTitle = selectedRecord?.title ?? selectedReminder?.title ?? selectedDocument?.title ?? ''
 
   const filteredRecords = filterRecords(recordCandidates, search)
   const filteredReminders = filterReminders(reminderCandidates, search)
@@ -402,20 +508,31 @@ export function AddLinkedItemDrawer({
   function chooseType(type: CandidateType) {
     setTargetType(type)
     setSelectedId(null)
-    setRelationshipType(type === 'reminder' ? 'renews' : 'related')
+    setSelectedDocument(null)
+    setRelationshipType(type === 'reminder' ? 'reminder_for' : type === 'document' ? 'document_for' : 'related')
     setSearch('')
+    setDocumentCandidates([])
     setStep('select')
   }
 
   function chooseRecord(record: LifeRecord) {
     setSelectedId(record.id)
+    setSelectedDocument(null)
     setRelationshipType(getDefaultRecordRelationship(record))
     setStep('relationship')
   }
 
   function chooseReminder(reminder: Reminder) {
     setSelectedId(reminder.id)
-    setRelationshipType('renews')
+    setSelectedDocument(null)
+    setRelationshipType('reminder_for')
+    setStep('relationship')
+  }
+
+  function chooseDocument(candidate: RelationshipCandidate) {
+    setSelectedId(candidate.item_id)
+    setSelectedDocument(candidate)
+    setRelationshipType('document_for')
     setStep('relationship')
   }
 
@@ -429,6 +546,7 @@ export function AddLinkedItemDrawer({
       setStep('type')
       setTargetType(null)
       setSelectedId(null)
+      setSelectedDocument(null)
     }
   }
 
@@ -485,6 +603,13 @@ export function AddLinkedItemDrawer({
               <span><strong>Reminder</strong><small>Link a reminder like registration renewal or maintenance.</small></span>
               <ChevronRight size={18} aria-hidden="true" />
             </button>
+            {sourceId ? (
+              <button type="button" className="linked-picker-type-card" onClick={() => chooseType('document')}>
+                <span className="linked-picker-type-icon linked-picker-document-icon" aria-hidden="true"><FileText size={24} /></span>
+                <span><strong>Document</strong><small>Link a document attached to one of your records.</small></span>
+                <ChevronRight size={18} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -492,7 +617,7 @@ export function AddLinkedItemDrawer({
           <div className="linked-picker-select-step">
             <label className="linked-picker-search">
               <Search size={16} aria-hidden="true" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${targetType}s...`} />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${targetType === 'document' ? 'documents' : `${targetType}s`}...`} />
             </label>
             {targetType === 'record' ? (
               <CandidateList
@@ -500,13 +625,23 @@ export function AddLinkedItemDrawer({
                 records={filteredRecords}
                 onChooseRecord={chooseRecord}
               />
-            ) : (
+            ) : null}
+            {targetType === 'reminder' ? (
               <CandidateList
                 emptyText="No reminders available to link."
                 reminders={filteredReminders}
                 onChooseReminder={chooseReminder}
               />
-            )}
+            ) : null}
+            {targetType === 'document' ? (
+              isSearchingDocuments ? <p className="linked-items-state linked-picker-empty">Searching documents...</p> : (
+                <CandidateList
+                  documents={documentCandidates}
+                  emptyText="No documents available to link."
+                  onChooseDocument={chooseDocument}
+                />
+              )
+            ) : null}
             <p className="linked-picker-footnote">Items already linked to this record are hidden.</p>
           </div>
         ) : null}
@@ -515,11 +650,11 @@ export function AddLinkedItemDrawer({
           <div className="linked-picker-relationship-step">
             <div className="linked-picker-selected-item">
               <span className="linked-item-icon tone-other" aria-hidden="true">
-                {targetType === 'record' ? <FileText size={18} /> : <Bell size={18} />}
+                {targetType === 'reminder' ? <Bell size={18} /> : <FileText size={18} />}
               </span>
               <div>
                 <strong>{selectedTitle}</strong>
-                <span>{targetType === 'record' ? 'Record' : 'Reminder'}</span>
+                <span>{targetType === 'record' ? 'Record' : targetType === 'document' ? 'Document' : 'Reminder'}</span>
               </div>
             </div>
 
@@ -558,23 +693,113 @@ export function AddLinkedItemDrawer({
   )
 }
 
+function EditRelationshipDrawer({
+  isOpen,
+  link,
+  onClose,
+  onSave,
+}: {
+  isOpen: boolean
+  link: LinkedItem | null
+  onClose: () => void
+  onSave: (input: { relationshipType: RelationshipType; label: string | null }) => Promise<void>
+}) {
+  const [relationshipType, setRelationshipType] = useState<RelationshipType>('related')
+  const [label, setLabel] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (link) {
+      setRelationshipType(link.relationship_type)
+      setLabel(link.label ?? '')
+      setIsSaving(false)
+      setError(null)
+    }
+  }, [link])
+
+  if (!link) {
+    return null
+  }
+
+  async function submit() {
+    setIsSaving(true)
+    setError(null)
+    try {
+      await onSave({ relationshipType, label: label.trim() || null })
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update relationship.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <SheetDrawer className="add-dialog linked-picker-dialog" isOpen={isOpen} labelledBy="edit-relationship-heading" onClose={onClose}>
+      <div className="sheet-header linked-picker-header">
+        <div>
+          <h2 id="edit-relationship-heading">Edit relationship</h2>
+          <p>{link.linked_entity.title}</p>
+        </div>
+        <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close edit relationship">
+          <X size={19} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="sheet-body linked-picker-body">
+        <div className="linked-picker-relationship-step">
+          <fieldset className="linked-relationship-options">
+            <legend>How are they related?</legend>
+            {relationshipOptions.map((option) => (
+              <label key={option.value}>
+                <input
+                  checked={relationshipType === option.value}
+                  name="edit_relationship_type"
+                  type="radio"
+                  value={option.value}
+                  onChange={() => setRelationshipType(option.value)}
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="linked-picker-label-field">
+            <span>Optional label</span>
+            <input maxLength={40} value={label} onChange={(event) => setLabel(event.target.value)} placeholder="e.g. Primary insurance" />
+            <small>{label.length}/40</small>
+          </label>
+          {error ? <p className="field-error" role="alert">{error}</p> : null}
+          <button type="button" className="primary-button" disabled={isSaving} onClick={() => void submit()}>
+            <Link2 size={17} aria-hidden="true" />
+            {isSaving ? 'Saving...' : 'Save relationship'}
+          </button>
+        </div>
+      </div>
+    </SheetDrawer>
+  )
+}
+
 function CandidateList({
+  documents = [],
   emptyText,
   records = [],
   reminders = [],
+  onChooseDocument,
   onChooseRecord,
   onChooseReminder,
 }: {
+  documents?: RelationshipCandidate[]
   emptyText: string
   records?: LifeRecord[]
   reminders?: Reminder[]
+  onChooseDocument?: (document: RelationshipCandidate) => void
   onChooseRecord?: (record: LifeRecord) => void
   onChooseReminder?: (reminder: Reminder) => void
 }) {
   const hasRecords = records.length > 0
   const hasReminders = reminders.length > 0
+  const hasDocuments = documents.length > 0
 
-  if (!hasRecords && !hasReminders) {
+  if (!hasRecords && !hasReminders && !hasDocuments) {
     return <p className="linked-items-state linked-picker-empty">{emptyText}</p>
   }
 
@@ -595,6 +820,13 @@ function CandidateList({
         <button type="button" className="linked-picker-candidate" key={reminder.id} onClick={() => onChooseReminder?.(reminder)}>
           <span className="linked-item-icon tone-other" aria-hidden="true"><Bell size={18} /></span>
           <span><strong>{reminder.title}</strong><small>{getReminderTypeLabel(reminder.reminder_type)} - {formatDueDateLabel(reminder.due_date)}</small></span>
+          <ChevronRight size={17} aria-hidden="true" />
+        </button>
+      ))}
+      {documents.map((document) => (
+        <button type="button" className="linked-picker-candidate" key={document.item_id} onClick={() => onChooseDocument?.(document)}>
+          <span className="linked-item-icon tone-finance" aria-hidden="true"><FileText size={18} /></span>
+          <span><strong>{document.title}</strong><small>{[document.subtitle || 'Document', formatDocumentStatus(document.status)].filter(Boolean).join(' - ')}</small></span>
           <ChevronRight size={17} aria-hidden="true" />
         </button>
       ))}
@@ -635,7 +867,7 @@ function getPickerSubcopy(step: AddStep, targetType: CandidateType | null) {
     return 'Choose what you want to link.'
   }
   if (step === 'select') {
-    return targetType === 'record' ? 'Pick the record to link.' : 'Pick the reminder to link.'
+    return targetType === 'record' ? 'Pick the record to link.' : targetType === 'document' ? 'Pick the document to link.' : 'Pick the reminder to link.'
   }
   return 'Pick how the items are related.'
 }
@@ -656,12 +888,17 @@ function getLinkedItemMeta(item: LinkedItem) {
 
   if (entity.entity_type === 'record') {
     const typeLabel = entity.record_type ? getRecordTypeDefinition(entity.record_type).label : 'Record'
-    return `${typeLabel} \u2022 ${relationship}`
+    const status = entity.status === 'archived' ? 'Archived' : null
+    return [typeLabel, relationship, status].filter(Boolean).join(' - ')
+  }
+
+  if (entity.entity_type === 'document') {
+    return [relationship, entity.subtitle || 'Document', formatDocumentStatus(entity.status)].filter(Boolean).join(' - ')
   }
 
   const typeLabel = getReminderTypeLabel(entity.reminder_type ?? 'generic')
   const dueLabel = entity.due_date ? formatDueDateLabel(entity.due_date) : entity.status
-  return [typeLabel, dueLabel, relationship].filter(Boolean).join(' \u2022 ')
+  return [typeLabel, dueLabel, relationship].filter(Boolean).join(' - ')
 }
 
 function getLinkedItemIcon(item: LinkedItem) {
@@ -670,13 +907,53 @@ function getLinkedItemIcon(item: LinkedItem) {
     return getRecordTypeDefinition(entity.record_type).icon
   }
 
+  if (entity.entity_type === 'document') {
+    return FileText
+  }
+
   return Bell
 }
 
-function getRecordToneClass(recordType: LifeRecord['record_type'] | null) {
-  if (!recordType) {
-    return 'tone-other'
+function getLinkedItemToneClass(item: LinkedItem) {
+  const entity = item.linked_entity
+  if (entity.entity_type === 'record' && entity.record_type) {
+    return `tone-${getRecordTypeDefinition(entity.record_type).tone}`
   }
+  if (entity.entity_type === 'document') {
+    return 'tone-finance'
+  }
+  return 'tone-other'
+}
 
-  return `tone-${getRecordTypeDefinition(recordType).tone}`
+function normalizeLinks(response: LinkedItemsResponse): LinkedItemsResponse {
+  return {
+    records: response.records ?? [],
+    reminders: response.reminders ?? [],
+    documents: response.documents ?? [],
+  }
+}
+
+function getRemoveLinkBody(sourceTitle: string | undefined, item: LinkedItem | null) {
+  if (!item) {
+    return ''
+  }
+  const left = sourceTitle || 'This item'
+  return `Remove this link? ${left} and ${item.linked_entity.title} will remain in LifeLedger.`
+}
+
+function formatDocumentStatus(status: string | null) {
+  if (!status) {
+    return null
+  }
+  const labels: Record<string, string> = {
+    pending_upload: 'Waiting for upload',
+    uploaded: 'Scanning',
+    scanning: 'Scanning',
+    available: 'Security scanned',
+    rejected: 'Rejected',
+    scan_failed: 'Scan failed',
+    deleting: 'Deleting',
+    deleted: 'Deleted',
+  }
+  return labels[status] ?? status
 }

@@ -14,6 +14,7 @@ import {
   LogOut,
   Plus,
   RefreshCcw,
+  Search,
   ShieldCheck,
   Settings,
   X,
@@ -43,6 +44,7 @@ import { ReminderDetailDrawer } from './components/ReminderDetailDrawer'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
+import { SearchView } from './components/SearchView'
 import { buildDailyDigest } from './lib/digest'
 import { formatCompletionNotice, type ReminderStatusFilter, type ReminderTypeFilter } from './lib/reminderDisplay'
 import {
@@ -136,7 +138,7 @@ interface ReminderAppProps {
   userLabel?: string | null
 }
 
-type AppPage = 'home' | 'reminders' | 'records' | 'settings' | 'calendar'
+type AppPage = 'home' | 'search' | 'reminders' | 'records' | 'settings' | 'calendar'
 type ViewingRecordState = { initialTab: RecordDetailTab; record: LifeRecord }
 
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
@@ -726,6 +728,65 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setViewingReminder({ reminder, fromAlert: false })
   }
 
+  function openLinkedDocument(recordId: string, _documentId: string) {
+    const record = records.find((item) => item.id === recordId)
+    if (!record) {
+      setError('Unable to open linked document. Refresh and try again.')
+      return
+    }
+
+    setEditingRecord(null)
+    setViewingReminder(null)
+    if (viewingRecord) {
+      setRecordBackStack((current) => [...current, viewingRecord])
+    } else {
+      setRecordBackStack([])
+    }
+    setViewingRecord({ record, initialTab: 'documents' })
+  }
+
+  async function openSearchRecord(recordId: string) {
+    setError(null)
+    try {
+      const record = records.find((item) => item.id === recordId) ?? await recordsApi.get(recordId)
+      setRecords((current) => (current.some((item) => item.id === record.id) ? current.map((item) => (item.id === record.id ? record : item)) : [...current, record]))
+      setEditingRecord(null)
+      setViewingReminder(null)
+      setRecordBackStack([])
+      setViewingRecord({ record, initialTab: 'details' })
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to open search result.')
+    }
+  }
+
+  async function openSearchReminder(reminderId: string) {
+    setError(null)
+    try {
+      const reminder = reminders.find((item) => item.id === reminderId) ?? await remindersApi.get(reminderId)
+      setReminders((current) => (current.some((item) => item.id === reminder.id) ? current.map((item) => (item.id === reminder.id ? reminder : item)) : [...current, reminder]))
+      setViewingRecord(null)
+      setRecordBackStack([])
+      setEditingReminder(null)
+      setViewingReminder({ reminder, fromAlert: false })
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to open search result.')
+    }
+  }
+
+  async function openSearchDocument(recordId: string, _documentId: string) {
+    setError(null)
+    try {
+      const record = records.find((item) => item.id === recordId) ?? await recordsApi.get(recordId)
+      setRecords((current) => (current.some((item) => item.id === record.id) ? current.map((item) => (item.id === record.id ? record : item)) : [...current, record]))
+      setEditingRecord(null)
+      setViewingReminder(null)
+      setRecordBackStack([])
+      setViewingRecord({ record, initialTab: 'documents' })
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to open search result.')
+    }
+  }
+
   function goBackRecordDetail() {
     const previous = recordBackStack[recordBackStack.length - 1]
     if (!previous) {
@@ -1042,6 +1103,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onViewAlerts={() => setIsAlertCenterOpen(true)}
           onOpenDigest={openDailyDigest}
           onViewRecords={() => showPage('records')}
+          onViewSearch={() => showPage('search')}
           onViewReminder={openReminderDetail}
         />
       ) : null}
@@ -1056,6 +1118,14 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onSelectedDateChange={setCalendarSelectedDate}
           onViewReminder={openReminderDetail}
           onVisibleMonthChange={setCalendarVisibleMonth}
+        />
+      ) : null}
+
+      {activePage === 'search' ? (
+        <SearchView
+          onViewRecord={(recordId) => void openSearchRecord(recordId)}
+          onViewReminder={(reminderId) => void openSearchReminder(reminderId)}
+          onViewDocument={(recordId, documentId) => void openSearchDocument(recordId, documentId)}
         />
       ) : null}
 
@@ -1131,9 +1201,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           <Home size={19} aria-hidden="true" />
           Home
         </button>
-        <button type="button" className={getNavClass('reminders')} onClick={() => showPage('reminders')} aria-current={activePage === 'reminders' ? 'page' : undefined}>
-          <Bell size={19} aria-hidden="true" />
-          Reminders
+        <button type="button" className={getNavClass('search')} onClick={() => showPage('search')} aria-current={activePage === 'search' ? 'page' : undefined}>
+          <Search size={19} aria-hidden="true" />
+          Search
         </button>
         <button type="button" className="bottom-nav-add" onClick={openAddReminder} aria-label="Add item">
           <Plus size={28} aria-hidden="true" />
@@ -1227,6 +1297,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onEnableCalendarSync={handleEnableCalendarSync}
           onDismiss={handleDismissAlert}
           onEdit={openDetailEdit}
+          onOpenLinkedDocument={openLinkedDocument}
           onOpenLinkedRecord={openLinkedRecord}
           onRenew={handleRenewReminder}
           onRequestDelete={requestDelete}
@@ -1249,6 +1320,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
             setRecordBackStack([])
           }}
           onEdit={openRecordDetailEdit}
+          onOpenLinkedDocument={openLinkedDocument}
           onOpenLinkedRecord={openLinkedRecord}
           onOpenLinkedReminder={openLinkedReminder}
           onProtectedStatusChange={handleProtectedRecordStatusChange}
@@ -2380,6 +2452,7 @@ function parseDateKey(value: string | null | undefined) {
 function getPageTitle(page: AppPage) {
   const titles: Record<AppPage, string> = {
     home: 'LifeLedger',
+    search: 'Search',
     reminders: 'Reminders',
     records: 'Records',
     settings: 'Settings',

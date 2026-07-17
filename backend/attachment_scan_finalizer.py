@@ -7,7 +7,16 @@ from app.attachments import (
     reconcile_attachment_scan_status,
 )
 from app.config import get_settings
-from app.repository_factory import create_record_attachment_repository
+from app.repository_factory import (
+    create_linked_item_repository,
+    create_record_attachment_repository,
+    create_record_repository,
+    create_repository,
+    create_search_index_repository,
+)
+from app.relationship_service import document_item_id
+from app.schemas import LinkedEntityType
+from app.search_service import SearchProjectionService
 from app.security_audit import log_security_event
 
 
@@ -40,7 +49,7 @@ def handler(event: dict[str, Any], _context) -> dict[str, str]:
 
     try:
         storage = create_document_storage_service(settings)
-        reconcile_attachment_scan_status(
+        attachment = reconcile_attachment_scan_status(
             attachment=attachment,
             repo=repo,
             storage=storage,
@@ -58,6 +67,7 @@ def handler(event: dict[str, Any], _context) -> dict[str, str]:
         )
         return {"status": "storage_error"}
 
+    sync_search_projection(settings, repo, attachment)
     return {"status": "processed"}
 
 
@@ -71,3 +81,30 @@ def parse_attachment_key(object_key: str) -> tuple[str, str, str] | None:
     if not owner_hash or not record_id or not attachment_id:
         return None
     return owner_hash, record_id, attachment_id
+
+
+def sync_search_projection(settings, attachment_repo, attachment) -> None:
+    try:
+        service = SearchProjectionService(
+            create_search_index_repository(settings),
+            create_record_repository(settings),
+            create_repository(settings),
+            attachment_repo,
+            create_linked_item_repository(settings),
+        )
+        service.sync_entity(
+            attachment.user_id,
+            LinkedEntityType.DOCUMENT,
+            document_item_id(attachment.record_id, attachment.attachment_id),
+        )
+        service.sync_entity(attachment.user_id, LinkedEntityType.RECORD, attachment.record_id)
+    except Exception:
+        log_security_event(
+            "attachment_search_projection_sync_failed",
+            user_id=attachment.user_id,
+            record_id=attachment.record_id,
+            attachment_id=attachment.attachment_id,
+            content_type=attachment.content_type,
+            size=attachment.size_bytes,
+            result="search_sync_failed",
+        )

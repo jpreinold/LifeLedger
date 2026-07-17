@@ -41,6 +41,7 @@ interface ReminderDetailDrawerProps {
   onEnableCalendarSync: (id: string) => Promise<boolean>
   onDismiss: (id: string) => Promise<void>
   onEdit: (reminder: Reminder) => void
+  onOpenLinkedDocument?: (recordId: string, documentId: string) => void
   onOpenLinkedRecord: (recordId: string) => void
   onRenew: (id: string, newDueDate: string) => Promise<boolean>
   onRequestDelete: (reminder: Reminder) => void
@@ -61,6 +62,7 @@ export function ReminderDetailDrawer({
   onEnableCalendarSync,
   onDismiss,
   onEdit,
+  onOpenLinkedDocument,
   onOpenLinkedRecord,
   onRenew,
   onRequestDelete,
@@ -311,9 +313,12 @@ export function ReminderDetailDrawer({
         <LinkedItemsPanel
           records={records}
           reminders={[]}
+          showAdd
           sourceId={reminder.id}
+          sourceTitle={reminder.title}
           sourceType="reminder"
-          title="Linked records"
+          title="Linked items"
+          onOpenDocument={onOpenLinkedDocument}
           onOpenRecord={onOpenLinkedRecord}
         />
 

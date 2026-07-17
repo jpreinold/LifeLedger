@@ -48,6 +48,12 @@ Parameters:
   LinkedItemsTableName:
     Type: String
     Default: lifeledger-linked-items-auth
+  SearchIndexTableName:
+    Type: String
+    Default: lifeledger-search-index-auth
+  SavedViewsTableName:
+    Type: String
+    Default: lifeledger-saved-views-auth
   DocumentStorageMode:
     Type: String
     Default: s3
@@ -393,6 +399,8 @@ Resources:
           RECORDS_TABLE_NAME: !Ref RecordsTable
           RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable
           LINKED_ITEMS_TABLE_NAME: !Ref LinkedItemsTable
+          SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable
+          SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
@@ -401,6 +409,8 @@ Resources:
           LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json
           LOCAL_RECORD_ATTACHMENTS_FILE: /tmp/lifeledger-record-attachments.json
           LOCAL_LINKED_ITEMS_FILE: /tmp/lifeledger-linked-items.json
+          LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json
+          LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
@@ -431,6 +441,10 @@ Resources:
             TableName: !Ref RecordAttachmentsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref LinkedItemsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SearchIndexTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SavedViewsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
@@ -740,6 +754,54 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  SearchIndexTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref SearchIndexTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: search_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: search_key
+          KeyType: RANGE
+
+  SavedViewsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref SavedViewsTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: saved_view_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: saved_view_id
+          KeyType: RANGE
+
   PreferencesTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -926,8 +988,16 @@ Resources:
           AUTH_MODE: !Ref AuthMode
           LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
+          REMINDERS_TABLE_NAME: !Ref RemindersTable
+          RECORDS_TABLE_NAME: !Ref RecordsTable
           RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable
+          LINKED_ITEMS_TABLE_NAME: !Ref LinkedItemsTable
+          SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable
+          LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
+          LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json
           LOCAL_RECORD_ATTACHMENTS_FILE: /tmp/lifeledger-record-attachments.json
+          LOCAL_LINKED_ITEMS_FILE: /tmp/lifeledger-linked-items.json
+          LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json
           DOCUMENT_STORAGE_MODE: !Ref DocumentStorageMode
           DOCUMENTS_QUARANTINE_BUCKET: !Ref DocumentsQuarantineBucket
           DOCUMENTS_CLEAN_BUCKET: !Ref DocumentsCleanBucket
@@ -936,7 +1006,15 @@ Resources:
           ATTACHMENT_MAX_PER_RECORD: !Ref AttachmentMaxPerRecord
       Policies:
         - DynamoDBCrudPolicy:
+            TableName: !Ref RemindersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RecordsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref RecordAttachmentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LinkedItemsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SearchIndexTable
         - Statement:
             - Effect: Allow
               Action:
@@ -1057,6 +1135,12 @@ Outputs:
   LinkedItemsTable:
     Description: DynamoDB linked items table name.
     Value: !Ref LinkedItemsTable
+  SearchIndexTable:
+    Description: DynamoDB unified search index table name.
+    Value: !Ref SearchIndexTable
+  SavedViewsTable:
+    Description: DynamoDB saved search views table name.
+    Value: !Ref SavedViewsTable
   PushSubscriptionsTable:
     Description: DynamoDB push subscriptions table name.
     Value: !Ref PushSubscriptionsTable
@@ -1072,3 +1156,4 @@ Outputs:
   UserPoolClientId:
     Description: Cognito User Pool app client ID for the frontend.
     Value: !Ref LifeLedgerUserPoolClient
+

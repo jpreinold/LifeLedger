@@ -31,6 +31,8 @@ LAMBDA_LOCAL_DATA_FILE = "/tmp/lifeledger-reminders.json"
 LAMBDA_LOCAL_RECORDS_FILE = "/tmp/lifeledger-records.json"
 LAMBDA_LOCAL_RECORD_ATTACHMENTS_FILE = "/tmp/lifeledger-record-attachments.json"
 LAMBDA_LOCAL_LINKED_ITEMS_FILE = "/tmp/lifeledger-linked-items.json"
+LAMBDA_LOCAL_SEARCH_INDEX_FILE = "/tmp/lifeledger-search-index.json"
+LAMBDA_LOCAL_SAVED_VIEWS_FILE = "/tmp/lifeledger-saved-views.json"
 LAMBDA_LOCAL_PREFERENCES_FILE = "/tmp/lifeledger-preferences.json"
 LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE = "/tmp/lifeledger-push-subscriptions.json"
 LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE = "/tmp/lifeledger-google-calendar-connections.json"
@@ -52,6 +54,8 @@ DEFAULT_GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME = "lifeledger-google-calendar-con
 DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME = "lifeledger-google-oauth-states-auth"
 DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME = "lifeledger-record-attachments-auth"
 DEFAULT_LINKED_ITEMS_TABLE_NAME = "lifeledger-linked-items-auth"
+DEFAULT_SEARCH_INDEX_TABLE_NAME = "lifeledger-search-index-auth"
+DEFAULT_SAVED_VIEWS_TABLE_NAME = "lifeledger-saved-views-auth"
 DEFAULT_GOOGLE_CALENDAR_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
@@ -74,11 +78,15 @@ class Settings:
     google_oauth_states_table_name: str = DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME
     record_attachments_table_name: str = DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME
     linked_items_table_name: str = DEFAULT_LINKED_ITEMS_TABLE_NAME
+    search_index_table_name: str = DEFAULT_SEARCH_INDEX_TABLE_NAME
+    saved_views_table_name: str = DEFAULT_SAVED_VIEWS_TABLE_NAME
     aws_region: str = "us-east-1"
     local_data_file: str = ""
     local_records_file: str = ""
     local_record_attachments_file: str = ""
     local_linked_items_file: str = ""
+    local_search_index_file: str = ""
+    local_saved_views_file: str = ""
     local_preferences_file: str = ""
     local_push_subscriptions_file: str = ""
     local_google_calendar_connections_file: str = ""
@@ -196,6 +204,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME,
         linked_items_table_name=source.get("LINKED_ITEMS_TABLE_NAME", DEFAULT_LINKED_ITEMS_TABLE_NAME).strip()
         or DEFAULT_LINKED_ITEMS_TABLE_NAME,
+        search_index_table_name=source.get("SEARCH_INDEX_TABLE_NAME", DEFAULT_SEARCH_INDEX_TABLE_NAME).strip()
+        or DEFAULT_SEARCH_INDEX_TABLE_NAME,
+        saved_views_table_name=source.get("SAVED_VIEWS_TABLE_NAME", DEFAULT_SAVED_VIEWS_TABLE_NAME).strip()
+        or DEFAULT_SAVED_VIEWS_TABLE_NAME,
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
         local_records_file=source.get("LOCAL_RECORDS_FILE", "").strip() or default_local_records_file(source),
@@ -203,6 +215,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or default_local_record_attachments_file(source),
         local_linked_items_file=source.get("LOCAL_LINKED_ITEMS_FILE", "").strip()
         or default_local_linked_items_file(source),
+        local_search_index_file=source.get("LOCAL_SEARCH_INDEX_FILE", "").strip()
+        or default_local_search_index_file(source),
+        local_saved_views_file=source.get("LOCAL_SAVED_VIEWS_FILE", "").strip()
+        or default_local_saved_views_file(source),
         local_preferences_file=source.get("LOCAL_PREFERENCES_FILE", "").strip()
         or default_local_preferences_file(source),
         local_push_subscriptions_file=source.get("LOCAL_PUSH_SUBSCRIPTIONS_FILE", "").strip()
@@ -284,6 +300,25 @@ def default_local_linked_items_file(env: Mapping[str, str] | None = None) -> str
     return str(backend_root / "data" / "linked-items.json")
 
 
+def default_local_search_index_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_SEARCH_INDEX_FILE
+
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "search-index.json")
+
+
+def default_local_saved_views_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_SAVED_VIEWS_FILE
+
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "saved-views.json")
+
 def default_local_preferences_file(env: Mapping[str, str] | None = None) -> str:
     source = os.environ if env is None else env
 
@@ -342,3 +377,6 @@ def parse_int(value: str, default: int) -> int:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return load_settings()
+
+
+

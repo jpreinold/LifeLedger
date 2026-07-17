@@ -15,6 +15,9 @@ class RecordAttachmentRepository(Protocol):
     def list_for_record(self, user_id: str, record_id: str) -> list[RecordAttachment]:
         ...
 
+    def list_for_user(self, user_id: str) -> list[RecordAttachment]:
+        ...
+
     def get_attachment(self, user_id: str, record_id: str, attachment_id: str) -> RecordAttachment | None:
         ...
 
@@ -54,6 +57,10 @@ class LocalRecordAttachmentRepository:
                 if attachment.user_id == user_id
                 and attachment.record_attachment_key.startswith(prefix)
             ]
+
+    def list_for_user(self, user_id: str) -> list[RecordAttachment]:
+        with self._lock:
+            return [attachment for attachment in self._read_all_unlocked() if attachment.user_id == user_id]
 
     def get_attachment(self, user_id: str, record_id: str, attachment_id: str) -> RecordAttachment | None:
         key = record_attachment_key(record_id, attachment_id)
@@ -147,6 +154,25 @@ class DynamoRecordAttachmentRepository:
         query_kwargs: dict[str, Any] = {
             "KeyConditionExpression": "user_id = :user_id AND begins_with(record_attachment_key, :prefix)",
             "ExpressionAttributeValues": {":user_id": user_id, ":prefix": f"{record_id}#"},
+        }
+
+        while True:
+            response = self.table.query(**query_kwargs)
+            items.extend(response.get("Items", []))
+
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+
+            query_kwargs["ExclusiveStartKey"] = last_key
+
+        return [self._from_item(item) for item in items]
+
+    def list_for_user(self, user_id: str) -> list[RecordAttachment]:
+        items: list[dict[str, Any]] = []
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "user_id = :user_id",
+            "ExpressionAttributeValues": {":user_id": user_id},
         }
 
         while True:

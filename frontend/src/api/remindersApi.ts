@@ -44,6 +44,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const remindersApi = {
   list: () => request<Reminder[]>('/reminders'),
 
+  get: (id: string) => request<Reminder>(`/reminders/${id}`),
+
   alerts: () => request<ReminderAlert[]>('/alerts'),
 
   create: (input: ReminderInput) =>

@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 from secrets import token_urlsafe
 from uuid import uuid4
@@ -58,6 +59,7 @@ from app.google_calendar_service import (
     build_google_calendar_event,
 )
 from app.linked_items_repository import LinkedItemRepository
+from app.search_repository import SavedSearchViewRepository, SearchIndexRepository
 from app.maintenance import (
     advance_maintenance_details,
     get_maintenance_computed_label,
@@ -65,7 +67,7 @@ from app.maintenance import (
     get_maintenance_status_label,
     prepare_maintenance_details,
 )
-from app.models import DynamicRecordField, GoogleCalendarConnection, GoogleOAuthState, PushSubscription, Record, RecordAttachment, Reminder
+from app.models import DynamicRecordField, GoogleCalendarConnection, GoogleOAuthState, LinkedItem, PushSubscription, Record, RecordAttachment, Reminder
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
@@ -89,13 +91,21 @@ from app.repository_factory import (
     create_record_attachment_repository,
     create_record_repository,
     create_repository,
+    create_saved_search_view_repository,
+    create_search_index_repository,
 )
 from app.records_repository import RecordRepository
 from app.relationship_service import (
+    ItemResolver,
     assert_supported_record_link,
     create_record_link,
+    create_relationship,
+    delete_relationship,
+    document_item_id,
     get_entity_neighborhood,
+    read_relationship,
     require_link_for_entity,
+    update_relationship,
 )
 from app.schemas import (
     AlertSnoozeRequest,
@@ -118,12 +128,21 @@ from app.schemas import (
     LinkedEntityType,
     LinkedItemResponse,
     LinkedItemsResponse,
+    RelationshipCandidatesResponse,
+    RelationshipCreateRequest,
+    RelationshipResponse,
+    RelationshipUpdateRequest,
     MaintenanceDetails,
     PushConfigurationResponse,
     PushStatusResponse,
     PushSubscriptionCreate,
     PushSubscriptionResponse,
     PushTestResponse,
+    SavedSearchViewCreate,
+    SavedSearchViewResponse,
+    SavedSearchViewUpdate,
+    SearchResponse,
+    SearchSort,
     ProtectedRecordPayload,
     ProtectedRecordStatusResponse,
     ReminderCreate,
@@ -148,6 +167,14 @@ from app.schemas import (
     RenewalDetails,
     RepeatOption,
     normalize_dynamic_field_value,
+)
+from app.search_service import (
+    SavedSearchViewService,
+    SearchProjectionService,
+    SearchQueryService,
+    SearchValidationError,
+    to_saved_view_response,
+    validate_search_request,
 )
 from app.security_audit import log_security_event
 from app.push_sender import (
@@ -210,6 +237,8 @@ google_calendar_connection_repository = create_google_calendar_connection_reposi
 google_oauth_state_repository = create_google_oauth_state_repository()
 record_attachment_repository = create_record_attachment_repository()
 linked_item_repository = create_linked_item_repository()
+search_index_repository = create_search_index_repository()
+saved_search_view_repository = create_saved_search_view_repository()
 
 
 def get_app_settings() -> Settings:
@@ -232,6 +261,14 @@ def get_linked_item_repository() -> LinkedItemRepository:
     return linked_item_repository
 
 
+def get_search_index_repository() -> SearchIndexRepository:
+    return search_index_repository
+
+
+def get_saved_search_view_repository() -> SavedSearchViewRepository:
+    return saved_search_view_repository
+
+
 def get_preferences_repository() -> PreferencesRepository:
     return preferences_repository
 
@@ -248,6 +285,27 @@ def get_google_oauth_state_repository() -> GoogleOAuthStateRepository:
     return google_oauth_state_repository
 
 
+
+def get_search_projection_service(
+    search_repo: SearchIndexRepository = Depends(get_search_index_repository),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> SearchProjectionService:
+    return SearchProjectionService(search_repo, record_repo, reminder_repo, attachment_repo, linked_repo)
+
+
+def get_search_query_service(
+    search_repo: SearchIndexRepository = Depends(get_search_index_repository),
+) -> SearchQueryService:
+    return SearchQueryService(search_repo)
+
+
+def get_saved_search_view_service(
+    saved_repo: SavedSearchViewRepository = Depends(get_saved_search_view_repository),
+) -> SavedSearchViewService:
+    return SavedSearchViewService(saved_repo)
 def get_google_calendar_service(app_settings: Settings = Depends(get_app_settings)) -> GoogleCalendarService:
     return GoogleCalendarService(app_settings)
 
@@ -268,6 +326,138 @@ def get_document_storage_service(app_settings: Settings = Depends(get_app_settin
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
+
+@app.get("/search", response_model=SearchResponse)
+def search_items(
+    q: str = Query(default="", max_length=120),
+    item_types: str | None = Query(default=None, alias="itemTypes"),
+    statuses: str | None = Query(default=None),
+    archived: bool = Query(default=False),
+    date_from: date | None = Query(default=None, alias="dateFrom"),
+    date_to: date | None = Query(default=None, alias="dateTo"),
+    category: str | None = Query(default=None, max_length=80),
+    owner: str | None = Query(default=None, max_length=120),
+    has_documents: bool | None = Query(default=None, alias="hasDocuments"),
+    has_linked_items: bool | None = Query(default=None, alias="hasLinkedItems"),
+    sort: SearchSort = Query(default=SearchSort.RELEVANCE),
+    page_size: int = Query(default=20, ge=1, le=50, alias="pageSize"),
+    cursor: str | None = Query(default=None, max_length=512),
+    current_user: UserContext = Depends(get_current_user),
+    search_service: SearchQueryService = Depends(get_search_query_service),
+) -> SearchResponse:
+    started = time.perf_counter()
+    try:
+        request = validate_search_request(
+            query=q,
+            item_types=item_types,
+            statuses=statuses,
+            include_archived=archived,
+            date_from=date_from,
+            date_to=date_to,
+            category=category,
+            owner=owner,
+            has_documents=has_documents,
+            has_linked_items=has_linked_items,
+            sort=sort,
+            page_size=page_size,
+            cursor=cursor,
+        )
+        result = search_service.search(current_user.user_id, request)
+    except SearchValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    logger.info(
+        "search_request",
+        extra={
+            "operation": "search",
+            "query_present": bool(q.strip()),
+            "query_length": len(q.strip()),
+            "filter_types": sorted(key for key, value in result.applied_filters.items() if value not in (None, "", [], False)),
+            "sort": sort.value,
+            "page_size": page_size,
+            "result_count": result.result_count,
+            "has_next_page": result.next_cursor is not None,
+            "latency_ms": latency_ms,
+        },
+    )
+    return result
+
+
+@app.get("/saved-views", response_model=list[SavedSearchViewResponse])
+def list_saved_views(
+    current_user: UserContext = Depends(get_current_user),
+    service: SavedSearchViewService = Depends(get_saved_search_view_service),
+) -> list[SavedSearchViewResponse]:
+    return [to_saved_view_response(view) for view in service.list_views(current_user.user_id)]
+
+
+@app.post("/saved-views", response_model=SavedSearchViewResponse, status_code=status.HTTP_201_CREATED)
+def create_saved_view(
+    payload: SavedSearchViewCreate,
+    current_user: UserContext = Depends(get_current_user),
+    service: SavedSearchViewService = Depends(get_saved_search_view_service),
+) -> SavedSearchViewResponse:
+    saved = service.create_view(
+        user_id=current_user.user_id,
+        saved_view_id=str(uuid4()),
+        name=payload.name,
+        query=payload.query,
+        filters=payload.filters,
+        sort=payload.sort,
+        icon=payload.icon,
+        is_pinned=payload.is_pinned,
+        now=utc_now(),
+    )
+    return to_saved_view_response(saved)
+
+
+@app.get("/saved-views/{saved_view_id}", response_model=SavedSearchViewResponse)
+def get_saved_view(
+    saved_view_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    service: SavedSearchViewService = Depends(get_saved_search_view_service),
+) -> SavedSearchViewResponse:
+    view = service.get_view(current_user.user_id, saved_view_id)
+    if view is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved view not found")
+    return to_saved_view_response(view)
+
+
+@app.patch("/saved-views/{saved_view_id}", response_model=SavedSearchViewResponse)
+def update_saved_view(
+    saved_view_id: str,
+    payload: SavedSearchViewUpdate,
+    current_user: UserContext = Depends(get_current_user),
+    service: SavedSearchViewService = Depends(get_saved_search_view_service),
+) -> SavedSearchViewResponse:
+    view = service.get_view(current_user.user_id, saved_view_id)
+    if view is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved view not found")
+    updated = service.update_view(
+        view,
+        name=payload.name,
+        query=payload.query,
+        filters=payload.filters,
+        sort=payload.sort,
+        icon=payload.icon,
+        is_pinned=payload.is_pinned,
+        now=utc_now(),
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved view not found")
+    return to_saved_view_response(updated)
+
+
+@app.delete("/saved-views/{saved_view_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_saved_view(
+    saved_view_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    service: SavedSearchViewService = Depends(get_saved_search_view_service),
+) -> Response:
+    if not service.delete_view(current_user.user_id, saved_view_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved view not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @app.get("/reminders", response_model=list[ReminderResponse])
 def list_reminders(
@@ -325,6 +515,7 @@ def create_record(
     payload: RecordCreate,
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
     now = utc_now()
     record_fields = payload.model_dump()
@@ -337,7 +528,9 @@ def create_record(
         updated_at=now,
     )
 
-    return to_record_response(repo.create_record(record))
+    saved = repo.create_record(record)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, saved.id, "record_create")
+    return to_record_response(saved)
 
 
 @app.get("/records/{record_id}", response_model=RecordResponse)
@@ -355,6 +548,7 @@ def update_record(
     payload: RecordUpdate,
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     updates = payload.model_dump(exclude_unset=True)
@@ -364,7 +558,9 @@ def update_record(
     if "tags" in updates and updates["tags"] is None:
         updates["tags"] = []
     updated = Record.model_validate({**record.model_dump(), **updates, "updated_at": utc_now()})
-    return to_record_response(repo.update_record(updated))
+    saved = repo.update_record(updated)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, saved.id, "record_update")
+    return to_record_response(saved)
 
 
 @app.post("/records/{record_id}/fields", response_model=RecordResponse, status_code=status.HTTP_201_CREATED)
@@ -374,6 +570,7 @@ def add_record_field(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     if len(record.dynamic_fields) >= 30:
@@ -410,6 +607,7 @@ def add_record_field(
         is_sensitive=field.is_sensitive,
         result="success",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, saved.id, "record_field_create")
     return to_record_response(saved)
 
 
@@ -421,6 +619,7 @@ def update_record_field(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     existing = find_dynamic_field(record, field_id)
@@ -488,6 +687,7 @@ def update_record_field(
         is_sensitive=updated_field.is_sensitive,
         result="success",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, saved.id, "record_field_update")
     return to_record_response(saved)
 
 
@@ -531,6 +731,7 @@ def delete_record_field(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     existing = find_dynamic_field(record, field_id)
@@ -552,6 +753,7 @@ def delete_record_field(
         field_id=field_id,
         result="success",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, saved.id, "record_field_delete")
     return to_record_response(saved)
 
 @app.post("/records/{record_id}/archive", response_model=RecordResponse)
@@ -559,11 +761,13 @@ def archive_record(
     record_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
     archived = repo.archive_record(current_user.user_id, record_id)
     if archived is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, archived.id, "record_archive")
     return to_record_response(archived)
 
 
@@ -572,11 +776,13 @@ def restore_record(
     record_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
     restored = repo.unarchive_record(current_user.user_id, record_id)
     if restored is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, restored.id, "record_restore")
     return to_record_response(restored)
 
 
@@ -588,18 +794,29 @@ def delete_record(
     attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
     document_storage=Depends(get_document_storage_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> Response:
     require_record(repo, current_user.user_id, record_id)
+    deleted_links = linked_repo.list_links_for_entity(current_user.user_id, LinkedEntityType.RECORD, record_id)
     cleanup_record_attachments_before_delete(
         current_user.user_id,
         record_id,
         attachment_repo,
         document_storage,
+        linked_repo,
     )
     linked_repo.delete_links_for_entity(current_user.user_id, LinkedEntityType.RECORD, record_id)
     deleted = repo.delete_record(current_user.user_id, record_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    sync_linked_search_neighbors_safe(
+        search_service,
+        current_user.user_id,
+        deleted_links,
+        "record_delete_relationship_cleanup",
+        excluded_entities={(LinkedEntityType.RECORD, record_id)},
+    )
+    delete_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "record_delete")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -611,6 +828,7 @@ def list_record_links(
     record_repo: RecordRepository = Depends(get_record_repository),
     reminder_repo: ReminderRepository = Depends(get_repository),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
 ) -> LinkedItemsResponse:
     require_record(record_repo, current_user.user_id, record_id)
     return get_entity_neighborhood(
@@ -620,6 +838,7 @@ def list_record_links(
         linked_repo,
         record_repo,
         reminder_repo,
+        attachment_repo,
     )
 
 
@@ -631,6 +850,8 @@ def add_record_link(
     record_repo: RecordRepository = Depends(get_record_repository),
     reminder_repo: ReminderRepository = Depends(get_repository),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> LinkedItemResponse:
     source_record = require_record(record_repo, current_user.user_id, record_id)
     assert_supported_record_link(payload)
@@ -642,6 +863,7 @@ def add_record_link(
         record_repo,
         reminder_repo,
         utc_now(),
+        attachment_repo,
     )
     log_security_event(
         "linked_item_created",
@@ -653,6 +875,8 @@ def add_record_link(
         relationship_type=payload.relationship_type.value,
         result="created",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "relationship_create")
+    sync_search_entity_safe(search_service, current_user.user_id, payload.target_type, payload.target_id, "relationship_create")
     return response
 
 
@@ -663,6 +887,7 @@ def remove_record_link(
     current_user: UserContext = Depends(get_current_user),
     record_repo: RecordRepository = Depends(get_record_repository),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> Response:
     require_record(record_repo, current_user.user_id, record_id)
     link = require_link_for_entity(current_user.user_id, link_id, LinkedEntityType.RECORD, record_id, linked_repo)
@@ -677,6 +902,142 @@ def remove_record_link(
         relationship_type=link.relationship_type.value,
         result="removed",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, link.source_type, link.source_id, "relationship_delete")
+    sync_search_entity_safe(search_service, current_user.user_id, link.target_type, link.target_id, "relationship_delete")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/relationships/candidates", response_model=RelationshipCandidatesResponse)
+def list_relationship_candidates(
+    source_item_type: LinkedEntityType = Query(...),
+    source_item_id: str = Query(..., min_length=1, max_length=240),
+    item_type: LinkedEntityType | None = Query(default=None),
+    q: str = Query(default="", max_length=120),
+    include_archived: bool = Query(default=False),
+    limit: int = Query(default=25, ge=1, le=50),
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> RelationshipCandidatesResponse:
+    resolver = ItemResolver(record_repo, reminder_repo, attachment_repo)
+    return resolver.candidates(
+        current_user.user_id,
+        source_item_type,
+        source_item_id,
+        linked_repo,
+        item_type=item_type,
+        query=q,
+        include_archived=include_archived,
+        limit=limit,
+    )
+
+
+@app.post("/relationships", response_model=RelationshipResponse, status_code=status.HTTP_201_CREATED)
+def create_relationship_route(
+    payload: RelationshipCreateRequest,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
+) -> RelationshipResponse:
+    response = create_relationship(
+        current_user.user_id,
+        payload,
+        linked_repo,
+        record_repo,
+        reminder_repo,
+        utc_now(),
+        attachment_repo,
+    )
+    log_security_event(
+        "relationship_created",
+        user_id=current_user.user_id,
+        relationship_id=response.relationship_id,
+        source_type=payload.source_item_type.value,
+        target_type=payload.target_item_type.value,
+        relationship_type=payload.relationship_type.value,
+        result="created",
+    )
+    sync_search_entity_safe(search_service, current_user.user_id, payload.source_item_type, payload.source_item_id, "relationship_create")
+    sync_search_entity_safe(search_service, current_user.user_id, payload.target_item_type, payload.target_item_id, "relationship_create")
+    return response
+
+
+@app.get("/relationships/{relationship_id}", response_model=RelationshipResponse)
+def get_relationship_route(
+    relationship_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> RelationshipResponse:
+    return read_relationship(
+        current_user.user_id,
+        relationship_id,
+        linked_repo,
+        record_repo,
+        reminder_repo,
+        attachment_repo,
+    )
+
+
+@app.patch("/relationships/{relationship_id}", response_model=RelationshipResponse)
+def update_relationship_route(
+    relationship_id: str,
+    payload: RelationshipUpdateRequest,
+    current_user: UserContext = Depends(get_current_user),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
+) -> RelationshipResponse:
+    response = update_relationship(
+        current_user.user_id,
+        relationship_id,
+        payload,
+        linked_repo,
+        record_repo,
+        reminder_repo,
+        utc_now(),
+        attachment_repo,
+    )
+    log_security_event(
+        "relationship_updated",
+        user_id=current_user.user_id,
+        relationship_id=relationship_id,
+        relationship_type=response.relationship_type.value,
+        result="updated",
+    )
+    sync_search_entity_safe(search_service, current_user.user_id, response.source_item.entity_type, response.source_item.id, "relationship_update")
+    sync_search_entity_safe(search_service, current_user.user_id, response.target_item.entity_type, response.target_item.id, "relationship_update")
+    return response
+
+
+@app.delete("/relationships/{relationship_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_relationship_route(
+    relationship_id: str,
+    current_user: UserContext = Depends(get_current_user),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
+) -> Response:
+    link = delete_relationship(current_user.user_id, relationship_id, linked_repo)
+    log_security_event(
+        "relationship_removed",
+        user_id=current_user.user_id,
+        relationship_id=relationship_id,
+        source_type=link.source_type.value,
+        target_type=link.target_type.value,
+        relationship_type=link.relationship_type.value,
+        result="removed",
+    )
+    sync_search_entity_safe(search_service, current_user.user_id, link.source_type, link.source_id, "relationship_delete")
+    sync_search_entity_safe(search_service, current_user.user_id, link.target_type, link.target_id, "relationship_delete")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -713,6 +1074,7 @@ def create_record_attachment_upload_intent(
     attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
     document_storage=Depends(get_document_storage_service),
     app_settings: Settings = Depends(get_app_settings),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordAttachmentUploadIntentResponse:
     set_attachment_no_store(response)
     require_record(record_repo, current_user.user_id, record_id)
@@ -739,6 +1101,9 @@ def create_record_attachment_upload_intent(
         )
 
     saved = attachment_repo.create_attachment(attachment)
+    document_entity_id = document_item_id(record_id, saved.attachment_id)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_create")
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_create")
     try:
         presigned_upload = document_storage.create_presigned_upload(
             saved,
@@ -747,6 +1112,8 @@ def create_record_attachment_upload_intent(
         )
     except (DocumentStorageConfigurationError, DocumentStorageOperationError) as exc:
         attachment_repo.delete_attachment_metadata(current_user.user_id, record_id, saved.attachment_id)
+        delete_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_create_rollback")
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_create_rollback")
         raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
 
     log_security_event(
@@ -776,6 +1143,7 @@ def complete_record_attachment_upload(
     attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
     document_storage=Depends(get_document_storage_service),
     app_settings: Settings = Depends(get_app_settings),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordAttachmentResponse:
     set_attachment_no_store(response)
     require_record(record_repo, current_user.user_id, record_id)
@@ -796,6 +1164,9 @@ def complete_record_attachment_upload(
         raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
 
     saved = attachment_repo.update_attachment(completed)
+    document_entity_id = document_item_id(record_id, attachment_id)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_upload_complete")
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_upload_complete")
     log_security_event(
         "attachment_upload_completed",
         user_id=current_user.user_id,
@@ -835,11 +1206,16 @@ def refresh_record_attachment_status(
     attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
     document_storage=Depends(get_document_storage_service),
     app_settings: Settings = Depends(get_app_settings),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordAttachmentResponse:
     set_attachment_no_store(response)
     require_record(record_repo, current_user.user_id, record_id)
     attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
-    return to_attachment_response(maybe_reconcile_attachment(attachment, attachment_repo, document_storage, app_settings))
+    refreshed = maybe_reconcile_attachment(attachment, attachment_repo, document_storage, app_settings)
+    document_entity_id = document_item_id(record_id, attachment_id)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_refresh")
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_refresh")
+    return to_attachment_response(refreshed)
 
 
 @app.post("/records/{record_id}/attachments/{attachment_id}/download-url", response_model=RecordAttachmentDownloadUrlResponse)
@@ -939,11 +1315,29 @@ def delete_record_attachment(
     current_user: UserContext = Depends(get_current_user),
     record_repo: RecordRepository = Depends(get_record_repository),
     attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
     document_storage=Depends(get_document_storage_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> Response:
     require_record(record_repo, current_user.user_id, record_id)
     attachment = require_attachment(attachment_repo, current_user.user_id, record_id, attachment_id)
+    document_entity_id = document_item_id(record_id, attachment_id)
+    deleted_links = linked_repo.list_links_for_entity(current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id)
     cleanup_attachment_or_raise(attachment, attachment_repo, document_storage)
+    linked_repo.delete_links_for_entity(
+        current_user.user_id,
+        LinkedEntityType.DOCUMENT,
+        document_entity_id,
+    )
+    sync_linked_search_neighbors_safe(
+        search_service,
+        current_user.user_id,
+        deleted_links,
+        "document_delete_relationship_cleanup",
+        excluded_entities={(LinkedEntityType.DOCUMENT, document_entity_id)},
+    )
+    delete_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_delete")
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_delete")
     log_security_event(
         "attachment_deleted",
         user_id=current_user.user_id,
@@ -1408,12 +1802,15 @@ def dismiss_reminder_alert(
     reminder_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
     updated = reminder.model_copy(update={**dismiss_alert_state(now), "updated_at": now})
 
-    return to_response(repo.update_reminder(updated))
+    saved = repo.update_reminder(updated)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_update")
+    return to_response(saved)
 
 
 @app.post("/reminders/{reminder_id}/alert/snooze", response_model=ReminderResponse)
@@ -1422,6 +1819,7 @@ def snooze_reminder_alert(
     payload: AlertSnoozeRequest | None = Body(default=None),
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
@@ -1445,7 +1843,9 @@ def snooze_reminder_alert(
             ),
         }
     )
-    return to_response(repo.update_reminder(updated))
+    saved = repo.update_reminder(updated)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_update")
+    return to_response(saved)
 
 
 @app.post("/reminders/{reminder_id}/calendar-sync/enable", response_model=ReminderResponse)
@@ -1456,6 +1856,7 @@ def enable_reminder_calendar_sync(
     connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
     app_settings: Settings = Depends(get_app_settings),
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(reminder_repo, current_user.user_id, reminder_id)
     now = utc_now()
@@ -1486,7 +1887,9 @@ def enable_reminder_calendar_sync(
             "updated_at": now,
         }
     )
-    return to_response(reminder_repo.update_reminder(synced))
+    saved = reminder_repo.update_reminder(synced)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_calendar_sync")
+    return to_response(saved)
 
 
 @app.post("/reminders/{reminder_id}/calendar-sync/disable", response_model=ReminderResponse)
@@ -1497,11 +1900,14 @@ def disable_reminder_calendar_sync(
     connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
     app_settings: Settings = Depends(get_app_settings),
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(reminder_repo, current_user.user_id, reminder_id)
     now = utc_now()
     if not reminder.calendar_sync_enabled and not reminder.calendar_event_id:
-        return to_response(reminder_repo.update_reminder(clear_calendar_sync_metadata(reminder, now)))
+        saved = reminder_repo.update_reminder(clear_calendar_sync_metadata(reminder, now))
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_calendar_sync")
+        return to_response(saved)
 
     if reminder.calendar_event_id:
         connection = require_ready_google_connection(connection_repo, current_user.user_id, app_settings, calendar_service, now)
@@ -1518,7 +1924,9 @@ def disable_reminder_calendar_sync(
             save_calendar_sync_error(reminder_repo, reminder, now, exc.safe_message, CalendarSyncStatus.ERROR)
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.safe_message) from exc
 
-    return to_response(reminder_repo.update_reminder(clear_calendar_sync_metadata(reminder, now)))
+    saved = reminder_repo.update_reminder(clear_calendar_sync_metadata(reminder, now))
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_calendar_sync")
+    return to_response(saved)
 
 
 @app.post("/reminders", response_model=ReminderResponse, status_code=status.HTTP_201_CREATED)
@@ -1526,6 +1934,7 @@ def create_reminder(
     payload: ReminderCreate,
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     now = utc_now()
     reminder_fields = prepare_create_fields(payload)
@@ -1550,7 +1959,9 @@ def create_reminder(
         }
     )
 
-    return to_response(repo.create_reminder(reminder))
+    saved = repo.create_reminder(reminder)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_create")
+    return to_response(saved)
 
 
 @app.get("/reminders/{reminder_id}", response_model=ReminderResponse)
@@ -1580,6 +1991,7 @@ def list_reminder_links(
     reminder_repo: ReminderRepository = Depends(get_repository),
     record_repo: RecordRepository = Depends(get_record_repository),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
 ) -> LinkedItemsResponse:
     require_reminder(reminder_repo, current_user.user_id, reminder_id)
     return get_entity_neighborhood(
@@ -1589,6 +2001,7 @@ def list_reminder_links(
         linked_repo,
         record_repo,
         reminder_repo,
+        attachment_repo,
         include_reminders=False,
     )
 
@@ -1600,6 +2013,7 @@ def remove_reminder_link(
     current_user: UserContext = Depends(get_current_user),
     reminder_repo: ReminderRepository = Depends(get_repository),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> Response:
     require_reminder(reminder_repo, current_user.user_id, reminder_id)
     link = require_link_for_entity(current_user.user_id, link_id, LinkedEntityType.REMINDER, reminder_id, linked_repo)
@@ -1614,6 +2028,8 @@ def remove_reminder_link(
         relationship_type=link.relationship_type.value,
         result="removed",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, link.source_type, link.source_id, "relationship_delete")
+    sync_search_entity_safe(search_service, current_user.user_id, link.target_type, link.target_id, "relationship_delete")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1626,6 +2042,7 @@ def update_reminder(
     connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
     app_settings: Settings = Depends(get_app_settings),
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     updates = payload.model_dump(exclude_unset=True)
@@ -1665,6 +2082,7 @@ def update_reminder(
         saved,
         now,
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, synced.id, "reminder_update")
     return to_response(synced)
 
 
@@ -1677,6 +2095,7 @@ def delete_reminder(
     connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
     app_settings: Settings = Depends(get_app_settings),
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> Response:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     cleanup_calendar_event_before_delete(
@@ -1687,11 +2106,20 @@ def delete_reminder(
         reminder,
         utc_now(),
     )
+    deleted_links = linked_repo.list_links_for_entity(current_user.user_id, LinkedEntityType.REMINDER, reminder_id)
     linked_repo.delete_links_for_entity(current_user.user_id, LinkedEntityType.REMINDER, reminder_id)
     deleted = repo.delete_reminder(current_user.user_id, reminder_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")
 
+    sync_linked_search_neighbors_safe(
+        search_service,
+        current_user.user_id,
+        deleted_links,
+        "reminder_delete_relationship_cleanup",
+        excluded_entities={(LinkedEntityType.REMINDER, reminder_id)},
+    )
+    delete_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, reminder_id, "reminder_delete")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1700,6 +2128,7 @@ def clear_reminder_snooze(
     reminder_id: str,
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
@@ -1720,7 +2149,9 @@ def clear_reminder_snooze(
             new_due_date=reminder.due_date,
         )
 
-    return to_response(repo.update_reminder(reminder.model_copy(update=updates)))
+    saved = repo.update_reminder(reminder.model_copy(update=updates))
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_update")
+    return to_response(saved)
 
 
 @app.post("/reminders/{reminder_id}/snooze", response_model=ReminderResponse)
@@ -1729,6 +2160,7 @@ def snooze_reminder(
     payload: ReminderSnoozeRequest,
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     if reminder.completed:
@@ -1756,7 +2188,9 @@ def snooze_reminder(
             ),
         }
     )
-    return to_response(repo.update_reminder(updated))
+    saved = repo.update_reminder(updated)
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_update")
+    return to_response(saved)
 
 
 @app.post("/reminders/{reminder_id}/renew", response_model=ReminderResponse)
@@ -1770,6 +2204,7 @@ def renew_reminder(
     connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
     app_settings: Settings = Depends(get_app_settings),
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     if reminder.archived_at is not None:
@@ -1815,6 +2250,7 @@ def renew_reminder(
         saved,
         now,
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, synced.id, "reminder_update")
     return to_response(synced)
 
 
@@ -1826,6 +2262,7 @@ def complete_reminder(
     connection_repo: GoogleCalendarConnectionRepository = Depends(get_google_calendar_connection_repository),
     app_settings: Settings = Depends(get_app_settings),
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     now = utc_now()
@@ -1874,6 +2311,7 @@ def complete_reminder(
                 saved,
                 now,
             )
+            sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, synced.id, "reminder_update")
             return to_response(synced)
 
     if reminder.repeat == RepeatOption.NONE:
@@ -1893,7 +2331,9 @@ def complete_reminder(
                 ),
             }
         )
-        return to_response(repo.update_reminder(completed_reminder))
+        saved = repo.update_reminder(completed_reminder)
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, saved.id, "reminder_complete")
+        return to_response(saved)
 
     next_due_date = advance_due_date(reminder.due_date, reminder.repeat, today=now.date())
     birthday_details = reminder.birthday_details
@@ -1933,6 +2373,7 @@ def complete_reminder(
         saved,
         now,
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, synced.id, "reminder_update")
     return to_response(synced)
 
 
@@ -2448,9 +2889,16 @@ def cleanup_record_attachments_before_delete(
     record_id: str,
     repo: RecordAttachmentRepository,
     document_storage,
+    linked_repo: LinkedItemRepository | None = None,
 ) -> None:
     for attachment in repo.list_for_record(user_id, record_id):
         cleanup_attachment_or_raise(attachment, repo, document_storage)
+        if linked_repo is not None:
+            linked_repo.delete_links_for_entity(
+                user_id,
+                LinkedEntityType.DOCUMENT,
+                document_item_id(attachment.record_id, attachment.attachment_id),
+            )
 
 
 def cleanup_attachment_or_raise(
@@ -2834,6 +3282,89 @@ def to_push_status_response(settings: Settings, subscriptions: list[PushSubscrip
     )
 
 
+
+def sync_linked_search_neighbors_safe(
+    service: SearchProjectionService,
+    user_id: str,
+    links: list[LinkedItem],
+    operation: str,
+    *,
+    excluded_entities: set[tuple[LinkedEntityType, str]] | None = None,
+) -> None:
+    excluded = excluded_entities or set()
+    seen: set[tuple[LinkedEntityType, str]] = set()
+    for link in links:
+        for entity_type, entity_id in ((link.source_type, link.source_id), (link.target_type, link.target_id)):
+            key = (entity_type, entity_id)
+            if key in excluded or key in seen:
+                continue
+            seen.add(key)
+            sync_search_entity_safe(service, user_id, entity_type, entity_id, operation)
+
+
+
+def sync_search_entity_safe(
+    service: SearchProjectionService,
+    user_id: str,
+    entity_type: LinkedEntityType,
+    entity_id: str,
+    operation: str,
+) -> None:
+    try:
+        service.sync_entity(user_id, entity_type, entity_id)
+        logger.info(
+            "search_projection_sync",
+            extra={
+                "operation": operation,
+                "source_item_type": entity_type.value,
+                "projection_update_result": "success",
+            },
+        )
+    except Exception:
+        logger.exception(
+            "search_projection_sync_failed",
+            extra={
+                "operation": operation,
+                "source_item_type": entity_type.value,
+                "projection_update_result": "failure",
+            },
+        )
+
+
+def delete_search_entity_safe(
+    service: SearchProjectionService,
+    user_id: str,
+    entity_type: LinkedEntityType,
+    entity_id: str,
+    operation: str,
+) -> None:
+    try:
+        if entity_type == LinkedEntityType.RECORD:
+            service.delete_record(user_id, entity_id)
+        elif entity_type == LinkedEntityType.REMINDER:
+            service.delete_reminder(user_id, entity_id)
+        elif entity_type == LinkedEntityType.DOCUMENT:
+            parsed = entity_id.split("#", 1)
+            if len(parsed) == 2:
+                service.delete_document(user_id, parsed[0], parsed[1])
+        logger.info(
+            "search_projection_delete",
+            extra={
+                "operation": operation,
+                "source_item_type": entity_type.value,
+                "projection_update_result": "success",
+            },
+        )
+    except Exception:
+        logger.exception(
+            "search_projection_delete_failed",
+            extra={
+                "operation": operation,
+                "source_item_type": entity_type.value,
+                "projection_update_result": "failure",
+            },
+        )
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -3038,3 +3569,13 @@ def get_repeat_from_maintenance_interval(details: MaintenanceDetails) -> RepeatO
 
 def is_reminder_type(value: ReminderType | str | None, expected: ReminderType) -> bool:
     return value == expected or value == expected.value
+
+
+
+
+
+
+
+
+
+

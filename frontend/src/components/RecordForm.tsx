@@ -567,7 +567,7 @@ async function restoreRecordLinks(recordId: string, initialLinks: LinkedItemsRes
 }
 
 function flattenLinkedItems(links: LinkedItemsResponse) {
-  return [...links.records, ...links.reminders]
+  return [...links.records, ...links.reminders, ...links.documents]
 }
 
 function getLinkedItemComparisonKey(item: LinkedItem) {

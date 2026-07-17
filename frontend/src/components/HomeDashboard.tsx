@@ -6,6 +6,7 @@ import {
   ListChecks,
   Plus,
   RefreshCcw,
+  Search,
   Sun,
   Wrench,
 } from 'lucide-react'
@@ -42,6 +43,7 @@ interface HomeDashboardProps {
   onViewAlerts: () => void
   onOpenDigest: () => void
   onViewRecords: () => void
+  onViewSearch: () => void
   onViewReminder: (reminder: Reminder) => void
 }
 
@@ -72,6 +74,7 @@ export function HomeDashboard({
   onViewReminders,
   onOpenDigest,
   onViewRecords,
+  onViewSearch,
   onViewReminder,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter(isActionableReminder)
@@ -141,6 +144,11 @@ export function HomeDashboard({
           <ChevronRight size={21} aria-hidden="true" />
         </button>
       </section>
+
+      <button type="button" className="home-search-entry" onClick={onViewSearch}>
+        <Search size={17} aria-hidden="true" />
+        <span>Search your life...</span>
+      </button>
 
       <section className="home-digest-card" aria-labelledby="daily-digest-card-heading">
         <div className="home-digest-icon" aria-hidden="true">

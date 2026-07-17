@@ -129,6 +129,7 @@ class LinkedItem(BaseModel):
     target_id: str
     relationship_type: RelationshipType = RelationshipType.RELATED
     label: str | None = None
+    canonical_pair_key: str = ""
     source_link_key: str
     target_link_key: str
     created_at: datetime
@@ -214,3 +215,44 @@ class GoogleOAuthState(BaseModel):
     created_at: datetime
     expires_at: datetime
     consumed_at: datetime | None = None
+
+
+class SearchProjection(BaseModel):
+    user_id: str
+    search_item_id: str
+    source_item_id: str
+    source_item_type: LinkedEntityType
+    normalized_title: str
+    display_title: str
+    normalized_search_tokens: list[str] = Field(default_factory=list)
+    title_tokens: list[str] = Field(default_factory=list)
+    metadata_tokens: list[str] = Field(default_factory=list)
+    custom_field_name_tokens: list[str] = Field(default_factory=list)
+    relationship_tokens: list[str] = Field(default_factory=list)
+    linked_context_tokens: list[str] = Field(default_factory=list)
+    token_contexts: dict[str, list[str]] = Field(default_factory=dict)
+    safe_display_metadata: dict[str, str] = Field(default_factory=dict)
+    category: str | None = None
+    status: str | None = None
+    owner_or_person: str | None = None
+    relevant_date: date | None = None
+    has_documents: bool = False
+    has_linked_items: bool = False
+    archived: bool = False
+    created_at: datetime
+    updated_at: datetime
+    navigation_metadata: dict[str, str] = Field(default_factory=dict)
+    projection_version: int = 1
+
+
+class SavedSearchView(BaseModel):
+    saved_view_id: str
+    user_id: str
+    name: str
+    query: str = ""
+    filters: dict[str, object] = Field(default_factory=dict)
+    sort: str = "relevance"
+    icon: str | None = None
+    is_pinned: bool = False
+    created_at: datetime
+    updated_at: datetime
