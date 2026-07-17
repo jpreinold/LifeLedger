@@ -1651,7 +1651,7 @@ textarea:focus-visible {
 }
 
 .app-header-main {
-  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  grid-template-columns: 90px minmax(0, 1fr) 90px;
   margin-bottom: var(--space-4);
 }
 
@@ -1691,12 +1691,22 @@ textarea:focus-visible {
   stroke-width: 3;
 }
 
+.header-main-actions {
+  justify-self: end;
+  gap: 4px;
+}
+
+.header-search-button,
 .header-notification-button {
   position: relative;
-  justify-self: end;
   color: var(--color-text);
   background: transparent;
   box-shadow: none;
+}
+
+.header-search-button.active {
+  color: var(--color-primary);
+  background: rgba(7, 94, 234, 0.08);
 }
 
 .notification-badge {
@@ -7087,28 +7097,6 @@ textarea:focus-visible {
   }
 }
 
-.home-search-entry {
-  width: 100%;
-  min-height: 46px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-4);
-  padding: 0 var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-muted);
-  text-align: left;
-  background: #ffffff;
-  box-shadow: 0 6px 18px rgba(15, 32, 61, 0.05);
-}
-
-.home-search-entry span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .search-view {
   display: grid;
@@ -7169,7 +7157,7 @@ textarea:focus-visible {
   border: 0;
   color: var(--color-text);
   background: transparent;
-  font-size: 0.88rem;
+  font-size: 16px;
   outline: none;
 }
 
@@ -7529,6 +7517,7 @@ textarea:focus-visible {
   border-radius: var(--radius-md);
   color: var(--color-text);
   background: #ffffff;
+  font-size: 16px;
 }
 
 .saved-view-row {
@@ -7562,5 +7551,13 @@ textarea:focus-visible {
 
   .search-filter-sheet {
     border-radius: var(--radius-sheet);
+  }
+}
+
+@media (max-width: 768px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
   }
 }

@@ -12,6 +12,7 @@ import {
   FileText,
   Home,
   LogOut,
+  ListChecks,
   Plus,
   RefreshCcw,
   Search,
@@ -1032,39 +1033,50 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     <>
       <main className="app-shell" id="app-top">
         <header className="app-header app-header-main">
-        <button
-          type="button"
-          className={`icon-button header-calendar-button ${activePage === 'calendar' ? 'active' : ''}`.trim()}
-          onClick={() => showCalendar()}
-          aria-current={activePage === 'calendar' ? 'page' : undefined}
-          aria-label={activePage === 'calendar' ? 'Calendar open' : 'Open calendar'}
-        >
-          <CalendarDays size={20} aria-hidden="true" />
-        </button>
+          <button
+            type="button"
+            className={`icon-button header-calendar-button ${activePage === 'calendar' ? 'active' : ''}`.trim()}
+            onClick={() => showCalendar()}
+            aria-current={activePage === 'calendar' ? 'page' : undefined}
+            aria-label={activePage === 'calendar' ? 'Calendar open' : 'Open calendar'}
+          >
+            <CalendarDays size={20} aria-hidden="true" />
+          </button>
 
-        <h1 className={useBrandHeader ? 'app-title app-title-brand' : 'app-title'}>
-          {useBrandHeader ? (
-            <span className="app-title-logo" aria-hidden="true">
-              <CheckCircle size={14} />
-            </span>
-          ) : null}
-          <span>{useBrandHeader ? 'LifeLedger' : pageTitle}</span>
-        </h1>
+          <h1 className={useBrandHeader ? 'app-title app-title-brand' : 'app-title'}>
+            {useBrandHeader ? (
+              <span className="app-title-logo" aria-hidden="true">
+                <CheckCircle size={14} />
+              </span>
+            ) : null}
+            <span>{useBrandHeader ? 'LifeLedger' : pageTitle}</span>
+          </h1>
 
-        <button
-          type="button"
-          className="icon-button header-notification-button"
-          onClick={() => setIsAlertCenterOpen(true)}
-          aria-label="Open alerts"
-        >
-          <Bell size={19} aria-hidden="true" />
-          {attentionCount > 0 ? (
-            <span className="notification-badge" aria-label={`${attentionCount} reminders need attention`}>
-              {attentionCount > 9 ? '9+' : attentionCount}
-            </span>
-          ) : null}
-        </button>
-      </header>
+          <div className="header-actions header-main-actions">
+            <button
+              type="button"
+              className={`icon-button header-search-button ${activePage === 'search' ? 'active' : ''}`.trim()}
+              onClick={() => showPage('search')}
+              aria-current={activePage === 'search' ? 'page' : undefined}
+              aria-label={activePage === 'search' ? 'Search open' : 'Open search'}
+            >
+              <Search size={19} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button header-notification-button"
+              onClick={() => setIsAlertCenterOpen(true)}
+              aria-label="Open alerts"
+            >
+              <Bell size={19} aria-hidden="true" />
+              {attentionCount > 0 ? (
+                <span className="notification-badge" aria-label={`${attentionCount} reminders need attention`}>
+                  {attentionCount > 9 ? '9+' : attentionCount}
+                </span>
+              ) : null}
+            </button>
+          </div>
+        </header>
 
       {error ? (
         <div className="alert" role="alert">
@@ -1103,7 +1115,6 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onViewAlerts={() => setIsAlertCenterOpen(true)}
           onOpenDigest={openDailyDigest}
           onViewRecords={() => showPage('records')}
-          onViewSearch={() => showPage('search')}
           onViewReminder={openReminderDetail}
         />
       ) : null}
@@ -1201,9 +1212,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           <Home size={19} aria-hidden="true" />
           Home
         </button>
-        <button type="button" className={getNavClass('search')} onClick={() => showPage('search')} aria-current={activePage === 'search' ? 'page' : undefined}>
-          <Search size={19} aria-hidden="true" />
-          Search
+        <button type="button" className={getNavClass('reminders')} onClick={() => showPage('reminders')} aria-current={activePage === 'reminders' ? 'page' : undefined}>
+          <ListChecks size={19} aria-hidden="true" />
+          Reminders
         </button>
         <button type="button" className="bottom-nav-add" onClick={openAddReminder} aria-label="Add item">
           <Plus size={28} aria-hidden="true" />
