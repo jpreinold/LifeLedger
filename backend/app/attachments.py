@@ -429,6 +429,14 @@ def complete_attachment_upload(
     settings: Settings,
     now: datetime | None = None,
 ) -> RecordAttachment:
+    if attachment.status in {
+        AttachmentStatus.UPLOADED,
+        AttachmentStatus.SCANNING,
+        AttachmentStatus.AVAILABLE,
+        AttachmentStatus.REJECTED,
+        AttachmentStatus.SCAN_FAILED,
+    }:
+        return attachment
     if attachment.status != AttachmentStatus.PENDING_UPLOAD:
         raise AttachmentValidationError(UPLOAD_NOT_READY)
     if not attachment.quarantine_object_key:

@@ -5566,6 +5566,11 @@ textarea:focus-visible {
   background: #fffafa;
 }
 
+.document-card-targeted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(47, 107, 87, 0.16);
+}
+
 .document-card-open {
   position: relative;
   min-width: 0;
@@ -7301,6 +7306,17 @@ textarea:focus-visible {
   color: var(--color-text);
 }
 
+.recent-search-row-with-remove {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.recent-search-setting {
+  margin-bottom: var(--space-2);
+}
+
 .recent-search-row span,
 .saved-view-row span,
 .search-result-copy strong,
@@ -7560,4 +7576,22 @@ textarea:focus-visible {
   textarea {
     font-size: 16px;
   }
+}
+
+.record-workflow-stages {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.record-workflow-stages li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  background: var(--color-surface-muted);
 }

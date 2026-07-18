@@ -20,9 +20,18 @@ import {
 import type { LucideIcon } from 'lucide-react'
 
 import { searchApi } from '../api/searchApi'
-import { clearRecentSearches, loadRecentSearches, saveRecentSearch, type RecentSearch } from '../lib/recentSearches'
+import {
+  clearRecentSearches,
+  isRememberRecentSearchesEnabled,
+  loadRecentSearches,
+  removeRecentSearch,
+  saveRecentSearch,
+  setRememberRecentSearches,
+  type RecentSearch,
+} from '../lib/recentSearches'
 import type { LinkedEntityType } from '../types/linkedItem'
 import type { SavedSearchView, SearchInput, SearchResponse, SearchResultItem, SearchSort, SearchStatus } from '../types/search'
+import { ConfirmDialog } from './ConfirmDialog'
 
 interface SearchViewProps {
   onViewRecord: (recordId: string) => void
@@ -69,12 +78,15 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [rememberRecentSearches, setRememberRecentSearchesState] = useState(() => isRememberRecentSearchesEnabled())
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>(() => loadRecentSearches())
   const [savedViews, setSavedViews] = useState<SavedSearchView[]>([])
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [isSavedPanelOpen, setIsSavedPanelOpen] = useState(false)
   const [isSavingView, setIsSavingView] = useState(false)
+  const [isDeletingSavedView, setIsDeletingSavedView] = useState(false)
   const [saveViewName, setSaveViewName] = useState('')
+  const [pendingSavedViewDelete, setPendingSavedViewDelete] = useState<SavedSearchView | null>(null)
   const requestIdRef = useRef(0)
 
   const searchInput = useMemo<SearchInput>(
@@ -202,17 +214,27 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
   }
 
   async function deleteSavedView(viewId: string) {
+    setIsDeletingSavedView(true)
     setError(null)
     try {
       await searchApi.deleteSavedView(viewId)
       setSavedViews((current) => current.filter((view) => view.saved_view_id !== viewId))
+      setPendingSavedViewDelete(null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to delete this view.')
+    } finally {
+      setIsDeletingSavedView(false)
     }
   }
 
   function clearRecents() {
     setRecentSearches(clearRecentSearches())
+  }
+
+  function toggleRememberRecents(enabled: boolean) {
+    const storedSetting = setRememberRecentSearches(enabled)
+    setRememberRecentSearchesState(storedSetting)
+    setRecentSearches(storedSetting ? loadRecentSearches() : [])
   }
 
   function loadMore() {
@@ -232,7 +254,7 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
       return
     }
     const recordId = item.navigation_metadata.record_id
-    const documentId = item.navigation_metadata.document_id ?? item.source_item_id
+    const documentId = item.navigation_metadata.attachment_id ?? item.navigation_metadata.document_id ?? item.source_item_id
     if (recordId) {
       onViewDocument(recordId, documentId)
     }
@@ -311,8 +333,11 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
       {isInitialEmpty ? (
         <SearchStartState
           recentSearches={recentSearches}
+          rememberRecentSearches={rememberRecentSearches}
           savedViews={savedViews}
           onClearRecent={clearRecents}
+          onRemoveRecent={(createdAt) => setRecentSearches(removeRecentSearch(createdAt))}
+          onRememberRecentChange={toggleRememberRecents}
           onRunRecent={(value) => {
             setQuery(value)
             setRecentSearches(saveRecentSearch(value))
@@ -455,7 +480,7 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
                     </span>
                     <ChevronRight size={16} aria-hidden="true" />
                   </button>
-                  <button type="button" className="icon-button" onClick={() => void deleteSavedView(view.saved_view_id)} aria-label={`Delete ${view.name}`}>
+                  <button type="button" className="icon-button" onClick={() => setPendingSavedViewDelete(view)} aria-label={`Delete ${view.name}`}>
                     <Trash2 size={16} aria-hidden="true" />
                   </button>
                 </div>
@@ -464,6 +489,16 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
           </aside>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        body={pendingSavedViewDelete ? `The saved view "${pendingSavedViewDelete.name}" will be permanently deleted. Records, reminders, documents, and recent searches will remain.` : ''}
+        confirmLabel="Delete saved view"
+        isBusy={isDeletingSavedView}
+        isOpen={pendingSavedViewDelete !== null}
+        title="Delete saved view?"
+        onCancel={() => setPendingSavedViewDelete(null)}
+        onConfirm={() => pendingSavedViewDelete && void deleteSavedView(pendingSavedViewDelete.saved_view_id)}
+      />
     </section>
   )
 
@@ -488,14 +523,20 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
 
 function SearchStartState({
   recentSearches,
+  rememberRecentSearches,
   savedViews,
   onClearRecent,
+  onRemoveRecent,
+  onRememberRecentChange,
   onRunRecent,
   onApplySavedView,
 }: {
   recentSearches: RecentSearch[]
+  rememberRecentSearches: boolean
   savedViews: SavedSearchView[]
   onClearRecent: () => void
+  onRemoveRecent: (createdAt: string) => void
+  onRememberRecentChange: (enabled: boolean) => void
   onRunRecent: (query: string) => void
   onApplySavedView: (view: SavedSearchView) => void
 }) {
@@ -504,20 +545,28 @@ function SearchStartState({
       <section className="search-panel" aria-labelledby="recent-searches-heading">
         <div className="search-section-header">
           <h3 id="recent-searches-heading">Recent searches</h3>
-          {recentSearches.length > 0 ? (
-            <button type="button" className="text-button" onClick={onClearRecent}>
-              Clear
-            </button>
+          {rememberRecentSearches && recentSearches.length > 0 ? (
+            <button type="button" className="text-button" onClick={onClearRecent}>Clear all</button>
           ) : null}
         </div>
-        {recentSearches.length === 0 ? <p className="search-muted">No recent searches.</p> : null}
-        {recentSearches.map((item) => (
-          <button type="button" className="recent-search-row" key={`${item.query}-${item.createdAt}`} onClick={() => onRunRecent(item.query)}>
-            <Clock size={15} aria-hidden="true" />
-            <span>{item.query}</span>
-            <small>{formatRelativeDate(item.createdAt)}</small>
-          </button>
-        ))}
+        <label className="search-toggle-row recent-search-setting">
+          <span>Remember recent searches on this device</span>
+          <input type="checkbox" checked={rememberRecentSearches} onChange={(event) => onRememberRecentChange(event.currentTarget.checked)} />
+        </label>
+        {!rememberRecentSearches ? <p className="search-muted">Off by default. Search text is not saved on this device.</p> : null}
+        {rememberRecentSearches && recentSearches.length === 0 ? <p className="search-muted">No recent searches.</p> : null}
+        {rememberRecentSearches ? recentSearches.map((item) => (
+          <div className="recent-search-row-with-remove" key={`${item.query}-${item.createdAt}`}>
+            <button type="button" className="recent-search-row" onClick={() => onRunRecent(item.query)}>
+              <Clock size={15} aria-hidden="true" />
+              <span>{item.query}</span>
+              <small>{formatRelativeDate(item.createdAt)}</small>
+            </button>
+            <button type="button" className="icon-button" onClick={() => onRemoveRecent(item.createdAt)} aria-label={`Remove recent search ${item.query}`}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )) : null}
       </section>
 
       <section className="search-panel" aria-labelledby="saved-views-heading">

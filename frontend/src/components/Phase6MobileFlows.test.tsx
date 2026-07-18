@@ -191,7 +191,7 @@ describe('Phase 6 mobile flows', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Custom' }))
     await user.type(screen.getByLabelText('Field name'), 'Microchip')
-    await user.click(screen.getByRole('switch', { name: /Hide value by default/ }))
+    await user.click(screen.getByRole('switch', { name: /Protected detail/ }))
     await user.type(screen.getByLabelText('Value'), '987654321')
     await user.click(screen.getByRole('button', { name: /Save field/ }))
 

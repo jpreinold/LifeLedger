@@ -13,11 +13,20 @@ def template_section(template: str, start: str, end: str) -> str:
     return template.split(start, maxsplit=1)[1].split(end, maxsplit=1)[0]
 
 
-def test_sam_template_defaults_to_local_persistence():
+def test_sam_template_defaults_to_secure_production_modes():
     template = template_text()
 
     assert "PersistenceMode:" in template
-    assert "Default: local" in template
+    assert "Default: production" in template_section(template, "  AppEnv:", "  AuthMode:")
+    assert "Default: cognito" in template_section(template, "  AuthMode:", "  LocalDevUserId:")
+    assert "Default: dynamodb" in template_section(template, "  PersistenceMode:", "  RemindersTableName:")
+    assert "Default: s3" in template_section(template, "  DocumentStorageMode:", "  DocumentsUploadBucketName:")
+    assert "Default: kms" in template_section(template, "  RecordEncryptionMode:", "  CorsAllowedOrigins:")
+    assert "ProductionSecurityControls:" in template
+    assert "Production requires Cognito authentication." in template
+    assert "Production requires DynamoDB persistence." in template
+    assert "Production requires KMS protected-record encryption." in template
+    assert "Production requires encrypted S3 document storage." in template
     assert "LifeLedgerHttpApi:" in template
     assert "LifeLedgerLocalHttpApi" not in template
     assert "LifeLedgerCognitoHttpApi" not in template
@@ -110,6 +119,7 @@ def test_sam_template_defaults_to_local_persistence():
     assert "Handler: digest_push_handler.handler" in template
     assert "Schedule: rate(15 minutes)" in template
     assert "CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins" in template
+    assert "- Idempotency-Key" in template
     assert "https://lifeledger.jpreinold.com" in template
     assert "https://www.lifeledger.jpreinold.com" in template
     assert "DeletionPolicy: Retain" in template
@@ -191,6 +201,7 @@ def test_sam_local_env_file_uses_local_persistence():
     env_file = json.loads((BACKEND_ROOT / "env.local.json").read_text(encoding="utf-8"))
 
     function_env = env_file["LifeLedgerApiFunction"]
+    assert function_env["APP_ENV"] == "local"
     assert function_env["AUTH_MODE"] == "local"
     assert function_env["LOCAL_DEV_USER_ID"] == "local-dev-user"
     assert function_env["PERSISTENCE_MODE"] == "local"

@@ -22,6 +22,7 @@ import type { GoogleCalendarStatus } from '../api/calendarApi'
 import type { Reminder } from '../types/reminder'
 import type { LifeRecord } from '../types/record'
 import { getCategoryVisual } from './categoryVisuals'
+import { ConfirmDialog } from './ConfirmDialog'
 import { DetailSection, type DetailRow } from './DetailSection'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { SheetDrawer } from './SheetDrawer'
@@ -71,6 +72,7 @@ export function ReminderDetailDrawer({
 }: ReminderDetailDrawerProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isCalendarSyncSaving, setIsCalendarSyncSaving] = useState(false)
+  const [isCalendarDisableConfirmOpen, setIsCalendarDisableConfirmOpen] = useState(false)
   const [customSnoozeDate, setCustomSnoozeDate] = useState(() => addDaysDateOnly(3))
   const [renewDate, setRenewDate] = useState(reminder.due_date)
   const closeTimerRef = useRef<number | null>(null)
@@ -188,12 +190,24 @@ export function ReminderDetailDrawer({
     await onRenew(reminder.id, renewDate)
   }
   async function handleCalendarSyncToggle() {
+    if (reminder.calendar_sync_enabled) {
+      setIsCalendarDisableConfirmOpen(true)
+      return
+    }
     setIsCalendarSyncSaving(true)
     try {
-      if (reminder.calendar_sync_enabled) {
-        await onDisableCalendarSync(reminder.id)
-      } else {
-        await onEnableCalendarSync(reminder.id)
+      await onEnableCalendarSync(reminder.id)
+    } finally {
+      setIsCalendarSyncSaving(false)
+    }
+  }
+
+  async function confirmCalendarSyncDisable() {
+    setIsCalendarSyncSaving(true)
+    try {
+      const disabled = await onDisableCalendarSync(reminder.id)
+      if (disabled) {
+        setIsCalendarDisableConfirmOpen(false)
       }
     } finally {
       setIsCalendarSyncSaving(false)
@@ -328,6 +342,16 @@ export function ReminderDetailDrawer({
             <p className="detail-note">{note}</p>
           </section>
         ) : null}
+        <ConfirmDialog
+          body="The Google Calendar event for this reminder will be permanently deleted. The LifeLedger reminder will remain and can be synced again later."
+          busyLabel="Stopping sync"
+          confirmLabel="Stop syncing"
+          isBusy={isCalendarSyncSaving}
+          isOpen={isCalendarDisableConfirmOpen}
+          title="Stop calendar sync?"
+          onCancel={() => setIsCalendarDisableConfirmOpen(false)}
+          onConfirm={() => void confirmCalendarSyncDisable()}
+        />
     </SheetDrawer>
   )
 }

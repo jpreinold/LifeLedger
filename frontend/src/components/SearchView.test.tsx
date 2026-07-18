@@ -93,4 +93,35 @@ describe('SearchView', () => {
       sort: 'relevance',
     })))
   })
+  it('passes the exact document ID from a search result', async () => {
+    const user = userEvent.setup()
+    const onViewDocument = vi.fn()
+    api.search.mockResolvedValue({
+      ...searchResponse,
+      items: [{
+        ...searchResponse.items[0],
+        source_item_id: 'record-9#document-b',
+        source_item_type: 'document',
+        title: 'duplicate-name.pdf',
+        navigation_metadata: {
+          record_id: 'record-9',
+          attachment_id: 'document-b',
+          document_id: 'record-9#document-b',
+        },
+      }],
+    })
+
+    render(
+      <SearchView
+        onViewRecord={vi.fn()}
+        onViewReminder={vi.fn()}
+        onViewDocument={onViewDocument}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText('Search records, docs, reminders...'), 'duplicate')
+    const result = await screen.findByRole('button', { name: /duplicate-name.pdf/ })
+    await user.click(result)
+    expect(onViewDocument).toHaveBeenCalledWith('record-9', 'document-b')
+  })
 })

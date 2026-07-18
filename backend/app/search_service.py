@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import base64
 import hashlib
@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from app.attachments_repository import RecordAttachmentRepository
-from app.models import Record, RecordAttachment, Reminder, SavedSearchView, SearchProjection
+from app.models import ProjectionSyncFailure, Record, RecordAttachment, Reminder, SavedSearchView, SearchProjection
 from app.records_repository import RecordRepository
 from app.recurrence import calculate_status, get_effective_attention_date
 from app.relationship_service import ItemResolver, document_item_id, parse_document_item_id
@@ -17,7 +17,7 @@ from app.repository import ReminderRepository
 from app.schemas import AttachmentStatus, DynamicFieldType, LinkedEntityType, RecordStatus, SearchResponse, SearchResultItem, SearchSort
 from app.search_repository import SavedSearchViewRepository, SearchIndexRepository
 
-SEARCH_PROJECTION_VERSION = 1
+SEARCH_PROJECTION_VERSION = 2
 MAX_QUERY_LENGTH = 120
 MAX_QUERY_TOKENS = 8
 MAX_TOKEN_LENGTH = 32
@@ -66,6 +66,9 @@ class BackfillResult:
     documents_indexed: int = 0
     reminders_indexed: int = 0
     skipped: int = 0
+    projections_deleted: int = 0
+    failures_retried: int = 0
+    failures_remaining: int = 0
     dry_run: bool = False
 
     @property
@@ -149,6 +152,7 @@ def normalize_status_value(value: str | None) -> str:
         "due_today": "due_today",
         "due_soon": "due_soon",
         "upcoming": "due_soon",
+        "urgent": "due_soon",
         "scheduled": "scheduled",
         "overdue": "overdue",
         "active": "active",
@@ -404,6 +408,93 @@ class SearchProjectionService:
             return None
         return self.index_repo.upsert_projection(projection)
 
+    def sync_entity_observed(
+        self,
+        user_id: str,
+        entity_type: LinkedEntityType,
+        entity_id: str,
+        *,
+        operation: str,
+    ) -> None:
+        try:
+            self.sync_entity(user_id, entity_type, entity_id)
+        except Exception:
+            existing = next(
+                (
+                    item
+                    for item in self.index_repo.list_sync_failures(user_id)
+                    if item.entity_type == entity_type and item.entity_id == entity_id
+                ),
+                None,
+            )
+            self.index_repo.save_sync_failure(
+                ProjectionSyncFailure(
+                    user_id=user_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    operation=operation,
+                    retryable=True,
+                    attempt_count=(existing.attempt_count + 1) if existing else 1,
+                    last_failed_at=datetime.now(timezone.utc),
+                )
+            )
+            raise
+        self.index_repo.clear_sync_failure(user_id, entity_type.value, entity_id)
+
+    def sync_entity_and_neighbors_observed(
+        self,
+        user_id: str,
+        entity_type: LinkedEntityType,
+        entity_id: str,
+        *,
+        operation: str,
+    ) -> None:
+        """Synchronize one source and every projection that embeds its linked context."""
+        targets = [(entity_type, entity_id)]
+        for link in self.linked_repo.list_links_for_entity(user_id, entity_type, entity_id):
+            linked_type, linked_id = opposite_link_endpoint(link, entity_type, entity_id)
+            if linked_type is not None and linked_id is not None:
+                targets.append((linked_type, linked_id))
+
+        seen: set[tuple[LinkedEntityType, str]] = set()
+        for target_type, target_id in targets:
+            key = (target_type, target_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            self.sync_entity_observed(user_id, target_type, target_id, operation=operation)
+
+    def delete_entity_observed(
+        self,
+        user_id: str,
+        entity_type: LinkedEntityType,
+        entity_id: str,
+        *,
+        operation: str,
+    ) -> None:
+        try:
+            if entity_type == LinkedEntityType.RECORD:
+                self.delete_record(user_id, entity_id)
+            elif entity_type == LinkedEntityType.REMINDER:
+                self.delete_reminder(user_id, entity_id)
+            elif entity_type == LinkedEntityType.DOCUMENT:
+                parsed = parse_document_item_id(entity_id)
+                if parsed is not None:
+                    self.delete_document(user_id, parsed[0], parsed[1])
+        except Exception:
+            self.index_repo.save_sync_failure(
+                ProjectionSyncFailure(
+                    user_id=user_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    operation=operation,
+                    retryable=True,
+                    last_failed_at=datetime.now(timezone.utc),
+                )
+            )
+            raise
+        self.index_repo.clear_sync_failure(user_id, entity_type.value, entity_id)
+
     def sync_entity(self, user_id: str, entity_type: LinkedEntityType, entity_id: str) -> None:
         if entity_type == LinkedEntityType.RECORD:
             record = self.record_repo.get_record(user_id, entity_id)
@@ -431,25 +522,83 @@ class SearchProjectionService:
     def delete_document(self, user_id: str, record_id: str, attachment_id: str) -> None:
         self.index_repo.delete_projection(user_id, document_search_item_id(record_id, attachment_id))
 
-    def rebuild_user(self, user_id: str, *, dry_run: bool = False) -> BackfillResult:
+    def rebuild_one(
+        self,
+        user_id: str,
+        entity_type: LinkedEntityType,
+        entity_id: str,
+        *,
+        dry_run: bool = False,
+    ) -> None:
+        if not dry_run:
+            self.sync_entity_observed(user_id, entity_type, entity_id, operation="projection_reconcile_one")
+
+    def rebuild_user(self, user_id: str, *, dry_run: bool = False, limit: int = 1_000) -> BackfillResult:
         records_indexed = documents_indexed = reminders_indexed = skipped = 0
-        for record in self.record_repo.list_records(user_id, include_archived=True):
+        failures_before = self.index_repo.list_sync_failures(user_id, limit=limit)
+        if not dry_run:
+            for failure in failures_before:
+                try:
+                    self.sync_entity_observed(
+                        user_id, failure.entity_type, failure.entity_id, operation="projection_reconcile_failure"
+                    )
+                except Exception:
+                    continue
+        all_records = self.record_repo.list_records(user_id, include_archived=True)
+        all_attachments = self.attachment_repo.list_for_user(user_id)
+        all_reminders = self.reminder_repo.list_reminders(user_id)
+        source_scan_complete = all(
+            len(items) <= limit for items in (all_records, all_attachments, all_reminders)
+        )
+
+        expected_ids: set[str] = set()
+        for record in all_records[:limit]:
             records_indexed += 1
+            expected_ids.add(record_search_item_id(record.id))
             if not dry_run:
                 self.upsert_record(record)
-        for attachment in self.attachment_repo.list_for_user(user_id):
+                self.index_repo.clear_sync_failure(user_id, LinkedEntityType.RECORD.value, record.id)
+        for attachment in all_attachments[:limit]:
             projection = self.build_document_projection(attachment)
             if projection is None:
                 skipped += 1
                 continue
             documents_indexed += 1
+            expected_ids.add(projection.search_item_id)
             if not dry_run:
                 self.index_repo.upsert_projection(projection)
-        for reminder in self.reminder_repo.list_reminders(user_id):
+                self.index_repo.clear_sync_failure(
+                    user_id,
+                    LinkedEntityType.DOCUMENT.value,
+                    document_item_id(attachment.record_id, attachment.attachment_id),
+                )
+        for reminder in all_reminders[:limit]:
             reminders_indexed += 1
+            expected_ids.add(reminder_search_item_id(reminder.id))
             if not dry_run:
                 self.upsert_reminder(reminder)
-        return BackfillResult(user_id, records_indexed, documents_indexed, reminders_indexed, skipped, dry_run)
+                self.index_repo.clear_sync_failure(user_id, LinkedEntityType.REMINDER.value, reminder.id)
+
+        existing_ids = set(self.index_repo.list_projection_ids_for_user(user_id, limit * 3))
+        # Orphan cleanup requires a complete source scan. A bounded partial pass
+        # must never delete valid projections that fall after its limit.
+        orphan_ids = sorted(existing_ids - expected_ids) if source_scan_complete else []
+        if not dry_run:
+            for search_item_id in orphan_ids:
+                self.index_repo.delete_projection(user_id, search_item_id)
+
+        failures_after = self.index_repo.list_sync_failures(user_id, limit=limit)
+        return BackfillResult(
+            user_id=user_id,
+            records_indexed=records_indexed,
+            documents_indexed=documents_indexed,
+            reminders_indexed=reminders_indexed,
+            skipped=skipped,
+            projections_deleted=len(orphan_ids),
+            failures_retried=max(0, len(failures_before) - len(failures_after)) if not dry_run else 0,
+            failures_remaining=len(failures_after),
+            dry_run=dry_run,
+        )
 
     def _add_relationship_context(self, user_id: str, entity_type: LinkedEntityType, entity_id: str, collector: ProjectionTokenCollector) -> bool:
         links = self.linked_repo.list_links_for_entity(user_id, entity_type, entity_id)

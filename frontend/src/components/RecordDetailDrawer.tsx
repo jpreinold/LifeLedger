@@ -36,6 +36,7 @@ import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTy
 import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { AddFieldDrawer } from './AddFieldDrawer'
+import { ConfirmDialog } from './ConfirmDialog'
 import { DetailSection } from './DetailSection'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
@@ -45,6 +46,7 @@ export type RecordDetailTab = 'details' | 'documents' | 'linkedItems'
 
 interface RecordDetailDrawerProps {
   canGoBack?: boolean
+  initialDocumentId?: string
   initialTab?: RecordDetailTab
   record: LifeRecord
   records: LifeRecord[]
@@ -68,6 +70,7 @@ const sensitiveRevealMs = 60_000
 
 export function RecordDetailDrawer({
   canGoBack = false,
+  initialDocumentId,
   initialTab = 'details',
   record,
   records,
@@ -99,6 +102,8 @@ export function RecordDetailDrawer({
   const [revealingFieldId, setRevealingFieldId] = useState<string | null>(null)
   const [removingFieldId, setRemovingFieldId] = useState<string | null>(null)
   const [fieldError, setFieldError] = useState<string | null>(null)
+  const [pendingFieldRemoval, setPendingFieldRemoval] = useState<DynamicRecordField | null>(null)
+  const [isProtectedClearConfirmOpen, setIsProtectedClearConfirmOpen] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
@@ -113,8 +118,9 @@ export function RecordDetailDrawer({
   const hasSensitiveFields = record.has_protected_data || hasSensitiveDynamicFields(record.dynamic_fields)
   const isArchived = record.status === 'archived'
   const showCategoryChip = definition.category.trim().toLowerCase() !== definition.label.trim().toLowerCase()
+  const protectedFieldKeys = new Set<string>(definition.protectedFields)
   const suggestedDynamicFields = definition.dynamicFieldPresets.filter(
-    (field) => !record.dynamic_fields.some((existing) => existing.key === field.key),
+    (field) => !protectedFieldKeys.has(field.key) && !record.dynamic_fields.some((existing) => existing.key === field.key),
   )
 
   const recordReminders = reminders.filter((reminder) =>
@@ -271,7 +277,7 @@ export function RecordDetailDrawer({
       setProtectedPayload(revealed)
     } catch (requestError) {
       setProtectedPayload(null)
-      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to reveal sensitive details.')
+      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to reveal protected details.')
     } finally {
       setIsRevealingProtected(false)
     }
@@ -284,8 +290,9 @@ export function RecordDetailDrawer({
       const nextStatus = await recordsApi.clearProtected(record.id)
       clearProtectedState()
       onProtectedStatusChange(record.id, nextStatus)
+      setIsProtectedClearConfirmOpen(false)
     } catch (requestError) {
-      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to clear sensitive details.')
+      setProtectedError(requestError instanceof Error ? requestError.message : 'Unable to clear protected details.')
     } finally {
       setIsClearingProtected(false)
     }
@@ -323,15 +330,12 @@ export function RecordDetailDrawer({
   }
 
   async function handleRemoveField(field: DynamicRecordField) {
-    if (field.has_value && !window.confirm(`Remove ${field.label}? This removes only this field.`)) {
-      return
-    }
-
     setRemovingFieldId(field.field_id)
     setFieldError(null)
     try {
       const updated = await recordsApi.deleteField(record.id, field.field_id)
       hideDynamicField(field.field_id)
+      setPendingFieldRemoval(null)
       onRecordChange(updated)
     } catch (requestError) {
       setFieldError(requestError instanceof Error ? requestError.message : 'Unable to remove this field.')
@@ -497,7 +501,7 @@ export function RecordDetailDrawer({
               onAddField={() => setIsAddFieldOpen(true)}
               onEditField={setEditingField}
               onHideField={hideDynamicField}
-              onRemoveField={(field) => void handleRemoveField(field)}
+              onRemoveField={setPendingFieldRemoval}
               onRevealField={(field) => void handleRevealField(field)}
             />
 
@@ -507,7 +511,7 @@ export function RecordDetailDrawer({
               isRevealing={isRevealingProtected}
               payload={protectedPayload}
               record={record}
-              onClear={() => void handleClearProtected()}
+              onClear={() => setIsProtectedClearConfirmOpen(true)}
               onHide={clearProtectedState}
               onReveal={() => void handleRevealProtected()}
             />
@@ -546,7 +550,11 @@ export function RecordDetailDrawer({
             role="tabpanel"
             aria-labelledby="record-documents-tab"
           >
-            <RecordDocumentsPanel isActive={isDrawerOpen && activeTab === 'documents'} recordId={record.id} />
+            <RecordDocumentsPanel
+              initialAttachmentId={initialDocumentId}
+              isActive={isDrawerOpen && activeTab === 'documents'}
+              recordId={record.id}
+            />
           </div>
 
           <div
@@ -572,6 +580,25 @@ export function RecordDetailDrawer({
           </div>
       </SheetDrawer>
 
+
+      <ConfirmDialog
+        body="The encrypted protected details will be permanently removed from this record. The record, documents, reminders, and links will remain. This cannot be undone."
+        confirmLabel="Clear protected details"
+        isBusy={isClearingProtected}
+        isOpen={isProtectedClearConfirmOpen}
+        title="Clear protected details?"
+        onCancel={() => setIsProtectedClearConfirmOpen(false)}
+        onConfirm={() => void handleClearProtected()}
+      />
+      <ConfirmDialog
+        body={pendingFieldRemoval ? `${pendingFieldRemoval.label} will be permanently removed from this record. Related records, reminders, documents, and links will remain. This cannot be undone.` : ''}
+        confirmLabel="Remove detail"
+        isBusy={removingFieldId !== null}
+        isOpen={pendingFieldRemoval !== null}
+        title="Remove detail?"
+        onCancel={() => setPendingFieldRemoval(null)}
+        onConfirm={() => pendingFieldRemoval && void handleRemoveField(pendingFieldRemoval)}
+      />
       <AddFieldDrawer
         field={editingField}
         isOpen={isAddFieldOpen || editingField !== null}
@@ -878,12 +905,13 @@ function ProtectedDetailsSection({
   }))
 
   return (
-    <section className="detail-section protected-details-section" aria-label="Sensitive details">
+    <section className="detail-section protected-details-section" aria-label="Protected details">
       <div className="protected-details-heading">
-        <h3>Sensitive details</h3>
+        <h3>Protected details</h3>
         <LockKeyhole size={18} aria-hidden="true" />
       </div>
 
+      <p className="detail-note">Encrypted before storage, excluded from search, and hidden until you choose to reveal it.</p>
       <dl className="detail-list protected-detail-list">
         {rows.map((row) => (
           <div className="detail-row" key={row.field}>

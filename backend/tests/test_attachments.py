@@ -478,3 +478,18 @@ def test_disabled_document_storage_fails_closed(attachment_context):
     assert response.status_code == 503
     assert response.json()["detail"] == "Secure document storage is not configured for this environment."
     assert response.headers["cache-control"] == "no-store, private"
+
+
+def test_attachment_completion_is_safe_to_retry(attachment_context):
+    client, record_repo, attachment_repo, storage, _settings = attachment_context
+    record, attachment = prepare_completed_attachment(client, record_repo, attachment_repo, storage)
+    first_status = attachment.status
+    head_count = len(storage.quarantine_heads)
+
+    retried = client.post(f"/records/{record.id}/attachments/{attachment.attachment_id}/complete")
+
+    assert retried.status_code == 200
+    assert retried.json()["attachment_id"] == attachment.attachment_id
+    assert retried.json()["status"] == first_status
+    assert len(attachment_repo.list_for_record("user-a", record.id)) == 1
+    assert len(storage.quarantine_heads) == head_count

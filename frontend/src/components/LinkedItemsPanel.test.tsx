@@ -226,7 +226,7 @@ describe('LinkedItemsPanel', () => {
     }))
 
     await user.click(screen.getByRole('button', { name: 'Remove link to Adoption document.pdf' }))
-    expect(screen.getByText('Remove this link? Baxter and Adoption document.pdf will remain in LifeLedger.')).toBeInTheDocument()
+    expect(screen.getByText('The link between Baxter and Adoption document.pdf will be removed. Neither item will be deleted. You can add the link again later.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Remove link' }))
     expect(api.deleteRelationship).toHaveBeenCalledWith('link-document')
   })

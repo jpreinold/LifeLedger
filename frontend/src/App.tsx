@@ -38,7 +38,7 @@ import { EditReminderDrawer } from './components/EditReminderDrawer'
 import { HomeDashboard } from './components/HomeDashboard'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { RecordDetailDrawer, type RecordDetailTab } from './components/RecordDetailDrawer'
-import { RecordForm } from './components/RecordForm'
+import { RecordForm, type RecordCreationResult } from './components/RecordForm'
 import { RecordsView } from './components/RecordsView'
 import { RecordTypeSelector } from './components/RecordTypeSelector'
 import { ReminderDetailDrawer } from './components/ReminderDetailDrawer'
@@ -57,6 +57,7 @@ import {
   emptyMaintenanceDetails,
   emptyRenewalDetails,
 } from './lib/reminderInput'
+import { runRecordSetupAttempt } from './lib/recordCreationWorkflow'
 import { hasProtectedRecordInput } from './lib/recordTypes'
 import {
   defaultDigestPreferences,
@@ -140,7 +141,13 @@ interface ReminderAppProps {
 }
 
 type AppPage = 'home' | 'search' | 'reminders' | 'records' | 'settings' | 'calendar'
-type ViewingRecordState = { initialTab: RecordDetailTab; record: LifeRecord }
+type ViewingRecordState = { initialTab: RecordDetailTab; record: LifeRecord; documentId?: string }
+type RecordCreationProgress = {
+  record: LifeRecord
+  protectedSaved: boolean
+  successfulFiles: Set<string>
+  successfulLinks: Set<string>
+}
 
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -163,6 +170,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [editingRecord, setEditingRecord] = useState<LifeRecord | null>(null)
   const [viewingRecord, setViewingRecord] = useState<ViewingRecordState | null>(null)
   const [recordBackStack, setRecordBackStack] = useState<ViewingRecordState[]>([])
+  const recordCreationProgressRef = useRef(new Map<string, RecordCreationProgress>())
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
   const [pendingReminderActionId, setPendingReminderActionId] = useState<string | null>(null)
   const [pendingRecordDelete, setPendingRecordDelete] = useState<LifeRecord | null>(null)
@@ -467,63 +475,84 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     protectedInput: ProtectedRecordInput,
     files: File[] = [],
     links: LinkCreateRequest[] = [],
-  ) {
+    workflowId: string,
+  ): Promise<RecordCreationResult> {
     setIsSaving(true)
     setError(null)
     setNotice(null)
 
     try {
-      const created = await recordsApi.create(input)
-      let nextRecord = created
-      let protectedSaved = true
-      if (hasProtectedRecordInput(protectedInput)) {
-        try {
-          const protectedStatus = await recordsApi.setProtected(created.id, protectedInput)
-          nextRecord = withProtectedStatus(created, protectedStatus)
-        } catch {
-          protectedSaved = false
+      let progress = recordCreationProgressRef.current.get(workflowId)
+      if (!progress) {
+        const created = await recordsApi.create(input, workflowId)
+        progress = {
+          record: created,
+          protectedSaved: false,
+          successfulFiles: new Set(),
+          successfulLinks: new Set(),
         }
+        recordCreationProgressRef.current.set(workflowId, progress)
+      } else {
+        progress.record = await recordsApi.update(progress.record.id, input)
       }
 
-      let attachmentFailures = 0
-      for (const file of files) {
-        try {
-          await recordsApi.uploadRecordAttachment(created.id, file)
-        } catch {
-          attachmentFailures += 1
-        }
+      let nextRecord = progress.record
+      const setupAttempt = await runRecordSetupAttempt(
+        nextRecord.id,
+        protectedInput,
+        files,
+        links,
+        progress,
+        {
+          saveProtected: recordsApi.setProtected,
+          uploadFile: recordsApi.uploadRecordAttachment,
+          createLink: linkedItemsApi.createRecordLink,
+        },
+      )
+      const { failedFiles, linkFailures, protectedFailed, protectedStatus } = setupAttempt
+      if (protectedStatus) {
+        nextRecord = withProtectedStatus(nextRecord, protectedStatus)
+        progress.record = nextRecord
       }
 
-      let linkFailures = 0
-      for (const link of links) {
-        try {
-          await linkedItemsApi.createRecordLink(created.id, link)
-        } catch {
-          linkFailures += 1
-        }
-      }
-
+      recordCreationProgressRef.current.set(workflowId, progress)
       await loadRecordData()
+      const incomplete = protectedFailed || failedFiles.length > 0 || linkFailures > 0
+      if (incomplete) {
+        const failures = [
+          protectedFailed ? 'protected details were not saved' : null,
+          failedFiles.length ? `${failedFiles.length} document${failedFiles.length === 1 ? '' : 's'} could not be uploaded` : null,
+          linkFailures ? `${linkFailures} link${linkFailures === 1 ? '' : 's'} could not be saved` : null,
+        ].filter(Boolean).join('; ')
+        return {
+          complete: false,
+          recordId: nextRecord.id,
+          message: `${nextRecord.title} was created, but ${failures}. Retry the unfinished setup now or finish it later.`,
+          stages: [
+            { label: 'Record', status: 'saved' },
+            { label: 'Protected details', status: !hasProtectedRecordInput(protectedInput) ? 'not_included' : progress.protectedSaved ? 'saved' : 'needs_retry' },
+            { label: 'Documents', status: files.length === 0 ? 'not_included' : failedFiles.length === 0 ? 'saved' : 'needs_retry' },
+            { label: 'Links', status: links.length === 0 ? 'not_included' : linkFailures === 0 ? 'saved' : 'needs_retry' },
+          ],
+        }
+      }
+
+      recordCreationProgressRef.current.delete(workflowId)
       setActivePage('records')
       setRecordBackStack([])
       setViewingRecord({ record: nextRecord, initialTab: links.length > 0 ? 'linkedItems' : 'details' })
-      if (!protectedSaved) {
-        setError('Record added, but protected details were not saved. Protected record storage may not be configured.')
-      } else if (attachmentFailures > 0 || linkFailures > 0) {
-        setError(formatRecordCreatePartialError(attachmentFailures, linkFailures))
-      } else if (files.length > 0 && links.length > 0) {
-        setNotice('Record added. Attachments are uploading and linked items were saved.')
-      } else if (files.length > 0) {
-        setNotice('Record added. Attachments are uploading and will be scanned shortly.')
-      } else if (links.length > 0) {
-        setNotice('Record added with linked items.')
-      } else {
-        setNotice('Record added. Add a document when ready.')
-      }
-      return true
+      setNotice(files.length || links.length || hasProtectedRecordInput(protectedInput) ? 'Record and setup details saved.' : 'Record added. Add a document when ready.')
+      return { complete: true, recordId: nextRecord.id, message: null }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to create record.')
-      return false
+      const createdRecordId = recordCreationProgressRef.current.get(workflowId)?.record.id ?? null
+      return {
+        complete: false,
+        recordId: createdRecordId,
+        message: createdRecordId
+          ? 'The record was created, but LifeLedger could not continue setup. Retry now or finish it later.'
+          : requestError instanceof Error ? requestError.message : 'LifeLedger could not create the record. Try again.',
+        stages: [{ label: 'Record', status: createdRecordId ? 'saved' : 'needs_retry' }],
+      }
     } finally {
       setIsSaving(false)
     }
@@ -537,9 +566,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       const updated = await recordsApi.update(id, input)
       let nextRecord = updated
       let protectedSaved = true
-      if (hasProtectedRecordInput(protectedInput)) {
+      if (Object.keys(protectedInput).length > 0) {
         try {
-          const protectedStatus = await recordsApi.setProtected(id, protectedInput)
+          const protectedStatus = await recordsApi.updateProtected(id, protectedInput)
           nextRecord = withProtectedStatus(updated, protectedStatus)
         } catch {
           protectedSaved = false
@@ -552,7 +581,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       } else {
         setNotice('Record updated.')
       }
-      return true
+      return protectedSaved
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to update record.')
       return false
@@ -729,7 +758,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setViewingReminder({ reminder, fromAlert: false })
   }
 
-  function openLinkedDocument(recordId: string, _documentId: string) {
+  function openLinkedDocument(recordId: string, documentId: string) {
     const record = records.find((item) => item.id === recordId)
     if (!record) {
       setError('Unable to open linked document. Refresh and try again.')
@@ -743,7 +772,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     } else {
       setRecordBackStack([])
     }
-    setViewingRecord({ record, initialTab: 'documents' })
+    setViewingRecord({ record, initialTab: 'documents', documentId: normalizeDocumentAttachmentId(recordId, documentId) })
   }
 
   async function openSearchRecord(recordId: string) {
@@ -774,7 +803,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function openSearchDocument(recordId: string, _documentId: string) {
+  async function openSearchDocument(recordId: string, documentId: string) {
     setError(null)
     try {
       const record = records.find((item) => item.id === recordId) ?? await recordsApi.get(recordId)
@@ -782,7 +811,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setEditingRecord(null)
       setViewingReminder(null)
       setRecordBackStack([])
-      setViewingRecord({ record, initialTab: 'documents' })
+      setViewingRecord({ record, initialTab: 'documents', documentId: normalizeDocumentAttachmentId(recordId, documentId) })
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to open search result.')
     }
@@ -914,6 +943,15 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   function closeRecordForm() {
     setIsRecordFormOpen(false)
     setEditingRecord(null)
+  }
+
+  function continueRecordSetupLater(recordId: string) {
+    const progress = [...recordCreationProgressRef.current.values()].find((item) => item.record.id === recordId)
+    setActivePage('records')
+    setRecordBackStack([])
+    if (progress) {
+      setViewingRecord({ record: progress.record, initialTab: 'details' })
+    }
   }
 
   function closeAddReminder() {
@@ -1170,8 +1208,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           <div className="privacy-note">
             <ShieldCheck size={24} aria-hidden="true" />
             <div>
-              <strong>Your data is private and secure.</strong>
-              <span>We never share your information.</span>
+              <strong>Signed-in access protects your LifeLedger account.</strong>
+              <span>Standard details are available to the authenticated application backend; protected details add encryption before storage.</span>
             </div>
           </div>
         </>
@@ -1263,6 +1301,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         reminders={reminders}
         onClose={closeRecordForm}
         onCreate={handleCreateRecord}
+        onContinueLater={continueRecordSetupLater}
         onOpenRecord={openLinkedRecord}
         onOpenReminder={openLinkedReminder}
         onUpdate={handleUpdateRecord}
@@ -1322,6 +1361,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           records={records}
           reminders={reminders}
           canGoBack={recordBackStack.length > 0}
+          initialDocumentId={viewingRecord.documentId}
           initialTab={viewingRecord.initialTab}
           onArchive={handleArchiveRecord}
           onAddReminder={openAddReminder}
@@ -1447,7 +1487,7 @@ function SettingsView({
           </div>
           <div className="settings-row">
             <span>Privacy</span>
-            <strong>Your reminders stay in your private LifeLedger account.</strong>
+            <strong>Reminders are scoped to your signed-in LifeLedger account and processed by the application backend.</strong>
           </div>
           <div className="settings-row">
             <span>Updates</span>
@@ -1624,6 +1664,7 @@ function GoogleCalendarSection({
   onCalendarStatusUpdate: (status: GoogleCalendarStatus) => void
 }) {
   const [isWorking, setIsWorking] = useState(false)
+  const [isDisconnectConfirmOpen, setIsDisconnectConfirmOpen] = useState(false)
   const [calendarOptions, setCalendarOptions] = useState<GoogleCalendarOption[]>([])
   const [selectedCalendarId, setSelectedCalendarId] = useState('')
   const [isLoadingCalendars, setIsLoadingCalendars] = useState(false)
@@ -1737,6 +1778,7 @@ function GoogleCalendarSection({
       const status = await calendarApi.getStatus()
       onCalendarStatusUpdate(status)
       setCalendarMessage('Google Calendar disconnected.')
+      setIsDisconnectConfirmOpen(false)
     } catch (requestError) {
       setCalendarError(requestError instanceof Error ? requestError.message : 'Unable to disconnect Google Calendar.')
       await onCalendarStatusRefresh()
@@ -1838,12 +1880,22 @@ function GoogleCalendarSection({
           </button>
         ) : null}
         {shouldShowDisconnect ? (
-          <button type="button" className="secondary-button settings-push-button" disabled={!canDisconnect} onClick={() => void disconnectGoogleCalendar()}>
+          <button type="button" className="secondary-button settings-push-button" disabled={!canDisconnect} onClick={() => setIsDisconnectConfirmOpen(true)}>
             <CalendarX size={17} aria-hidden="true" />
             {isWorking ? 'Disconnecting...' : 'Disconnect Google Calendar'}
           </button>
         ) : null}
       </div>
+      <ConfirmDialog
+        body="LifeLedger will remove the saved Google authorization and stop future calendar syncs. Existing calendar events will remain, and synced reminders will be marked for attention."
+        busyLabel="Disconnecting"
+        confirmLabel="Disconnect Google Calendar"
+        isBusy={isWorking}
+        isOpen={isDisconnectConfirmOpen}
+        title="Disconnect Google Calendar?"
+        onCancel={() => setIsDisconnectConfirmOpen(false)}
+        onConfirm={() => void disconnectGoogleCalendar()}
+      />
     </section>
   )
 }
@@ -1919,6 +1971,7 @@ function PushNotificationsSection({
   const [permission, setPermission] = useState<NotificationPermission>(() => getNotificationPermission())
   const [isLoadingPush, setIsLoadingPush] = useState(true)
   const [isSavingPush, setIsSavingPush] = useState(false)
+  const [isDisablePushConfirmOpen, setIsDisablePushConfirmOpen] = useState(false)
   const [isSendingTestPush, setIsSendingTestPush] = useState(false)
   const [pushMessage, setPushMessage] = useState<string | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
@@ -2043,6 +2096,7 @@ function PushNotificationsSection({
       setPushStatus(nextStatus)
       setSubscriptions(savedSubscriptions)
       setPushMessage('Daily Digest push notifications are disabled.')
+      setIsDisablePushConfirmOpen(false)
     } catch (requestError) {
       setPushError(requestError instanceof Error ? requestError.message : 'Unable to disable push notifications.')
     } finally {
@@ -2105,7 +2159,7 @@ function PushNotificationsSection({
 
       <div className="settings-push-actions">
         {supportState === 'unsupported' || isConfigMissing ? null : isEnabled ? (
-          <button type="button" className="secondary-button settings-push-button" disabled={isBusy} onClick={() => void disablePushNotifications()}>
+          <button type="button" className="secondary-button settings-push-button" disabled={isBusy} onClick={() => setIsDisablePushConfirmOpen(true)}>
             {isSavingPush ? 'Disabling...' : 'Disable push notifications'}
           </button>
         ) : (
@@ -2131,6 +2185,16 @@ function PushNotificationsSection({
           ))}
         </div>
       </details>
+      <ConfirmDialog
+        body="Push delivery will be disabled on this device and its saved push subscriptions will be removed. Your reminders and Daily Digest schedule will remain. You can enable push again later."
+        busyLabel="Disabling"
+        confirmLabel="Disable push notifications"
+        isBusy={isSavingPush}
+        isOpen={isDisablePushConfirmOpen}
+        title="Disable push notifications?"
+        onCancel={() => setIsDisablePushConfirmOpen(false)}
+        onConfirm={() => void disablePushNotifications()}
+      />
     </section>
   )
 }
@@ -2307,6 +2371,10 @@ function getUserDisplayName(value?: string | null) {
 
 const GOOGLE_CALENDAR_OAUTH_CALLBACK_KEY_PREFIX = 'google-calendar-oauth-callback:'
 
+function normalizeDocumentAttachmentId(recordId: string, documentId: string): string {
+  const prefix = `${recordId}#`
+  return documentId.startsWith(prefix) ? documentId.slice(prefix.length) : documentId
+}
 function clearGoogleOAuthUrlParams(params: URLSearchParams) {
   for (const key of ['code', 'state', 'scope', 'authuser', 'prompt', 'error', 'error_description']) {
     params.delete(key)
@@ -2347,32 +2415,20 @@ function getDeleteConfirmationBody(reminder: Reminder | null) {
   const name = reminder?.title.trim()
 
   if (name) {
-    return `Delete ${name}? This cannot be undone.`
+    return `${name} will be permanently deleted. Linked records and documents will remain, but their links to this reminder will be removed. This cannot be undone.`
   }
 
-  return 'Are you sure you want to delete this reminder? This cannot be undone.'
+  return 'This reminder will be permanently deleted. Linked items will remain, but their links to it will be removed. This cannot be undone.'
 }
 
 function getRecordDeleteConfirmationBody(record: LifeRecord | null) {
   const name = record?.title.trim()
 
   if (name) {
-    return `Delete ${name}? This cannot be undone.`
+    return `${name}, its protected details, and its stored documents will be permanently deleted. Linked reminders and records will remain, but their links to this record will be removed. This cannot be undone.`
   }
 
-  return 'Are you sure you want to delete this record? This cannot be undone.'
-}
-
-function formatRecordCreatePartialError(attachmentFailures: number, linkFailures: number) {
-  const failures: string[] = []
-  if (attachmentFailures > 0) {
-    failures.push(`${attachmentFailures} attachment${attachmentFailures === 1 ? '' : 's'} could not be uploaded`)
-  }
-  if (linkFailures > 0) {
-    failures.push(`${linkFailures} linked item${linkFailures === 1 ? '' : 's'} could not be saved`)
-  }
-
-  return `Record added, but ${failures.join(' and ')}. Open the record to try again.`
+  return 'This record, its protected details, and its stored documents will be permanently deleted. Linked items will remain, but their links to it will be removed. This cannot be undone.'
 }
 
 function withProtectedStatus(record: LifeRecord, protectedStatus: ProtectedRecordStatus): LifeRecord {

@@ -32,6 +32,21 @@ from app.config import (
     load_settings,
 )
 
+def secure_production_env() -> dict[str, str]:
+    return {
+        "APP_ENV": "production",
+        "AUTH_MODE": "cognito",
+        "PERSISTENCE_MODE": "dynamodb",
+        "RECORD_ENCRYPTION_MODE": "kms",
+        "DATA_ENCRYPTION_KMS_KEY_ARN": "arn:aws:kms:us-east-1:123456789012:key/data",
+        "COGNITO_USER_POOL_ID": "us-east-1_example",
+        "COGNITO_USER_POOL_CLIENT_ID": "client-id",
+        "DOCUMENT_STORAGE_MODE": "s3",
+        "DOCUMENTS_QUARANTINE_BUCKET": "quarantine",
+        "DOCUMENTS_CLEAN_BUCKET": "clean",
+        "DOCUMENTS_KMS_KEY_ARN": "arn:aws:kms:us-east-1:123456789012:key/documents",
+        "CORS_ALLOWED_ORIGINS": "https://lifeledger.example.com",
+    }
 
 def test_config_defaults_are_local_safe():
     settings = load_settings({})
@@ -96,7 +111,7 @@ def test_config_defaults_are_local_safe():
 def test_config_reads_environment_values():
     settings = load_settings(
         {
-            "APP_ENV": "production",
+            "APP_ENV": "test",
             "AUTH_MODE": "cognito",
             "LOCAL_DEV_USER_ID": "dev-user",
             "PERSISTENCE_MODE": "dynamodb",
@@ -132,7 +147,7 @@ def test_config_reads_environment_values():
         }
     )
 
-    assert settings.app_env == "production"
+    assert settings.app_env == "test"
     assert settings.auth_mode == COGNITO_AUTH_MODE
     assert settings.local_dev_user_id == "dev-user"
     assert settings.persistence_mode == DYNAMODB_PERSISTENCE
@@ -228,6 +243,13 @@ def test_sam_local_defaults_to_writable_tmp_data_file():
     assert settings.local_google_oauth_states_file == LAMBDA_LOCAL_GOOGLE_OAUTH_STATES_FILE
 
 
+def test_config_rejects_unknown_app_environment_or_component():
+    with pytest.raises(ValueError, match="Unsupported APP_ENV"):
+        load_settings({"APP_ENV": "staging"})
+    with pytest.raises(ValueError, match="Unsupported APP_COMPONENT"):
+        load_settings({"APP_COMPONENT": "unknown"})
+
+
 def test_config_rejects_unknown_persistence_mode():
     with pytest.raises(ValueError):
         load_settings({"PERSISTENCE_MODE": "sqlite"})
@@ -248,34 +270,41 @@ def test_config_rejects_unknown_document_storage_mode():
         load_settings({"DOCUMENT_STORAGE_MODE": "public-bucket"})
 
 
-def test_production_defaults_document_storage_to_s3():
-    settings = load_settings({"APP_ENV": "production"})
-
-    assert settings.document_storage_mode == DOCUMENT_STORAGE_S3
-    assert settings.document_storage_configured is False
+def test_production_without_explicit_secure_configuration_is_rejected():
+    with pytest.raises(ValueError, match="Unsafe production configuration"):
+        load_settings({"APP_ENV": "production"})
 
 
-def test_production_disallows_plaintext_secret_fallback_by_default():
-    settings = load_settings(
-        {
-            "APP_ENV": "production",
-            "GOOGLE_CLIENT_ID": "client-id",
-            "GOOGLE_CLIENT_SECRET": "client-secret",
-            "GOOGLE_OAUTH_REDIRECT_URI": "https://example.com/oauth",
-            "VAPID_PUBLIC_KEY": "public",
-            "VAPID_PRIVATE_KEY": "private",
-            "VAPID_SUBJECT": "mailto:test@example.com",
-        }
-    )
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("AUTH_MODE", "local", "AUTH_MODE must be cognito"),
+        ("PERSISTENCE_MODE", "local", "PERSISTENCE_MODE must be dynamodb"),
+        ("RECORD_ENCRYPTION_MODE", "disabled", "RECORD_ENCRYPTION_MODE must be kms"),
+    ],
+)
+def test_production_rejects_insecure_modes(field: str, value: str, message: str):
+    env = secure_production_env()
+    env[field] = value
+    with pytest.raises(ValueError, match=message):
+        load_settings(env)
 
-    assert settings.google_calendar_configured is False
-    assert settings.push_notifications_configured is False
+
+def test_production_rejects_plaintext_local_secret_providers_even_with_legacy_override():
+    env = secure_production_env()
+    env.update({
+        "GOOGLE_CLIENT_SECRET": "secret",
+        "VAPID_PRIVATE_KEY": "private",
+        "ALLOW_PLAINTEXT_PRODUCTION_SECRETS": "true",
+    })
+    with pytest.raises(ValueError, match="local plaintext secret providers"):
+        load_settings(env)
 
 
 def test_secret_arns_configure_production_google_and_push():
-    settings = load_settings(
+    env = secure_production_env()
+    env.update(
         {
-            "APP_ENV": "production",
             "GOOGLE_CLIENT_ID": "client-id",
             "GOOGLE_OAUTH_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:google",
             "GOOGLE_OAUTH_REDIRECT_URI": "https://example.com/oauth",
@@ -284,9 +313,10 @@ def test_secret_arns_configure_production_google_and_push():
             "VAPID_SUBJECT": "mailto:test@example.com",
         }
     )
-
+    settings = load_settings(env)
     assert settings.google_calendar_configured is True
     assert settings.push_notifications_configured is True
+    assert settings.document_storage_configured is True
 
 
 def test_local_record_encryption_mode_can_be_selected():

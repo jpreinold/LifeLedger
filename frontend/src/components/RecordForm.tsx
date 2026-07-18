@@ -11,6 +11,7 @@ import {
 } from '../lib/attachmentFiles'
 import {
   createRecordInput,
+  getProtectedFieldLabel,
   getRecordTypeDefinition,
   normalizeRecordInput,
   recordToInput,
@@ -20,12 +21,18 @@ import {
 } from '../lib/recordTypes'
 import { formatDueDateLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
 import { relationshipLabels, type LinkedItem, type LinkedItemsResponse, type LinkCreateRequest, type RelationshipType } from '../types/linkedItem'
-import type { LifeRecord, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
+import type { LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { AddLinkedItemDrawer, LinkedItemsPanel, type LinkDraft } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
+export interface RecordCreationResult {
+  complete: boolean
+  message: string | null
+  recordId: string | null
+  stages?: Array<{ label: string; status: 'saved' | 'not_included' | 'needs_retry' }>
+}
 interface RecordFormProps {
   isOpen: boolean
   isSaving: boolean
@@ -34,7 +41,8 @@ interface RecordFormProps {
   recordType: RecordType
   reminders: Reminder[]
   onClose: () => void
-  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[], links: LinkCreateRequest[]) => Promise<boolean>
+  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[], links: LinkCreateRequest[], workflowId: string) => Promise<RecordCreationResult | boolean>
+  onContinueLater?: (recordId: string) => void
   onOpenRecord?: (recordId: string) => void
   onOpenReminder?: (reminderId: string) => void
   onUpdate: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
@@ -66,6 +74,7 @@ export function RecordForm({
   reminders,
   onClose,
   onCreate,
+  onContinueLater,
   onOpenRecord,
   onOpenReminder,
   onUpdate,
@@ -74,6 +83,8 @@ export function RecordForm({
   const [activeTab, setActiveTab] = useState<RecordFormTab>('record')
   const [tagsText, setTagsText] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [protectedInput, setProtectedInput] = useState<ProtectedRecordInput>({})
+  const [creationResult, setCreationResult] = useState<RecordCreationResult | null>(null)
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
   const [stagedError, setStagedError] = useState<string | null>(null)
   const [stagedLinks, setStagedLinks] = useState<StagedLink[]>([])
@@ -83,6 +94,8 @@ export function RecordForm({
   const initialLinksRef = useRef<LinkedItemsResponse | null>(null)
   const wasSavedRef = useRef(false)
   const isClosingRef = useRef(false)
+  const creationWorkflowIdRef = useRef(crypto.randomUUID())
+  const submissionPendingRef = useRef(false)
   const [visibleOptionalFields, setVisibleOptionalFields] = useState<Set<RecordField>>(() => new Set())
   const definition = getRecordTypeDefinition(form.record_type)
   const isEditing = record !== null
@@ -105,6 +118,8 @@ export function RecordForm({
   useEffect(() => {
     if (!isOpen) {
       setValidationError(null)
+      setProtectedInput({})
+      setCreationResult(null)
       setActiveTab('record')
       clearStagedAttachments()
       setStagedLinks([])
@@ -114,12 +129,15 @@ export function RecordForm({
 
     wasSavedRef.current = false
     isClosingRef.current = false
+    creationWorkflowIdRef.current = crypto.randomUUID()
+    setCreationResult(null)
     initialLinksRef.current = null
     const nextForm = record ? recordToInput(record) : createRecordInput(recordType)
     setForm(nextForm)
     setTagsText(tagsToText(nextForm.tags))
     setVisibleOptionalFields(getInitialVisibleFields(nextForm, getRecordTypeDefinition(nextForm.record_type)))
     setValidationError(null)
+    setProtectedInput({})
     setActiveTab('record')
     clearStagedAttachments()
     setStagedLinks([])
@@ -179,20 +197,48 @@ export function RecordForm({
       return
     }
 
+    const normalizedProtectedInput: ProtectedRecordInput = {}
+    for (const [field, value] of Object.entries(protectedInput) as Array<[ProtectedRecordField, string | null]>) {
+      if (typeof value === 'string' && value.length > 0 && !value.trim()) {
+        setActiveTab('record')
+        setValidationError('Protected details cannot contain only spaces.')
+        return
+      }
+      normalizedProtectedInput[field] = typeof value === 'string' ? value.trim() || null : value
+    }
+
     setValidationError(null)
-    const protectedInput: ProtectedRecordInput = {}
-    const wasSaved = record
-      ? await onUpdate(record.id, input, protectedInput)
-      : await onCreate(
+    if (submissionPendingRef.current || isSaving) {
+      return
+    }
+    submissionPendingRef.current = true
+    try {
+      if (record) {
+        const wasSaved = await onUpdate(record.id, input, normalizedProtectedInput)
+        if (wasSaved) {
+          wasSavedRef.current = true
+          onClose()
+        }
+        return
+      }
+
+      const rawResult = await onCreate(
         input,
-        protectedInput,
+        normalizedProtectedInput,
         stagedAttachments.map((item) => item.file),
         stagedLinks.map(toLinkCreateRequest),
+        creationWorkflowIdRef.current,
       )
-
-    if (wasSaved) {
-      wasSavedRef.current = true
-      onClose()
+      const result: RecordCreationResult = typeof rawResult === 'boolean'
+        ? { complete: rawResult, message: null, recordId: null }
+        : rawResult
+      setCreationResult(result)
+      if (result.complete) {
+        wasSavedRef.current = true
+        onClose()
+      }
+    } finally {
+      submissionPendingRef.current = false
     }
   }
 
@@ -203,6 +249,10 @@ export function RecordForm({
 
     isClosingRef.current = true
     try {
+      if (!record && creationResult?.recordId) {
+        onContinueLater?.(creationResult.recordId)
+        return
+      }
       if (record && !wasSavedRef.current && initialLinksRef.current) {
         await restoreRecordLinks(record.id, initialLinksRef.current)
       }
@@ -210,6 +260,12 @@ export function RecordForm({
       onClose()
       isClosingRef.current = false
     }
+  }
+
+  function handleContinueLater() {
+    if (!creationResult?.recordId) return
+    onContinueLater?.(creationResult.recordId)
+    onClose()
   }
 
   function handleChooseStagedAttachment() {
@@ -447,7 +503,27 @@ export function RecordForm({
               </details>
             ) : null}
 
+            {definition.protectedFields.length > 0 ? (
+              <ProtectedDetailsSection
+                fields={definition.protectedFields}
+                input={protectedInput}
+                record={record}
+                onChange={(field, value) => setProtectedInput((current) => ({ ...current, [field]: value }))}
+                onRemove={(field) => setProtectedInput((current) => ({ ...current, [field]: null }))}
+              />
+            ) : null}
             {validationError ? <p className="field-error">{validationError}</p> : null}
+            {creationResult?.message ? <p className={`${creationResult.complete ? 'form-status' : 'field-error'} record-workflow-message`} role={creationResult.complete ? 'status' : 'alert'}>{creationResult.message}</p> : null}
+            {creationResult?.stages ? (
+              <ul className="record-workflow-stages" aria-label="Record setup progress">
+                {creationResult.stages.map((stage) => (
+                  <li key={stage.label}>
+                    <span>{stage.label}</span>
+                    <strong>{stage.status === 'saved' ? 'Saved' : stage.status === 'needs_retry' ? 'Needs retry' : 'Not included'}</strong>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
 
           <div
@@ -500,9 +576,14 @@ export function RecordForm({
         </div>
 
         <div className="sheet-footer record-form-footer">
+          {!record && creationResult?.recordId && !creationResult.complete ? (
+            <button type="button" className="secondary-button" onClick={handleContinueLater}>
+              Finish later
+            </button>
+          ) : null}
           <button className="primary-button" type="submit" disabled={isSaving}>
             {isEditing ? <Save size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
-            {isSaving ? 'Saving' : isEditing ? 'Save record' : 'Add record'}
+            {isSaving ? 'Saving' : isEditing ? 'Save record' : creationResult?.recordId ? 'Retry unfinished setup' : 'Add record'}
           </button>
         </div>
       </form>
@@ -532,6 +613,55 @@ export function RecordForm({
   )
 }
 
+function ProtectedDetailsSection({
+  fields,
+  input,
+  record,
+  onChange,
+  onRemove,
+}: {
+  fields: ProtectedRecordField[]
+  input: ProtectedRecordInput
+  record: LifeRecord | null
+  onChange: (field: ProtectedRecordField, value: string) => void
+  onRemove: (field: ProtectedRecordField) => void
+}) {
+  return (
+    <details className="record-progressive-section record-collapsible-section protected-details-editor" open={!record}>
+      <summary>Protected details</summary>
+      <p className="form-help-copy">
+        Encrypted before storage, excluded from search, and hidden until you choose to reveal it. LifeLedger discourages storing passwords, authentication secrets, or full payment-card details.
+      </p>
+      <div className="record-field-grid">
+        {fields.map((field) => {
+          const hasStoredValue = record?.protected_field_names.includes(field) ?? false
+          const pendingRemoval = input[field] === null
+          return (
+            <label key={field}>
+              <span>{getProtectedFieldLabel(field)}</span>
+              <input
+                autoComplete="off"
+                maxLength={field === 'sensitive_notes' ? 1000 : field === 'vin' ? 17 : 120}
+                type="password"
+                value={typeof input[field] === 'string' ? input[field] ?? '' : ''}
+                onChange={(event) => onChange(field, event.target.value)}
+                placeholder={hasStoredValue && !pendingRemoval ? 'Stored and hidden; enter a replacement' : 'Add protected detail'}
+              />
+              {hasStoredValue ? (
+                <span className="protected-field-edit-status">
+                  {pendingRemoval ? 'Will be removed when you save.' : 'A protected value is stored.'}
+                  <button type="button" className="small-outline-button" onClick={() => onRemove(field)}>
+                    Remove
+                  </button>
+                </span>
+              ) : null}
+            </label>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
 function toLinkCreateRequest(link: StagedLink): LinkCreateRequest {
   return {
     target_type: link.targetType,

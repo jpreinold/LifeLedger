@@ -19,6 +19,8 @@ SUPPORTED_RECORD_ENCRYPTION_MODES = {
     RECORD_ENCRYPTION_LOCAL,
     RECORD_ENCRYPTION_KMS,
 }
+SUPPORTED_APP_ENVS = {"local", "test", "production"}
+SUPPORTED_APP_COMPONENTS = {"api", "digest", "attachment_finalizer"}
 DOCUMENT_STORAGE_DISABLED = "disabled"
 DOCUMENT_STORAGE_LOCAL = "local"
 DOCUMENT_STORAGE_S3 = "s3"
@@ -67,6 +69,7 @@ DEFAULT_ATTACHMENT_MAX_PER_RECORD = 5
 @dataclass(frozen=True)
 class Settings:
     app_env: str = "local"
+    app_component: str = "api"
     auth_mode: str = LOCAL_AUTH_MODE
     local_dev_user_id: str = DEFAULT_LOCAL_DEV_USER_ID
     persistence_mode: str = LOCAL_PERSISTENCE
@@ -96,6 +99,8 @@ class Settings:
     vapid_private_key: str = ""
     vapid_subject: str = ""
     google_client_id: str = ""
+    cognito_user_pool_id: str = ""
+    cognito_user_pool_client_id: str = ""
     google_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
     google_calendar_scopes: str = DEFAULT_GOOGLE_CALENDAR_SCOPES
@@ -147,6 +152,16 @@ class Settings:
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     source = os.environ if env is None else env
+    app_env = (source.get("APP_ENV", "local").strip() or "local").lower()
+    if app_env not in SUPPORTED_APP_ENVS:
+        supported = ", ".join(sorted(SUPPORTED_APP_ENVS))
+        raise ValueError(f"Unsupported APP_ENV '{app_env}'. Expected one of: {supported}.")
+
+    app_component = (source.get("APP_COMPONENT", "api").strip() or "api").lower()
+    if app_component not in SUPPORTED_APP_COMPONENTS:
+        supported = ", ".join(sorted(SUPPORTED_APP_COMPONENTS))
+        raise ValueError(f"Unsupported APP_COMPONENT '{app_component}'. Expected one of: {supported}.")
+
     auth_mode = source.get("AUTH_MODE", LOCAL_AUTH_MODE).strip().lower()
     persistence_mode = source.get("PERSISTENCE_MODE", LOCAL_PERSISTENCE).strip().lower()
 
@@ -163,15 +178,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         supported = ", ".join(sorted(SUPPORTED_RECORD_ENCRYPTION_MODES))
         raise ValueError(f"Unsupported RECORD_ENCRYPTION_MODE '{record_encryption_mode}'. Expected one of: {supported}.")
 
-    app_env = source.get("APP_ENV", "local").strip() or "local"
     default_document_storage_mode = DOCUMENT_STORAGE_S3 if app_env == "production" else DOCUMENT_STORAGE_DISABLED
     document_storage_mode = source.get("DOCUMENT_STORAGE_MODE", default_document_storage_mode).strip().lower()
     if document_storage_mode not in SUPPORTED_DOCUMENT_STORAGE_MODES:
         supported = ", ".join(sorted(SUPPORTED_DOCUMENT_STORAGE_MODES))
         raise ValueError(f"Unsupported DOCUMENT_STORAGE_MODE '{document_storage_mode}'. Expected one of: {supported}.")
 
-    return Settings(
+    settings = Settings(
         app_env=app_env,
+        app_component=app_component,
         auth_mode=auth_mode,
         local_dev_user_id=source.get("LOCAL_DEV_USER_ID", DEFAULT_LOCAL_DEV_USER_ID).strip()
         or DEFAULT_LOCAL_DEV_USER_ID,
@@ -233,6 +248,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         vapid_private_key=source.get("VAPID_PRIVATE_KEY", "").strip(),
         vapid_subject=source.get("VAPID_SUBJECT", "").strip(),
         google_client_id=source.get("GOOGLE_CLIENT_ID", "").strip(),
+        cognito_user_pool_id=source.get("COGNITO_USER_POOL_ID", "").strip(),
+        cognito_user_pool_client_id=source.get("COGNITO_USER_POOL_CLIENT_ID", "").strip(),
         google_client_secret=source.get("GOOGLE_CLIENT_SECRET", "").strip(),
         google_oauth_redirect_uri=source.get("GOOGLE_OAUTH_REDIRECT_URI", "").strip(),
         google_calendar_scopes=source.get("GOOGLE_CALENDAR_SCOPES", DEFAULT_GOOGLE_CALENDAR_SCOPES).strip()
@@ -258,7 +275,53 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             DEFAULT_ATTACHMENT_MAX_PER_RECORD,
         ),
     )
+    validate_settings(settings)
+    return settings
 
+
+def validate_settings(settings: Settings) -> None:
+    """Fail closed before any production component begins its work."""
+    if settings.app_env != "production":
+        return
+
+    problems: list[str] = []
+    if settings.persistence_mode != DYNAMODB_PERSISTENCE:
+        problems.append("PERSISTENCE_MODE must be dynamodb")
+
+    if settings.app_component == "api":
+        if settings.auth_mode != COGNITO_AUTH_MODE:
+            problems.append("AUTH_MODE must be cognito")
+        if settings.record_encryption_mode != RECORD_ENCRYPTION_KMS:
+            problems.append("RECORD_ENCRYPTION_MODE must be kms")
+        if not settings.data_encryption_kms_key_arn:
+            problems.append("DATA_ENCRYPTION_KMS_KEY_ARN is required")
+        if not settings.cognito_user_pool_id:
+            problems.append("COGNITO_USER_POOL_ID is required")
+        if not settings.cognito_user_pool_client_id:
+            problems.append("COGNITO_USER_POOL_CLIENT_ID is required")
+        unsafe_origins = [
+            origin
+            for origin in settings.cors_allowed_origins or []
+            if not origin.startswith("https://") or "localhost" in origin or "127.0.0.1" in origin or origin == "*"
+        ]
+        if not settings.cors_allowed_origins or unsafe_origins:
+            problems.append("CORS_ALLOWED_ORIGINS must contain only explicit HTTPS production origins")
+
+    if settings.app_component in {"api", "attachment_finalizer"}:
+        if settings.document_storage_mode != DOCUMENT_STORAGE_S3:
+            problems.append("DOCUMENT_STORAGE_MODE must be s3")
+        if not settings.documents_quarantine_bucket:
+            problems.append("DOCUMENTS_QUARANTINE_BUCKET is required")
+        if not settings.documents_clean_bucket:
+            problems.append("DOCUMENTS_CLEAN_BUCKET is required")
+        if not settings.documents_kms_key_arn:
+            problems.append("DOCUMENTS_KMS_KEY_ARN is required")
+
+    if settings.local_records_encryption_key or settings.google_client_secret or settings.vapid_private_key:
+        problems.append("local plaintext secret providers are not allowed")
+
+    if problems:
+        raise ValueError("Unsafe production configuration: " + "; ".join(problems) + ".")
 
 def default_local_data_file(env: Mapping[str, str] | None = None) -> str:
     source = os.environ if env is None else env

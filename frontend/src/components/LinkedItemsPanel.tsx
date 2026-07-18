@@ -938,7 +938,7 @@ function getRemoveLinkBody(sourceTitle: string | undefined, item: LinkedItem | n
     return ''
   }
   const left = sourceTitle || 'This item'
-  return `Remove this link? ${left} and ${item.linked_entity.title} will remain in LifeLedger.`
+  return `The link between ${left} and ${item.linked_entity.title} will be removed. Neither item will be deleted. You can add the link again later.`
 }
 
 function formatDocumentStatus(status: string | null) {

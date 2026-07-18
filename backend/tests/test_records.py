@@ -484,3 +484,66 @@ def test_sensitive_dynamic_field_requires_encryption_configuration(client):
 
     assert response.status_code == 409
     assert response.json()["detail"] == "Protected record storage is not configured for this environment."
+
+
+def test_record_creation_idempotency_key_prevents_duplicate_records(client, record_repo):
+    set_auth_user("user-a")
+    headers = {"Idempotency-Key": "record-workflow-123"}
+
+    first = client.post("/records", json=record_payload(title="Idempotent record"), headers=headers)
+    second = client.post("/records", json=record_payload(title="Idempotent record"), headers=headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert len(record_repo.list_records("user-a", include_archived=True)) == 1
+
+    set_auth_user("user-b")
+    other_user = client.post("/records", json=record_payload(title="Idempotent record"), headers=headers)
+    assert other_user.status_code == 201
+    assert other_user.json()["id"] != first.json()["id"]
+
+
+def test_protected_patch_replaces_and_removes_one_detail(encrypted_client):
+    created = encrypted_client.post(
+        "/records", json=record_payload(record_type="insurance", title="Insurance")
+    ).json()
+    assert encrypted_client.put(
+        f"/records/{created['id']}/protected",
+        json={"policy_number": "POL-123", "member_number": "MEM-456"},
+    ).status_code == 200
+
+    updated = encrypted_client.patch(
+        f"/records/{created['id']}/protected",
+        json={"policy_number": "POL-999", "member_number": None},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["protected_field_names"] == ["policy_number"]
+    assert encrypted_client.get(f"/records/{created['id']}/protected").json() == {
+        "document_number": None,
+        "license_number": None,
+        "vin": None,
+        "policy_number": "POL-999",
+        "member_number": None,
+        "serial_number": None,
+        "account_reference": None,
+        "sensitive_notes": None,
+    }
+
+
+def test_protected_validation_error_does_not_echo_plaintext(encrypted_client, caplog):
+    caplog.set_level("INFO")
+    created = encrypted_client.post(
+        "/records", json=record_payload(record_type="vehicle", title="Vehicle")
+    ).json()
+    rejected_value = "BAD-PROTECTED-VALUE"
+
+    response = encrypted_client.patch(
+        f"/records/{created['id']}/protected",
+        json={"vin": rejected_value},
+    )
+
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store, private"
+    assert rejected_value not in response.text
+    assert rejected_value not in caplog.text

@@ -1,6 +1,6 @@
 # LifeLedger
 
-LifeLedger is a private personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
+LifeLedger is a personal admin hub for tracking important reminders, renewals, maintenance tasks, and records.
 
 LifeLedger now has a unified smart reminder experience across regular reminders, birthdays, renewals/expirations, and maintenance. It also has an in-app alert/attention foundation: the bell and Alert Center surface reminders that need attention, and alert state supports dismissing or snoozing those in-app alerts. The Daily Digest gives a short briefing of what needs attention today, what is due today, and what is coming up, using the same smart reminder labels and alert logic as the Alert Center. Optional Daily Digest push notifications can send one summary-level browser push at the user's selected digest time when there is meaningful reminder activity. Google Calendar sync is available as a one-way, per-reminder integration from LifeLedger to the user's selected Google Calendar. Records are now first-class, structured personal entities that users can create, view, edit, archive, restore, delete, preview, attach scanned PDF/JPEG/PNG files to after malware scanning, and link to related records and reminders. Optional protected details are encrypted at the application layer before persistence. Google OAuth token bundles are also application-encrypted when encryption is enabled. Email, SMS, public sign-up, OCR, AI/RAG, file sharing, and automatic record-to-reminder generation are not included. Local development still defaults to JSON persistence and a local dev user; deployed reminders, records, linked items, record attachments, digest preferences, alert state, and push subscriptions are protected by Amazon Cognito and scoped by user in DynamoDB.
 
@@ -123,7 +123,7 @@ Backward compatibility is adapter-based. Existing record metadata, protected-fie
 
 ## Linked Items Virtual Knowledge Graph
 
-Linked Items make a record or reminder a small private hub for related LifeLedger items without adding a graph database or new AI service. The backend stores explicit user-created edges in the retained `lifeledger-linked-items-auth` DynamoDB table and resolves one-hop neighborhoods in the application layer with indexed DynamoDB queries. This keeps the feature low cost, simple to operate, and aligned with the existing user-scoped storage model.
+Linked Items make a record or reminder a personal hub for related LifeLedger items without adding a graph database or new AI service. The backend stores explicit user-created edges in the retained `lifeledger-linked-items-auth` DynamoDB table and resolves one-hop neighborhoods in the application layer with indexed DynamoDB queries. This keeps the feature low cost, simple to operate, and aligned with the existing user-scoped storage model.
 
 Supported links are record-to-record and record-to-reminder. Record detail and edit views show linked records and reminders; reminder detail views show the records linked to that reminder. The mobile UI follows the same compact drawer patterns as records and reminders: choose Record or Reminder, search/filter items the user already owns, choose a relationship, optionally add a short label, and see the linked item appear immediately.
 
@@ -350,7 +350,7 @@ Deployed frontend flow:
 - DynamoDB stores records under the authenticated user's `user_id` in a separate records table.
 - DynamoDB stores linked item edges under the authenticated user's `user_id` in a separate linked items table.
 
-Frontend security headers are deployed through `frontend/public/_headers`, which Vite copies to `dist/_headers` for Cloudflare Pages. The CSP is intentionally `Content-Security-Policy-Report-Only` during this phase and allows only the LifeLedger origin, the production API Gateway origin, and the Cognito User Pool endpoint for browser connections. CSP reports are accepted by the Cloudflare Pages Function at `frontend/functions/__csp-report.ts`. The service worker does not precache `index.html`, so document security headers are fetched from the network instead of being retained in an older Workbox cache. If a Cloudflare dashboard Transform Rule, Pages configuration, or Worker is also setting CSP, edit or remove that rule before relying on this policy; multiple CSP headers are combined by browsers, so an older policy such as `connect-src 'none'` can continue to report or enforce blocks even after this repository policy is added. If Cloudflare JavaScript Detections, Bot Fight Mode, or challenge injection is enabled, Cloudflare may inject inline `/cdn-cgi/challenge-platform/` scripts that conflict with strict `script-src 'self'`; disable that injection for LifeLedger or use a nonce-capable Worker before moving CSP from Report-Only to enforced mode.
+Frontend security headers are deployed through `frontend/public/_headers`, which Vite copies to `dist/_headers` for Cloudflare Pages. The CSP remains `Content-Security-Policy-Report-Only`; enforcement is not claimed and allows only the LifeLedger origin, the production API Gateway origin, and the Cognito User Pool endpoint for browser connections. CSP reports are accepted by the Cloudflare Pages Function at `frontend/functions/__csp-report.ts`. The service worker does not precache `index.html`, so document security headers are fetched from the network instead of being retained in an older Workbox cache. If a Cloudflare dashboard Transform Rule, Pages configuration, or Worker is also setting CSP, edit or remove that rule before relying on this policy; multiple CSP headers are combined by browsers, so an older policy such as `connect-src 'none'` can continue to report or enforce blocks even after this repository policy is added. If Cloudflare JavaScript Detections, Bot Fight Mode, or challenge injection is enabled, Cloudflare may inject inline `/cdn-cgi/challenge-platform/` scripts that conflict with strict `script-src 'self'`; disable that injection for LifeLedger or use a nonce-capable Worker before moving CSP from Report-Only to enforced mode. Before enforcement, collect at least 14 consecutive days of production reports, resolve all application-origin violations, verify Cognito, PWA assets and updates, API calls, S3 document previews, and Google Calendar OAuth in supported browsers, then deploy the same policy as `Content-Security-Policy` while retaining reporting.
 
 ## API Routes
 
@@ -368,11 +368,12 @@ Frontend security headers are deployed through `frontend/public/_headers`, which
 - `POST /reminders/{id}/alert/dismiss` requires authentication in Cognito mode.
 - `POST /reminders/{id}/alert/snooze` requires authentication in Cognito mode.
 - `GET /records` requires authentication in Cognito mode and returns active records by default. `include_archived=true` also returns archived records.
-- `POST /records` requires authentication in Cognito mode and creates a record for the current user only.
+- `POST /records` requires authentication in Cognito mode and creates a record for the current user only. An optional `Idempotency-Key` makes safe retries resolve to the same user-scoped record.
 - `GET /records/{id}` requires authentication in Cognito mode and returns only an owned record.
 - `PUT /records/{id}` requires authentication in Cognito mode and updates only an owned record.
 - `GET /records/{id}/protected/status` requires authentication in Cognito mode and returns safe protected-field status only for an owned record.
-- `PUT /records/{id}/protected` requires authentication in Cognito mode and encrypts/replaces protected fields only for an owned record.
+- PUT /records/{id}/protected requires authentication in Cognito mode and encrypts/replaces protected fields only for an owned record.
+- PATCH /records/{id}/protected changes or removes selected protected details without replacing unaffected protected values.
 - `GET /records/{id}/protected` requires authentication in Cognito mode, explicitly reveals protected fields only for an owned record, and returns no-store headers.
 - `DELETE /records/{id}/protected` requires authentication in Cognito mode and clears only the encrypted protected payload for an owned record.
 - `GET /records/{id}/attachments` requires authentication and returns safe attachment metadata only for an owned record.
@@ -438,7 +439,8 @@ Backend local development works without setting any variables.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `APP_ENV` | `local` | Names the runtime environment. |
+| APP_ENV | local | Names the runtime environment. Production deployments must explicitly use production. |
+| APP_COMPONENT | api | Identifies api, digest, or attachment_finalizer so production startup validates only the controls that component requires. SAM sets this automatically. |
 | `AUTH_MODE` | `local` | Use `local` for dev/SAM local or `cognito` for deployed Cognito auth. |
 | `LOCAL_DEV_USER_ID` | `local-dev-user` | User id assigned in local auth mode. |
 | `PERSISTENCE_MODE` | `local` | Use `local` for JSON or `dynamodb` for DynamoDB. |
@@ -471,7 +473,7 @@ Backend local development works without setting any variables.
 | `PUSH_SECRET_ARN` | empty | Secrets Manager ARN for JSON `{"vapid_private_key":"..."}` in production. |
 | `VAPID_PRIVATE_KEY` | empty | Local-only plaintext fallback for development. Do not commit a real value. |
 | `VAPID_SUBJECT` | empty | VAPID contact subject, such as `mailto:you@example.com`. |
-| `ALLOW_PLAINTEXT_PRODUCTION_SECRETS` | `false` | Set only for deliberate emergency compatibility. Production should use Secrets Manager. |
+| `ALLOW_PLAINTEXT_PRODUCTION_SECRETS` | `false` | Legacy local/test compatibility only; production rejects plaintext secret providers even when this flag is set. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 | `DOCUMENT_STORAGE_MODE` | `disabled` locally, `s3` when `APP_ENV=production` unless overridden | `disabled`, `local`, or `s3`. Local/SAM local defaults to disabled; production should use `s3`. |
 | `DOCUMENTS_QUARANTINE_BUCKET` | empty | Private quarantine S3 bucket used for untrusted browser uploads. SAM sets this from the stack bucket. |
@@ -525,10 +527,22 @@ The SAM template defines:
 - API Lambda Secrets Manager access is scoped to `GoogleOAuthSecretArn` and `PushSecretArn`; the Digest push Lambda may read only `PushSecretArn` and does not receive record KMS decrypt permissions.
 - `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain` on the KMS key and retained DynamoDB tables.
 
-SAM local defaults to `AUTH_MODE=local` and `PERSISTENCE_MODE=local`, so it can serve `/health`, `/reminders`, `/records`, `/records/{id}/links`, and `/preferences/digest` without Cognito login, AWS credentials, or DynamoDB calls. In Lambda/SAM local mode, local JSON persistence writes to `/tmp/lifeledger-reminders.json`, `/tmp/lifeledger-records.json`, `/tmp/lifeledger-linked-items.json`, `/tmp/lifeledger-preferences.json`, `/tmp/lifeledger-push-subscriptions.json`, `/tmp/lifeledger-google-calendar-connections.json`, and `/tmp/lifeledger-google-oauth-states.json` because the function code directory may be read-only.
+`backend/env.local.json` explicitly sets `APP_ENV=local`, `AUTH_MODE=local`, `PERSISTENCE_MODE=local`, disabled record encryption, and disabled document storage for SAM local, so it can serve `/health`, `/reminders`, `/records`, `/records/{id}/links`, and `/preferences/digest` without Cognito login, AWS credentials, or DynamoDB calls. In Lambda/SAM local mode, local JSON persistence writes to `/tmp/lifeledger-reminders.json`, `/tmp/lifeledger-records.json`, `/tmp/lifeledger-linked-items.json`, `/tmp/lifeledger-preferences.json`, `/tmp/lifeledger-push-subscriptions.json`, `/tmp/lifeledger-google-calendar-connections.json`, and `/tmp/lifeledger-google-oauth-states.json` because the function code directory may be read-only.
+
+Production deployments now fail closed at three layers: secure SAM defaults, CloudFormation rules, and runtime component validation. `AppEnv=production` rejects local auth, local persistence, disabled protected-record encryption, missing Cognito/KMS/document configuration, localhost or wildcard CORS origins, and local plaintext secret providers. Local development remains available only through explicit `APP_ENV=local` configuration.
+
+Search reconciliation is safe to rerun and never decrypts protected values. Rebuild one source item with `python backfill_search.py --user-id <user-id> --entity-type record --entity-id <record-id>`. Rebuild a bounded user scope, retry persisted projection failures, update stale versions, and delete verified orphans with `python backfill_search.py --user-id <user-id> --limit 1000`. Use `--dry-run` to count without writes. If the limit truncates any source collection, the command deliberately skips orphan deletion rather than risk deleting a valid projection; rerun with a sufficient bound.
+
+Pre-deployment validation:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest tests/test_config.py tests/test_sam_config.py -q
+sam validate --lint --template-file template.yaml
+sam build
+```
 
 High-level SAM commands:
-
 ```powershell
 cd backend
 sam build
@@ -548,7 +562,7 @@ RemindersTableName=lifeledger-reminders-auth
 RecordsTableName=lifeledger-records-auth
 RecordAttachmentsTableName=lifeledger-record-attachments-auth
 LinkedItemsTableName=lifeledger-linked-items-auth
-CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
+CorsAllowedOrigins=https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 VapidPublicKey=<public-vapid-key>
 PushSecretArn=<secrets-manager-arn-with-vapid_private_key>
 VapidSubject=mailto:you@example.com
@@ -565,13 +579,17 @@ cd backend
 sam deploy --guided
 ```
 
+
+CI requires no application secrets. `.github/workflows/ci.yml` installs dependencies from the lock/requirements files and runs backend tests, import/package validation, SAM lint validation, frontend tests, standalone type checking, lint, and the production build. It does not deploy.
 ## Deployment Checklist
 
 - `npm run check` passes.
-- Backend is deployed with `AuthMode=cognito`, `PersistenceMode=dynamodb`, `RecordEncryptionMode=kms`, and the linked items table parameter.
+- Backend is deployed with `AppEnv=production`, `AuthMode=cognito`, `PersistenceMode=dynamodb`, `RecordEncryptionMode=kms`, `DocumentStorageMode=s3`, malware protection enabled, HTTPS-only CORS origins, and the linked items table parameter.
 - AWS `/health` works without signing in.
 - AWS `/reminders` rejects requests without a bearer token.
-- AWS `/records` rejects requests without a bearer token.
+- AWS /records rejects requests without a bearer token.
+- A deployment attempt with any production/local mode combination is rejected, and an insecure production runtime configuration fails before serving requests.
+- S3 Block Public Access and default KMS encryption are enabled for both document buckets, and scanning documents cannot receive preview/download URLs.
 - Cognito admin-created user can sign in.
 - Cloudflare Pages has all required `VITE_*` environment variables, including `VITE_VAPID_PUBLIC_KEY` for push subscriptions.
 - Cloudflare frontend can load, create, complete, and delete reminders after sign-in.

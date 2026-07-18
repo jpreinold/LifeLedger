@@ -1,17 +1,17 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: LifeLedger FastAPI backend running on AWS Lambda with local or DynamoDB persistence.
+Description: LifeLedger FastAPI backend with fail-closed production defaults and explicit local overrides.
 
 Parameters:
   AppEnv:
     Type: String
-    Default: local
+    Default: production
     AllowedValues:
       - local
       - production
   AuthMode:
     Type: String
-    Default: local
+    Default: cognito
     AllowedValues:
       - local
       - cognito
@@ -20,7 +20,7 @@ Parameters:
     Default: local-dev-user
   PersistenceMode:
     Type: String
-    Default: local
+    Default: dynamodb
     AllowedValues:
       - local
       - dynamodb
@@ -102,14 +102,29 @@ Parameters:
     Default: ""
   RecordEncryptionMode:
     Type: String
-    Default: disabled
+    Default: kms
     AllowedValues:
       - disabled
       - local
       - kms
   CorsAllowedOrigins:
     Type: String
-    Default: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
+    Default: https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
+
+Rules:
+  ProductionSecurityControls:
+    RuleCondition: !Equals [!Ref AppEnv, production]
+    Assertions:
+      - Assert: !Equals [!Ref AuthMode, cognito]
+        AssertDescription: Production requires Cognito authentication.
+      - Assert: !Equals [!Ref PersistenceMode, dynamodb]
+        AssertDescription: Production requires DynamoDB persistence.
+      - Assert: !Equals [!Ref RecordEncryptionMode, kms]
+        AssertDescription: Production requires KMS protected-record encryption.
+      - Assert: !Equals [!Ref DocumentStorageMode, s3]
+        AssertDescription: Production requires encrypted S3 document storage.
+      - Assert: !Equals [!Ref MalwareProtectionEnabled, "true"]
+        AssertDescription: Production requires document malware protection.
 
 Conditions:
   HasGoogleOAuthSecretArn: !Not [!Equals [!Ref GoogleOAuthSecretArn, ""]]
@@ -367,11 +382,13 @@ Resources:
           - GET
           - POST
           - PUT
+          - PATCH
           - DELETE
           - OPTIONS
         AllowHeaders:
           - Content-Type
           - Authorization
+          - Idempotency-Key
         AllowCredentials: true
       Auth:
         DefaultAuthorizer: CognitoJwtAuthorizer
@@ -392,7 +409,10 @@ Resources:
       Environment:
         Variables:
           APP_ENV: !Ref AppEnv
+          APP_COMPONENT: api
           AUTH_MODE: !Ref AuthMode
+          COGNITO_USER_POOL_ID: !Ref LifeLedgerUserPool
+          COGNITO_USER_POOL_CLIENT_ID: !Ref LifeLedgerUserPoolClient
           LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
@@ -564,7 +584,10 @@ Resources:
       Environment:
         Variables:
           APP_ENV: !Ref AppEnv
+          APP_COMPONENT: digest
           AUTH_MODE: !Ref AuthMode
+          COGNITO_USER_POOL_ID: !Ref LifeLedgerUserPool
+          COGNITO_USER_POOL_CLIENT_ID: !Ref LifeLedgerUserPoolClient
           LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable
@@ -985,7 +1008,10 @@ Resources:
       Environment:
         Variables:
           APP_ENV: !Ref AppEnv
+          APP_COMPONENT: attachment_finalizer
           AUTH_MODE: !Ref AuthMode
+          COGNITO_USER_POOL_ID: !Ref LifeLedgerUserPool
+          COGNITO_USER_POOL_CLIENT_ID: !Ref LifeLedgerUserPoolClient
           LOCAL_DEV_USER_ID: !Ref LocalDevUserId
           PERSISTENCE_MODE: !Ref PersistenceMode
           REMINDERS_TABLE_NAME: !Ref RemindersTable

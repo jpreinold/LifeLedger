@@ -223,8 +223,8 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
             </label>
             <SwitchRow
               checked={customSensitive}
-              description="Useful for identification numbers or private information."
-              label="Hide value by default"
+              description="Encrypted before storage, excluded from search, and hidden until explicit reveal."
+              label="Protected detail"
               onChange={setCustomSensitive}
             />
             {customType === 'select' ? (

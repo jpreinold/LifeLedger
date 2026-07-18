@@ -1,4 +1,4 @@
-import { getAuthorizationHeaders } from '../auth/session'
+import { apiRequest } from './apiClient'
 import type {
   DynamicRecordFieldInput,
   DynamicRecordFieldReveal,
@@ -15,127 +15,94 @@ import type {
   RecordInput,
 } from '../types/record'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  let response: Response
-  const authorizationHeaders = await getAuthorizationHeaders()
-
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      cache: 'no-store',
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...authorizationHeaders,
-        ...options.headers,
-      },
-    })
-  } catch {
-    throw new Error('Unable to reach the LifeLedger API. Make sure the Python backend is running.')
-  }
-
-  if (!response.ok) {
-    let message = `Request failed with status ${response.status}.`
-
-    try {
-      const body = await response.json()
-      message = typeof body.detail === 'string' ? body.detail : message
-    } catch {
-      message = response.statusText || message
-    }
-
-    throw new Error(message)
-  }
-
-  if (response.status === 204) {
-    return undefined as T
-  }
-
-  return response.json() as Promise<T>
-}
-
 export const recordsApi = {
   list: (includeArchived = false) =>
-    request<LifeRecord[]>(`/records${includeArchived ? '?include_archived=true' : ''}`),
+    apiRequest<LifeRecord[]>(`/records${includeArchived ? '?include_archived=true' : ''}`),
 
-  get: (id: string) => request<LifeRecord>(`/records/${id}`),
+  get: (id: string) => apiRequest<LifeRecord>(`/records/${id}`),
 
   revealProtected: (id: string) =>
-    request<ProtectedRecordPayload>(`/records/${id}/protected`, {
+    apiRequest<ProtectedRecordPayload>(`/records/${id}/protected`, {
       cache: 'no-store',
     }),
 
   setProtected: (id: string, input: ProtectedRecordInput) =>
-    request<ProtectedRecordStatus>(`/records/${id}/protected`, {
+    apiRequest<ProtectedRecordStatus>(`/records/${id}/protected`, {
       method: 'PUT',
       body: JSON.stringify(input),
       cache: 'no-store',
     }),
 
+  updateProtected: (id: string, input: ProtectedRecordInput) =>
+    apiRequest<ProtectedRecordStatus>(`/records/${id}/protected`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    }),
+
   clearProtected: (id: string) =>
-    request<ProtectedRecordStatus>(`/records/${id}/protected`, {
+    apiRequest<ProtectedRecordStatus>(`/records/${id}/protected`, {
       method: 'DELETE',
       cache: 'no-store',
     }),
 
   addField: (id: string, input: DynamicRecordFieldInput) =>
-    request<LifeRecord>(`/records/${id}/fields`, {
+    apiRequest<LifeRecord>(`/records/${id}/fields`, {
       method: 'POST',
       body: JSON.stringify(input),
       cache: 'no-store',
     }),
 
   updateField: (id: string, fieldId: string, input: DynamicRecordFieldUpdateInput) =>
-    request<LifeRecord>(`/records/${id}/fields/${fieldId}`, {
+    apiRequest<LifeRecord>(`/records/${id}/fields/${fieldId}`, {
       method: 'PUT',
       body: JSON.stringify(input),
       cache: 'no-store',
     }),
 
   revealField: (id: string, fieldId: string) =>
-    request<DynamicRecordFieldReveal>(`/records/${id}/fields/${fieldId}/reveal`, {
+    apiRequest<DynamicRecordFieldReveal>(`/records/${id}/fields/${fieldId}/reveal`, {
       cache: 'no-store',
     }),
 
   deleteField: (id: string, fieldId: string) =>
-    request<LifeRecord>(`/records/${id}/fields/${fieldId}`, {
+    apiRequest<LifeRecord>(`/records/${id}/fields/${fieldId}`, {
       method: 'DELETE',
       cache: 'no-store',
     }),
 
   listAttachments: (id: string) =>
-    request<RecordAttachment[]>(`/records/${id}/attachments`, {
+    apiRequest<RecordAttachment[]>(`/records/${id}/attachments`, {
       cache: 'no-store',
     }),
 
   createAttachmentUploadIntent: (id: string, input: RecordAttachmentUploadIntentInput) =>
-    request<RecordAttachmentUploadIntent>(`/records/${id}/attachments/upload-intent`, {
+    apiRequest<RecordAttachmentUploadIntent>(`/records/${id}/attachments/upload-intent`, {
       method: 'POST',
       body: JSON.stringify(input),
       cache: 'no-store',
     }),
 
   completeAttachmentUpload: (id: string, attachmentId: string) =>
-    request<RecordAttachment>(`/records/${id}/attachments/${attachmentId}/complete`, {
+    apiRequest<RecordAttachment>(`/records/${id}/attachments/${attachmentId}/complete`, {
       method: 'POST',
       cache: 'no-store',
     }),
 
   createAttachmentDownloadUrl: (id: string, attachmentId: string) =>
-    request<RecordAttachmentDownloadUrl>(`/records/${id}/attachments/${attachmentId}/download-url`, {
+    apiRequest<RecordAttachmentDownloadUrl>(`/records/${id}/attachments/${attachmentId}/download-url`, {
       method: 'POST',
       cache: 'no-store',
     }),
 
   createAttachmentPreviewUrl: (id: string, attachmentId: string) =>
-    request<RecordAttachmentDownloadUrl>(`/records/${id}/attachments/${attachmentId}/preview-url`, {
+    apiRequest<RecordAttachmentDownloadUrl>(`/records/${id}/attachments/${attachmentId}/preview-url`, {
       method: 'POST',
       cache: 'no-store',
     }),
 
   deleteAttachment: (id: string, attachmentId: string) =>
-    request<void>(`/records/${id}/attachments/${attachmentId}`, {
+    apiRequest<void>(`/records/${id}/attachments/${attachmentId}`, {
       method: 'DELETE',
       cache: 'no-store',
     }),
@@ -168,30 +135,31 @@ export const recordsApi = {
     return recordsApi.completeAttachmentUpload(id, intent.attachment_id)
   },
 
-  create: (input: RecordInput) =>
-    request<LifeRecord>('/records', {
+  create: (input: RecordInput, idempotencyKey?: string) =>
+    apiRequest<LifeRecord>('/records', {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify(input),
     }),
 
   update: (id: string, input: RecordInput) =>
-    request<LifeRecord>(`/records/${id}`, {
+    apiRequest<LifeRecord>(`/records/${id}`, {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
 
   archive: (id: string) =>
-    request<LifeRecord>(`/records/${id}/archive`, {
+    apiRequest<LifeRecord>(`/records/${id}/archive`, {
       method: 'POST',
     }),
 
   restore: (id: string) =>
-    request<LifeRecord>(`/records/${id}/restore`, {
+    apiRequest<LifeRecord>(`/records/${id}/restore`, {
       method: 'POST',
     }),
 
   remove: (id: string) =>
-    request<void>(`/records/${id}`, {
+    apiRequest<void>(`/records/${id}`, {
       method: 'DELETE',
     }),
 }

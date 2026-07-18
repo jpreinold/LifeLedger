@@ -30,6 +30,7 @@ import type { RecordAttachment } from '../types/record'
 import { ConfirmDialog } from './ConfirmDialog'
 
 interface RecordDocumentsPanelProps {
+  initialAttachmentId?: string
   isActive: boolean
   mode?: 'detail' | 'edit'
   recordId: string
@@ -40,9 +41,11 @@ const minViewerZoom = 0.75
 const maxViewerZoom = 2.5
 const viewerZoomStep = 0.25
 
-export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: RecordDocumentsPanelProps) {
+export function RecordDocumentsPanel({ initialAttachmentId, isActive, mode = 'detail', recordId }: RecordDocumentsPanelProps) {
   const [attachments, setAttachments] = useState<RecordAttachment[]>([])
   const [isAttachmentsLoading, setIsAttachmentsLoading] = useState(false)
+  const [hasLoadedAttachments, setHasLoadedAttachments] = useState(false)
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState<string | null>(null)
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
   const [isDeletingAttachment, setIsDeletingAttachment] = useState(false)
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
@@ -55,6 +58,8 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const previewRequestRef = useRef(0)
+  const targetHandledRef = useRef<string | null>(null)
+  const handlePreviewAttachmentRef = useRef<(attachment: RecordAttachment) => Promise<void>>(async () => undefined)
 
   const visibleAttachments = useMemo(
     () => attachments.filter((attachment) => attachment.status !== 'deleted'),
@@ -93,6 +98,7 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
       } catch (requestError) {
         setAttachmentError(requestError instanceof Error ? requestError.message : 'Unable to load documents.')
       } finally {
+        setHasLoadedAttachments(true)
         if (!options.quiet) {
           setIsAttachmentsLoading(false)
         }
@@ -103,6 +109,9 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
 
   useEffect(() => {
     setAttachments([])
+    setHasLoadedAttachments(false)
+    setSelectedAttachmentId(null)
+    targetHandledRef.current = null
     clearTransientDocumentState()
     void loadAttachments()
   }, [clearTransientDocumentState, loadAttachments, recordId])
@@ -165,6 +174,7 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
       (attachment) =>
         attachment.status === 'available' &&
         isPreviewableAttachment(attachment) &&
+        attachment.attachment_id !== initialAttachmentId &&
         !thumbnailUrls[attachment.attachment_id],
     )
 
@@ -183,7 +193,34 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
     return () => {
       isCancelled = true
     }
-  }, [isActive, recordId, thumbnailUrls, visibleAttachments])
+  }, [initialAttachmentId, isActive, recordId, thumbnailUrls, visibleAttachments])
+
+  useEffect(() => {
+    if (!initialAttachmentId || !isActive || !hasLoadedAttachments || isAttachmentsLoading) {
+      return
+    }
+    const targetKey = `${recordId}:${initialAttachmentId}`
+    if (targetHandledRef.current === targetKey) {
+      return
+    }
+    targetHandledRef.current = targetKey
+    const target = visibleAttachments.find((attachment) => attachment.attachment_id === initialAttachmentId)
+    if (!target) {
+      setSelectedAttachmentId(null)
+      setAttachmentMessage(null)
+      setAttachmentError('This document is no longer available. You can continue using the record Documents tab.')
+      return
+    }
+
+    setSelectedAttachmentId(target.attachment_id)
+    if (target.status === 'available') {
+      void handlePreviewAttachmentRef.current(target)
+      return
+    }
+    const statusLabel = getAttachmentStatusMeta(target).label.toLowerCase()
+    setAttachmentError(null)
+    setAttachmentMessage(`${target.display_name} is ${statusLabel}. Preview and download stay unavailable until the document is safe to use.`)
+  }, [hasLoadedAttachments, initialAttachmentId, isActive, isAttachmentsLoading, recordId, visibleAttachments])
 
   function handleChooseAttachment() {
     setAttachmentError(null)
@@ -249,7 +286,11 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
   }
 
   async function handlePreviewAttachment(attachment: RecordAttachment) {
+    setSelectedAttachmentId(attachment.attachment_id)
     if (attachment.status !== 'available') {
+      const statusLabel = getAttachmentStatusMeta(attachment).label.toLowerCase()
+      setAttachmentError(null)
+      setAttachmentMessage(`${attachment.display_name} is ${statusLabel}. Preview and download stay unavailable until the document is safe to use.`)
       return
     }
 
@@ -277,6 +318,8 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
       }
     }
   }
+
+  handlePreviewAttachmentRef.current = handlePreviewAttachment
 
   async function confirmDeleteAttachment() {
     if (!pendingAttachmentDelete) {
@@ -368,6 +411,7 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
               <DocumentCard
                 attachment={attachment}
                 isPanelActive={isActive}
+                isTargeted={selectedAttachmentId === attachment.attachment_id}
                 key={attachment.attachment_id}
                 thumbnailUrl={thumbnailUrls[attachment.attachment_id] ?? null}
                 onDelete={() => setPendingAttachmentDelete(attachment)}
@@ -390,7 +434,7 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
       />
 
       <ConfirmDialog
-        body={pendingAttachmentDelete ? `Delete ${pendingAttachmentDelete.display_name}? This removes the stored file.` : ''}
+        body={pendingAttachmentDelete ? `This document and its stored file will be permanently deleted: ${pendingAttachmentDelete.display_name}.` : ''}
         confirmLabel="Delete document"
         isBusy={isDeletingAttachment}
         isOpen={pendingAttachmentDelete !== null}
@@ -414,6 +458,7 @@ export function RecordDocumentsPanel({ isActive, mode = 'detail', recordId }: Re
 function DocumentCard({
   attachment,
   isPanelActive,
+  isTargeted,
   onDelete,
   onDownload,
   onPreview,
@@ -422,6 +467,7 @@ function DocumentCard({
 }: {
   attachment: RecordAttachment
   isPanelActive: boolean
+  isTargeted: boolean
   onDelete: () => void
   onDownload: () => void
   onPreview: () => void
@@ -435,16 +481,16 @@ function DocumentCard({
   const dateLabel = formatAttachmentDate(attachment.available_at ?? attachment.uploaded_at ?? attachment.created_at)
 
   return (
-    <article className={`document-card ${isFailed ? 'document-card-warning' : ''}`.trim()}>
+    <article className={`document-card ${isFailed ? 'document-card-warning' : ''} ${isTargeted ? 'document-card-targeted' : ''}`.trim()}>
       <button
         type="button"
         className="document-card-open"
-        disabled={!isAvailable}
+        aria-current={isTargeted ? 'true' : undefined}
         onClick={onPreview}
         aria-label={
           isAvailable
-            ? `Open secure preview for ${attachment.display_name}`
-            : `${attachment.display_name} is ${statusMeta.label.toLowerCase()} and cannot be previewed`
+            ? `Open preview for ${attachment.display_name}`
+            : `Open document status for ${attachment.display_name}: ${statusMeta.label.toLowerCase()}`
         }
       >
         <DocumentThumbnail attachment={attachment} isPanelActive={isPanelActive} thumbnailUrl={thumbnailUrl} />

@@ -3,10 +3,13 @@ import logging
 import time
 from datetime import date, datetime, timedelta, timezone
 from secrets import token_urlsafe
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.alerts import (
     clear_alert_action_state,
@@ -221,10 +224,26 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def sanitize_sensitive_validation_errors(request: Request, exc: RequestValidationError):
+    if "/protected" not in request.url.path and "/fields" not in request.url.path:
+        return await request_validation_exception_handler(request, exc)
+
+    safe_errors = []
+    for error in exc.errors():
+        safe_error = {key: error[key] for key in ("type", "loc", "msg") if key in error}
+        safe_errors.append(safe_error)
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": safe_errors},
+        headers=no_store_headers(),
+    )
+
+
 @app.middleware("http")
 async def no_store_attachment_responses(request: Request, call_next):
     response = await call_next(request)
-    if "/attachments" in request.url.path or "/fields/" in request.url.path:
+    if "/attachments" in request.url.path or "/fields/" in request.url.path or "/protected" in request.url.path:
         for header, value in no_store_headers().items():
             response.headers[header] = value
     return response
@@ -513,15 +532,27 @@ def list_records(
 @app.post("/records", response_model=RecordResponse, status_code=status.HTTP_201_CREATED)
 def create_record(
     payload: RecordCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> RecordResponse:
+    normalized_key = normalize_idempotency_key(idempotency_key)
+    record_id = (
+        str(uuid5(NAMESPACE_URL, f"lifeledger:record:{current_user.user_id}:{normalized_key}"))
+        if normalized_key
+        else str(uuid4())
+    )
+    existing = repo.get_record(current_user.user_id, record_id)
+    if existing is not None:
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, existing.id, "record_create_retry")
+        return to_record_response(existing)
+
     now = utc_now()
     record_fields = payload.model_dump()
     record_fields["status"] = RecordStatus.ACTIVE
     record = Record(
-        id=str(uuid4()),
+        id=record_id,
         user_id=current_user.user_id,
         **record_fields,
         created_at=now,
@@ -1367,6 +1398,7 @@ def set_protected_record_payload(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ProtectedRecordStatusResponse:
     record = require_record(repo, current_user.user_id, record_id)
     values = payload.safe_values()
@@ -1384,6 +1416,7 @@ def set_protected_record_payload(
             record_type=record.record_type.value,
             result="success",
         )
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record.id, "protected_record_clear_via_put")
         return to_protected_record_status(cleared)
 
     next_payload = {**values}
@@ -1399,7 +1432,57 @@ def set_protected_record_payload(
         record_type=record.record_type.value,
         result="success",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record.id, "protected_record_set")
     return to_protected_record_status(saved)
+
+
+@app.patch("/records/{record_id}/protected", response_model=ProtectedRecordStatusResponse)
+def update_protected_record_payload(
+    record_id: str,
+    payload: ProtectedRecordPayload,
+    current_user: UserContext = Depends(get_current_user),
+    repo: RecordRepository = Depends(get_record_repository),
+    encryption_service: EncryptionService = Depends(get_encryption_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
+) -> ProtectedRecordStatusResponse:
+    record = require_record(repo, current_user.user_id, record_id)
+    requested_fields = payload.model_fields_set
+    if not requested_fields:
+        return to_protected_record_status(record)
+
+    current_payload = decrypt_record_private_payload(record, encryption_service) if record_has_protected_data(record) else {}
+    allowed = protected_fields_for_record(record)
+    legacy_values = {field: value for field, value in current_payload.items() if field in allowed and isinstance(value, str) and value}
+    for field in requested_fields:
+        if field not in allowed:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="This protected detail is not supported for this record type.")
+        value = getattr(payload, field)
+        if value is None:
+            legacy_values.pop(field, None)
+        else:
+            legacy_values[field] = value
+
+    validate_protected_record_fields(record, legacy_values)
+    dynamic_values = protected_dynamic_values(current_payload)
+    next_payload: dict[str, object] = {**legacy_values}
+    if dynamic_values:
+        next_payload[DYNAMIC_PROTECTED_VALUES_KEY] = dynamic_values
+    now = utc_now()
+    if next_payload:
+        updated = encrypt_record_private_payload(record, next_payload, sorted(legacy_values.keys()), encryption_service, now)
+    else:
+        updated = clear_record_protected_fields(record, now)
+    saved = repo.update_record(updated)
+    log_security_event(
+        "protected_record_updated",
+        user_id=current_user.user_id,
+        record_id=record.id,
+        record_type=record.record_type.value,
+        result="success",
+    )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record.id, "protected_record_update")
+    return to_protected_record_status(saved)
+
 
 @app.get("/records/{record_id}/protected", response_model=ProtectedRecordPayload)
 def reveal_protected_record_payload(
@@ -1455,6 +1538,7 @@ def clear_protected_record_payload(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ProtectedRecordStatusResponse:
     record = require_record(repo, current_user.user_id, record_id)
     now = utc_now()
@@ -1479,6 +1563,7 @@ def clear_protected_record_payload(
         record_type=record.record_type.value,
         result="success",
     )
+    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record.id, "protected_record_clear")
     return to_protected_record_status(cleared)
 
 @app.get("/preferences/digest", response_model=DigestPreferences)
@@ -2241,7 +2326,7 @@ def renew_reminder(
         }
     )
     saved = repo.update_reminder(updated)
-    update_linked_record_dates(current_user.user_id, reminder.id, previous_due_date, payload.new_due_date, now, linked_repo, record_repo)
+    update_linked_record_dates(current_user.user_id, reminder.id, previous_due_date, payload.new_due_date, now, linked_repo, record_repo, search_service)
     synced = sync_existing_calendar_event_after_change(
         repo,
         connection_repo,
@@ -2413,6 +2498,7 @@ def update_linked_record_dates(
     now: datetime,
     linked_repo: LinkedItemRepository,
     record_repo: RecordRepository,
+    search_service: SearchProjectionService,
 ) -> None:
     for summary in get_reminder_linked_record_summaries(user_id, reminder_id, linked_repo, record_repo):
         record = record_repo.get_record(user_id, summary.id)
@@ -2429,9 +2515,15 @@ def update_linked_record_dates(
             continue
 
         try:
-            record_repo.update_record(record.model_copy(update={**updates, "updated_at": now}))
+            saved_record = record_repo.update_record(record.model_copy(update={**updates, "updated_at": now}))
+            sync_search_entity_safe(
+                search_service, user_id, LinkedEntityType.RECORD, saved_record.id, "reminder_renewal_linked_record_date_update"
+            )
         except Exception:
-            logger.exception("Failed to update linked record dates for renewed reminder", extra={"reminder_id": reminder_id})
+            logger.exception(
+                "Failed to update linked record dates for renewed reminder",
+                extra={"reminder_id": reminder_id, "record_id": record.id, "user_id": user_id},
+            )
 
 def to_google_calendar_status_response(
     settings: Settings,
@@ -3311,13 +3403,17 @@ def sync_search_entity_safe(
     operation: str,
 ) -> None:
     try:
-        service.sync_entity(user_id, entity_type, entity_id)
+        service.sync_entity_and_neighbors_observed(user_id, entity_type, entity_id, operation=operation)
         logger.info(
             "search_projection_sync",
             extra={
                 "operation": operation,
-                "source_item_type": entity_type.value,
-                "projection_update_result": "success",
+                "entity_type": entity_type.value,
+                "entity_id": entity_id,
+                "authenticated_user_id": user_id,
+                "result": "success",
+                "retryable": False,
+                "projection_sync_status": "synchronized",
             },
         )
     except Exception:
@@ -3325,8 +3421,12 @@ def sync_search_entity_safe(
             "search_projection_sync_failed",
             extra={
                 "operation": operation,
-                "source_item_type": entity_type.value,
-                "projection_update_result": "failure",
+                "entity_type": entity_type.value,
+                "entity_id": entity_id,
+                "authenticated_user_id": user_id,
+                "result": "failure",
+                "retryable": True,
+                "projection_sync_status": "reconciliation_required",
             },
         )
 
@@ -3339,20 +3439,17 @@ def delete_search_entity_safe(
     operation: str,
 ) -> None:
     try:
-        if entity_type == LinkedEntityType.RECORD:
-            service.delete_record(user_id, entity_id)
-        elif entity_type == LinkedEntityType.REMINDER:
-            service.delete_reminder(user_id, entity_id)
-        elif entity_type == LinkedEntityType.DOCUMENT:
-            parsed = entity_id.split("#", 1)
-            if len(parsed) == 2:
-                service.delete_document(user_id, parsed[0], parsed[1])
+        service.delete_entity_observed(user_id, entity_type, entity_id, operation=operation)
         logger.info(
             "search_projection_delete",
             extra={
                 "operation": operation,
-                "source_item_type": entity_type.value,
-                "projection_update_result": "success",
+                "entity_type": entity_type.value,
+                "entity_id": entity_id,
+                "authenticated_user_id": user_id,
+                "result": "success",
+                "retryable": False,
+                "projection_sync_status": "synchronized",
             },
         )
     except Exception:
@@ -3360,14 +3457,28 @@ def delete_search_entity_safe(
             "search_projection_delete_failed",
             extra={
                 "operation": operation,
-                "source_item_type": entity_type.value,
-                "projection_update_result": "failure",
+                "entity_type": entity_type.value,
+                "entity_id": entity_id,
+                "authenticated_user_id": user_id,
+                "result": "failure",
+                "retryable": True,
+                "projection_sync_status": "reconciliation_required",
             },
         )
 
+def normalize_idempotency_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if len(normalized) > 128 or any(character in normalized for character in "\r\n\t"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid idempotency key.")
+    return normalized
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
 
 def prepare_create_fields(payload: ReminderCreate) -> dict:
     data = payload.model_dump()

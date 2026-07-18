@@ -1,3 +1,4 @@
+import base64
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -6,9 +7,12 @@ from fastapi.testclient import TestClient
 
 from app.attachments_repository import LocalRecordAttachmentRepository, record_attachment_key
 from app.auth import UserContext, get_current_user
+from app.config import load_settings
+from app.encryption_service import EncryptionService
 from app.linked_items_repository import LocalLinkedItemRepository
 from app.main import (
     app,
+    get_encryption_service,
     get_linked_item_repository,
     get_record_attachment_repository,
     get_record_repository,
@@ -21,7 +25,7 @@ from app.records_repository import LocalRecordRepository
 from app.repository import LocalReminderRepository
 from app.schemas import AttachmentStatus, LinkedEntityType
 from app.search_repository import LocalSavedSearchViewRepository, LocalSearchIndexRepository
-from app.search_service import SearchProjectionService
+from app.search_service import SearchProjectionService, document_item_id, record_search_item_id
 
 
 @pytest.fixture()
@@ -32,8 +36,17 @@ def search_context(tmp_path):
     linked_repo = LocalLinkedItemRepository(tmp_path / "linked-items.json")
     search_repo = LocalSearchIndexRepository(tmp_path / "search-index.json")
     saved_view_repo = LocalSavedSearchViewRepository(tmp_path / "saved-views.json")
+    encryption_service = EncryptionService(
+        load_settings(
+            {
+                "RECORD_ENCRYPTION_MODE": "local",
+                "LOCAL_RECORDS_ENCRYPTION_KEY": base64.b64encode(b"2" * 32).decode("ascii"),
+            }
+        )
+    )
 
     app.dependency_overrides[get_record_repository] = lambda: record_repo
+    app.dependency_overrides[get_encryption_service] = lambda: encryption_service
     app.dependency_overrides[get_repository] = lambda: reminder_repo
     app.dependency_overrides[get_record_attachment_repository] = lambda: attachment_repo
     app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
@@ -275,3 +288,172 @@ def test_saved_search_views_are_user_scoped_and_crud(search_context):
     set_auth_user("local-dev-user")
     assert client.delete(f"/saved-views/{view_id}").status_code == 204
     assert client.get("/saved-views").json() == []
+
+
+def test_protected_values_never_enter_search_projection(search_context):
+    client, *_repos = search_context
+    record = create_record(client, title="Search-safe passport", record_type="passport")
+    protected_value = "P-NEVER-INDEX-8842"
+
+    protected = client.put(
+        f"/records/{record['id']}/protected", json={"document_number": protected_value}
+    )
+
+    assert protected.status_code == 200
+    assert search(client, q="never index 8842")["items"] == []
+    standard = client.get(f"/records/{record['id']}")
+    assert protected_value not in standard.text
+
+
+def test_renewal_and_completion_refresh_search_dates_and_status(search_context):
+    client, *_repos = search_context
+    previous_date = date.today() + timedelta(days=2)
+    new_date = date.today() + timedelta(days=400)
+    record = create_record(
+        client,
+        title="Car registration projection",
+        record_type="vehicle",
+        expiration_date=None,
+        renewal_date=previous_date.isoformat(),
+    )
+    renewal = create_reminder(
+        client,
+        title="Renew projection registration",
+        due_date=previous_date.isoformat(),
+        repeat="Yearly",
+        renewal_details={
+            "item_name": "Car registration projection",
+            "renewal_kind": "renewal",
+            "renewal_date": previous_date.isoformat(),
+        },
+    )
+    assert client.post(
+        f"/records/{record['id']}/links",
+        json={"target_type": "reminder", "target_id": renewal["id"], "relationship_type": "renews"},
+    ).status_code == 201
+
+    assert client.post(
+        f"/reminders/{renewal['id']}/renew", json={"new_due_date": new_date.isoformat()}
+    ).status_code == 200
+    record_result = next(
+        item for item in search(client, q="car registration projection")["items"]
+        if item["source_item_type"] == "record"
+    )
+    assert record_result["relevant_date"] == new_date.isoformat()
+
+    one_time = create_reminder(
+        client,
+        title="Complete projection reminder",
+        repeat="None",
+        reminder_type="generic",
+        renewal_details=None,
+    )
+    assert client.post(f"/reminders/{one_time['id']}/complete").status_code == 200
+    completed_result = search(client, q="complete projection reminder")["items"][0]
+    assert completed_result["status"] == "completed"
+
+
+def test_relationship_and_linked_title_changes_refresh_both_projection_contexts(search_context):
+    client, *_repos = search_context
+    record = create_record(client, title="Baxter projection", record_type="pet")
+    reminder = create_reminder(client, title="Rabies projection reminder")
+    created = client.post(
+        "/relationships",
+        json={
+            "source_item_type": "record",
+            "source_item_id": record["id"],
+            "target_item_type": "reminder",
+            "target_item_id": reminder["id"],
+            "relationship_type": "reminder_for",
+            "custom_label": "Annual vaccine projection",
+        },
+    )
+    assert created.status_code == 201
+    relationship_id = created.json()["relationship_id"]
+    assert {item["source_item_type"] for item in search(client, q="annual vaccine projection")["items"]} == {"record", "reminder"}
+
+    changed = client.patch(
+        f"/relationships/{relationship_id}",
+        json={"custom_label": "Clinic paperwork projection"},
+    )
+    assert changed.status_code == 200
+    assert search(client, q="annual vaccine projection")["items"] == []
+    assert {item["source_item_type"] for item in search(client, q="clinic paperwork projection")["items"]} == {"record", "reminder"}
+
+    renamed = client.put(f"/records/{record['id']}", json={"title": "Baxter renamed projection"})
+    assert renamed.status_code == 200
+    linked_reminder = next(
+        item for item in search(client, q="baxter renamed projection")["items"]
+        if item["source_item_type"] == "reminder"
+    )
+    assert linked_reminder["source_item_id"] == reminder["id"]
+
+    assert client.delete(f"/relationships/{relationship_id}").status_code == 204
+    assert search(client, q="clinic paperwork projection")["items"] == []
+
+
+def test_document_metadata_sync_uses_document_id_and_delete_removes_projection(search_context):
+    client, record_repo, reminder_repo, attachment_repo, linked_repo, search_repo, _saved_repo = search_context
+    record = create_record(client, title="Document projection parent")
+    attachment = create_attachment_metadata(attachment_repo, "local-dev-user", record["id"], "Original projection.pdf")
+    service = build_projection_service(record_repo, reminder_repo, attachment_repo, linked_repo, search_repo)
+    entity_id = document_item_id(record["id"], attachment.attachment_id)
+    service.sync_entity_and_neighbors_observed("local-dev-user", LinkedEntityType.DOCUMENT, entity_id, operation="test_document_create")
+
+    renamed = attachment_repo.update_attachment(
+        attachment.model_copy(update={"display_name": "Renamed projection.pdf"})
+    )
+    service.sync_entity_and_neighbors_observed("local-dev-user", LinkedEntityType.DOCUMENT, entity_id, operation="test_document_update")
+    assert search(client, q="original projection")["items"] == []
+    result = search(client, q="renamed projection")["items"][0]
+    assert result["source_item_id"] == entity_id
+    assert result["navigation_metadata"]["attachment_id"] == renamed.attachment_id
+
+    assert attachment_repo.delete_attachment_metadata("local-dev-user", record["id"], attachment.attachment_id)
+    service.sync_entity_and_neighbors_observed("local-dev-user", LinkedEntityType.DOCUMENT, entity_id, operation="test_document_delete")
+    assert search(client, q="renamed projection")["items"] == []
+
+
+def test_projection_failure_is_persisted_and_reconciliation_repairs_stale_and_orphan_rows(search_context, monkeypatch):
+    _client, record_repo, reminder_repo, attachment_repo, linked_repo, search_repo, _saved_repo = search_context
+    client = _client
+    created = create_record(client, title="Recoverable projection")
+    service = build_projection_service(record_repo, reminder_repo, attachment_repo, linked_repo, search_repo)
+    original_upsert = search_repo.upsert_projection
+
+    def fail_upsert(_projection):
+        raise RuntimeError("simulated projection storage outage")
+
+    monkeypatch.setattr(search_repo, "upsert_projection", fail_upsert)
+    with pytest.raises(RuntimeError, match="simulated projection storage outage"):
+        service.sync_entity_observed(
+            "local-dev-user", LinkedEntityType.RECORD, created["id"], operation="record_update"
+        )
+    failures = search_repo.list_sync_failures("local-dev-user")
+    assert [(item.entity_id, item.operation, item.retryable) for item in failures] == [
+        (created["id"], "record_update", True)
+    ]
+
+    monkeypatch.setattr(search_repo, "upsert_projection", original_upsert)
+    projection = search_repo.get_projection("local-dev-user", record_search_item_id(created["id"]))
+    assert projection is not None
+    original_upsert(projection.model_copy(update={"display_title": "Stale title", "projection_version": 1}))
+
+    orphan_source = create_record(client, title="Orphan projection")
+    orphan_id = record_search_item_id(orphan_source["id"])
+    assert record_repo.delete_record("local-dev-user", orphan_source["id"])
+    assert search_repo.get_projection("local-dev-user", orphan_id) is not None
+
+    repaired = service.rebuild_user("local-dev-user")
+    assert repaired.failures_retried == 1
+    assert repaired.failures_remaining == 0
+    assert repaired.projections_deleted == 1
+    current = search_repo.get_projection("local-dev-user", record_search_item_id(created["id"]))
+    assert current is not None
+    assert current.display_title == "Recoverable projection"
+    assert current.projection_version > 1
+    assert search_repo.get_projection("local-dev-user", orphan_id) is None
+
+    second = service.rebuild_user("local-dev-user")
+    assert second.projections_deleted == 0
+    assert second.failures_remaining == 0

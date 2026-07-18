@@ -1,7 +1,7 @@
 import pytest
 
 from app.config import load_settings
-from app.secret_provider import SecretConfigurationError, SecretProvider
+from app.secret_provider import SecretProvider
 
 
 class FakeSecretsManagerClient:
@@ -41,8 +41,8 @@ def test_secret_provider_loads_and_caches_push_secret():
     assert client.calls == ["push-secret"]
 
 
-def test_secret_provider_disallows_plaintext_production_fallback():
-    provider = SecretProvider(
+def test_secret_provider_disallows_plaintext_production_fallback_at_startup():
+    with pytest.raises(ValueError, match="local plaintext secret providers are not allowed"):
         load_settings(
             {
                 "APP_ENV": "production",
@@ -50,12 +50,6 @@ def test_secret_provider_disallows_plaintext_production_fallback():
                 "VAPID_PRIVATE_KEY": "push-private-key",
             }
         )
-    )
-
-    with pytest.raises(SecretConfigurationError):
-        provider.google_client_secret()
-    with pytest.raises(SecretConfigurationError):
-        provider.vapid_private_key()
 
 
 def test_secret_provider_allows_plaintext_local_fallback():

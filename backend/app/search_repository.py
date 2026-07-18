@@ -1,15 +1,17 @@
-﻿import json
+import json
 import os
 import threading
 from pathlib import Path
 from typing import Any, Protocol
 
-from app.models import SavedSearchView, SearchProjection
+from app.models import ProjectionSyncFailure, SavedSearchView, SearchProjection
 
 SEARCH_PROJECTION_PREFIX = "ITEM#"
 SEARCH_TOKEN_PREFIX = "TOKEN#"
 SEARCH_PROJECTION_KIND = "search_projection"
 SEARCH_TOKEN_KIND = "search_token"
+SEARCH_SYNC_FAILURE_PREFIX = "SYNC_FAILURE#"
+SEARCH_SYNC_FAILURE_KIND = "search_sync_failure"
 
 
 def search_projection_key(search_item_id: str) -> str:
@@ -39,6 +41,15 @@ class SearchIndexRepository(Protocol):
     def delete_projection(self, user_id: str, search_item_id: str) -> bool:
         ...
 
+    def save_sync_failure(self, failure: ProjectionSyncFailure) -> ProjectionSyncFailure:
+        ...
+
+    def clear_sync_failure(self, user_id: str, entity_type: str, entity_id: str) -> bool:
+        ...
+
+    def list_sync_failures(self, user_id: str, limit: int = 100) -> list[ProjectionSyncFailure]:
+        ...
+
 
 class SavedSearchViewRepository(Protocol):
     def create_view(self, view: SavedSearchView) -> SavedSearchView:
@@ -60,11 +71,14 @@ class SavedSearchViewRepository(Protocol):
 class LocalSearchIndexRepository:
     def __init__(self, file_path: str | Path):
         self.file_path = Path(file_path)
+        self.failure_file_path = self.file_path.with_name(f"{self.file_path.stem}-failures{self.file_path.suffix}")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
         if not self.file_path.exists():
             self._write_all_unlocked([])
+        if not self.failure_file_path.exists():
+            self._write_failures_unlocked([])
 
     def upsert_projection(self, projection: SearchProjection) -> SearchProjection:
         with self._lock:
@@ -135,6 +149,54 @@ class LocalSearchIndexRepository:
                 return False
             self._write_all_unlocked(next_projections)
             return True
+
+    def save_sync_failure(self, failure: ProjectionSyncFailure) -> ProjectionSyncFailure:
+        with self._lock:
+            failures = [
+                item
+                for item in self._read_failures_unlocked()
+                if not (
+                    item.user_id == failure.user_id
+                    and item.entity_type == failure.entity_type
+                    and item.entity_id == failure.entity_id
+                )
+            ]
+            failures.append(failure)
+            self._write_failures_unlocked(failures)
+            return failure
+
+    def clear_sync_failure(self, user_id: str, entity_type: str, entity_id: str) -> bool:
+        with self._lock:
+            failures = self._read_failures_unlocked()
+            remaining = [
+                item
+                for item in failures
+                if not (
+                    item.user_id == user_id
+                    and item.entity_type.value == entity_type
+                    and item.entity_id == entity_id
+                )
+            ]
+            if len(remaining) == len(failures):
+                return False
+            self._write_failures_unlocked(remaining)
+            return True
+
+    def list_sync_failures(self, user_id: str, limit: int = 100) -> list[ProjectionSyncFailure]:
+        with self._lock:
+            return [item for item in self._read_failures_unlocked() if item.user_id == user_id][:limit]
+
+    def _read_failures_unlocked(self) -> list[ProjectionSyncFailure]:
+        if not self.failure_file_path.exists():
+            return []
+        raw_data = json.loads(self.failure_file_path.read_text(encoding="utf-8") or "[]")
+        return [ProjectionSyncFailure.model_validate(item) for item in raw_data]
+
+    def _write_failures_unlocked(self, failures: list[ProjectionSyncFailure]) -> None:
+        serialized = [failure.model_dump(mode="json") for failure in failures]
+        temp_path = self.failure_file_path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+        os.replace(temp_path, self.failure_file_path)
 
     def _read_all_unlocked(self) -> list[SearchProjection]:
         if not self.file_path.exists():
@@ -236,6 +298,34 @@ class DynamoSearchIndexRepository:
             ReturnValues="ALL_OLD",
         )
         return "Attributes" in response
+
+    def save_sync_failure(self, failure: ProjectionSyncFailure) -> ProjectionSyncFailure:
+        item = failure.model_dump(mode="json")
+        item.update(
+            {
+                "entity_kind": SEARCH_SYNC_FAILURE_KIND,
+                "search_key": f"{SEARCH_SYNC_FAILURE_PREFIX}{failure.entity_type.value}#{failure.entity_id}",
+            }
+        )
+        self.table.put_item(Item=item)
+        return failure
+
+    def clear_sync_failure(self, user_id: str, entity_type: str, entity_id: str) -> bool:
+        response = self.table.delete_item(
+            Key={"user_id": user_id, "search_key": f"{SEARCH_SYNC_FAILURE_PREFIX}{entity_type}#{entity_id}"},
+            ReturnValues="ALL_OLD",
+        )
+        return "Attributes" in response
+
+    def list_sync_failures(self, user_id: str, limit: int = 100) -> list[ProjectionSyncFailure]:
+        items = self._query_prefix(user_id, SEARCH_SYNC_FAILURE_PREFIX, limit)
+        return [
+            ProjectionSyncFailure.model_validate(
+                {key: value for key, value in item.items() if key not in {"entity_kind", "search_key"}}
+            )
+            for item in items
+            if item.get("entity_kind") == SEARCH_SYNC_FAILURE_KIND
+        ]
 
     def _query_prefix(self, user_id: str, prefix: str, limit: int) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []

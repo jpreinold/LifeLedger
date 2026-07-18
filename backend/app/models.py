@@ -244,6 +244,15 @@ class SearchProjection(BaseModel):
     navigation_metadata: dict[str, str] = Field(default_factory=dict)
     projection_version: int = 1
 
+class ProjectionSyncFailure(BaseModel):
+    user_id: str
+    entity_type: LinkedEntityType
+    entity_id: str
+    operation: str
+    retryable: bool = True
+    attempt_count: int = 1
+    last_failed_at: datetime
+
 
 class SavedSearchView(BaseModel):
     saved_view_id: str

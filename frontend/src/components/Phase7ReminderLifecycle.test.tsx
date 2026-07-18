@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { getActionCenterGroups } from '../lib/reminderDisplay'
 import type { Reminder } from '../types/reminder'
 import { ReminderDetailDrawer } from './ReminderDetailDrawer'
+import { ReminderForm } from './ReminderForm'
 import { ReminderList } from './ReminderList'
 
 function reminder(overrides: Partial<Reminder>): Reminder {
@@ -54,6 +55,34 @@ function reminder(overrides: Partial<Reminder>): Reminder {
 }
 
 describe('Phase 7 reminder lifecycle UI', () => {
+  it('keeps existing generic reminder creation working', async () => {
+    const user = userEvent.setup()
+    const onCreate = vi.fn(async () => true)
+    const onClose = vi.fn()
+    render(
+      <ReminderForm
+        isOpen
+        isSaving={false}
+        onBrowseTemplates={vi.fn()}
+        onClose={onClose}
+        onCreate={onCreate}
+        templateDraft={null}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('Title'), 'Pay annual fee')
+    const dueDate = screen.getByLabelText('Due date')
+    await user.clear(dueDate)
+    await user.type(dueDate, '2026-08-01')
+    await user.click(screen.getByRole('button', { name: 'Add reminder' }))
+
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Pay annual fee',
+      due_date: '2026-08-01',
+      reminder_type: 'generic',
+    })))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
   it('groups active reminders by lifecycle status and filters archived linked records', () => {
     const groups = getActionCenterGroups([
       reminder({ id: 'older-overdue', title: 'Older overdue', status: 'Overdue', due_date: '2026-06-01', effective_attention_date: '2026-06-01' }),

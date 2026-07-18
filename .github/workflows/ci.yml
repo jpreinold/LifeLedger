@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      AUTH_MODE: local
+      PERSISTENCE_MODE: local
+      RECORD_ENCRYPTION_MODE: disabled
+      DOCUMENT_STORAGE_MODE: disabled
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt
+      - name: Backend tests and security configuration tests
+        run: python -m pytest -q
+      - name: Import and package validation
+        run: |
+          python -m compileall -q app lambda_handler.py digest_push_handler.py attachment_scan_finalizer.py backfill_search.py
+          python -c "import app.main, lambda_handler, digest_push_handler, attachment_scan_finalizer"
+      - uses: aws-actions/setup-sam@v2
+      - name: Validate SAM template
+        run: sam validate --lint --template-file template.yaml
+      - name: Package SAM application
+        run: sam build --template-file template.yaml
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build

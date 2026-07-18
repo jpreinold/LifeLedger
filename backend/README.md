@@ -1,6 +1,6 @@
 # LifeLedger Backend
 
-FastAPI backend for LifeLedger reminders and records. Local JSON persistence works by default, deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and can link to related records and reminders through explicit user-created linked item edges. Records can also have secure PDF/JPEG/PNG attachments stored in private S3 quarantine/clean buckets after malware scanning and file validation. Optional protected record details and Google OAuth token bundles are application-encrypted before persistence when encryption is configured.
+FastAPI backend for LifeLedger reminders and records. Local JSON persistence works for explicit local development; deployed mode uses Cognito-authenticated, user-scoped DynamoDB storage, and smart reminder fields support birthdays, renewal/expiration, maintenance, in-app alerts, Daily Digest preferences, optional Daily Digest push notifications, and one-way Google Calendar sync foundations without changing the reminders table key schema. Records are first-class structured entities in their own repository/table and can link to related records and reminders through explicit user-created linked item edges. Records can also have secure PDF/JPEG/PNG attachments stored in private S3 quarantine/clean buckets after malware scanning and file validation. Optional protected record details and Google OAuth token bundles are application-encrypted before persistence when encryption is configured.
 
 ## Run Locally
 
@@ -84,7 +84,8 @@ Local development does not require environment variables.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `APP_ENV` | `local` | Runtime environment name. |
+| APP_ENV | local | Runtime environment name; production deployment must explicitly use production. |
+| APP_COMPONENT | api | Component-specific startup validation (api, digest, or attachment_finalizer); SAM sets this automatically. |
 | `AUTH_MODE` | `local` | `local` uses `LOCAL_DEV_USER_ID`; `cognito` requires Cognito claims. |
 | `LOCAL_DEV_USER_ID` | `local-dev-user` | User id assigned to local requests. |
 | `PERSISTENCE_MODE` | `local` | `local` uses JSON; `dynamodb` uses DynamoDB. |
@@ -117,7 +118,7 @@ Local development does not require environment variables.
 | `PUSH_SECRET_ARN` | empty | Secrets Manager ARN for JSON `{"vapid_private_key":"..."}` in production. |
 | `VAPID_PRIVATE_KEY` | empty | Local-only plaintext fallback. Do not commit it. |
 | `VAPID_SUBJECT` | empty | VAPID contact subject such as `mailto:you@example.com`. |
-| `ALLOW_PLAINTEXT_PRODUCTION_SECRETS` | `false` | Production guard for legacy plaintext secret fallback. Keep false for normal production. |
+| `ALLOW_PLAINTEXT_PRODUCTION_SECRETS` | `false` | Legacy local/test compatibility only. Production always rejects plaintext secret providers. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com` | Comma-separated frontend origins allowed to call the API. |
 | `DOCUMENT_STORAGE_MODE` | `disabled` locally, `s3` in production defaults | `disabled`, `local`, or `s3`. Local/SAM local is explicitly disabled. |
 | `DOCUMENTS_QUARANTINE_BUCKET` | empty | Private S3 quarantine bucket for presigned browser uploads. |
@@ -225,6 +226,8 @@ cd backend
 python run_digest_push.py
 ```
 
+Production startup rejects local auth/persistence, disabled protected-record encryption, missing Cognito/KMS/document settings, unsafe CORS origins, and prohibited local secret providers before serving requests. backend/env.local.json keeps local development explicit and unchanged.
+
 Deploy with Cognito and DynamoDB:
 
 ```powershell
@@ -245,7 +248,7 @@ RemindersTableName=lifeledger-reminders-auth
 RecordsTableName=lifeledger-records-auth
 RecordAttachmentsTableName=lifeledger-record-attachments-auth
 LinkedItemsTableName=lifeledger-linked-items-auth
-CorsAllowedOrigins=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
+CorsAllowedOrigins=https://lifeledger.jpreinold.com,https://www.lifeledger.jpreinold.com
 VapidPublicKey=<public-vapid-key>
 PushSecretArn=<secrets-manager-arn-with-vapid_private_key>
 VapidSubject=mailto:you@example.com
@@ -255,4 +258,20 @@ GoogleOAuthRedirectUri=<authorized-google-oauth-redirect-uri>
 GoogleCalendarScopes=https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly
 ```
 
-`sam deploy --guided` creates `samconfig.toml` for your local AWS account and deployment choices. That file is ignored by git. Use `samconfig.example.toml` as a safe reference that does not include credentials, account IDs, or local profile names.
+`sam deploy --guided` creates `samconfig.toml` for your local AWS account and deployment choices. That file is ignored by git. Use `samconfig.example.toml` as a fail-closed production reference that does not include credentials or local profile names. Replace its placeholder account IDs, secret ARNs, and public client values before use.
+
+## Search Projection Reconciliation
+
+Projection failures are persisted as safe identifiers only. Rebuild one item:
+
+```powershell
+python backfill_search.py --user-id <user-id> --entity-type record --entity-id <record-id>
+```
+
+Rebuild a user's bounded source set, retry failures, repair stale projection versions, and remove verified orphans:
+
+```powershell
+python backfill_search.py --user-id <user-id> --limit 1000
+```
+
+Add `--dry-run` for a read-only count. If the bound truncates a source collection, orphan deletion is skipped for safety. Protected payloads are never decrypted or indexed by reconciliation.
