@@ -297,6 +297,30 @@ def test_upload_intent_is_user_scoped_and_uses_non_pii_object_key(attachment_con
     assert blocked.status_code == 404
 
 
+def test_upload_intent_idempotency_reuses_metadata_and_rejects_a_different_file(attachment_context):
+    client, record_repo, attachment_repo, storage, _settings = attachment_context
+    set_auth_user("user-a")
+    record = create_record(record_repo, user_id="user-a")
+    headers = {"Idempotency-Key": "guided-passport-setup:document"}
+    payload = {"filename": "Passport.pdf", "content_type": "application/pdf", "size_bytes": 1024}
+
+    first = client.post(f"/records/{record.id}/attachments/upload-intent", json=payload, headers=headers)
+    second = client.post(f"/records/{record.id}/attachments/upload-intent", json=payload, headers=headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["attachment_id"] == first.json()["attachment_id"]
+    assert len(attachment_repo.list_for_record("user-a", record.id)) == 1
+    assert len(storage.uploads) == 2
+
+    mismatch = client.post(
+        f"/records/{record.id}/attachments/upload-intent",
+        json={**payload, "filename": "Different.pdf"},
+        headers=headers,
+    )
+    assert mismatch.status_code == 409
+
+
 @pytest.mark.parametrize(
     "payload",
     [

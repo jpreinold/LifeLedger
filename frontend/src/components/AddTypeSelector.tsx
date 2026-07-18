@@ -2,6 +2,7 @@ import { Bell, Cake, ChevronRight, Grid2X2Plus, RefreshCcw, Wrench } from 'lucid
 import type { LucideIcon } from 'lucide-react'
 
 import { getEntityDefinitions, primaryEntityTypes } from '../lib/entityRegistry'
+import { guidedWorkflowOptions, type GuidedWorkflowId } from '../lib/guidedWorkflows'
 import { useDrawerCloseTransition } from '../lib/useDrawerCloseTransition'
 import type { RecordType } from '../types/record'
 import { SheetDrawer } from './SheetDrawer'
@@ -15,6 +16,7 @@ interface AddTypeSelectorProps {
   onChooseMaintenance: () => void
   onChooseItem: (type: RecordType) => void
   onBrowseItemTypes: () => void
+  onChooseWorkflow?: (workflowId: GuidedWorkflowId) => void
 }
 
 interface AddOption {
@@ -35,6 +37,7 @@ export function AddTypeSelector({
   onChooseMaintenance,
   onChooseItem,
   onBrowseItemTypes,
+  onChooseWorkflow,
 }: AddTypeSelectorProps) {
   const { closeWithAction, isDrawerOpen, requestClose } = useDrawerCloseTransition({ isOpen, onClose })
   const itemOptions: AddOption[] = getEntityDefinitions(primaryEntityTypes).map((definition) => ({
@@ -79,6 +82,14 @@ export function AddTypeSelector({
       onClick: () => closeWithAction(onChooseMaintenance),
     },
   ]
+  const guidedOptions: AddOption[] = guidedWorkflowOptions.map((workflow) => ({
+    title: workflow.intentLabel,
+    description: workflow.shortDescription,
+    icon: workflow.icon,
+    tone: workflow.associatedItemType === 'pet' ? 'pink' : workflow.associatedItemType === 'vehicle' ? 'green' : 'blue',
+    ariaLabel: workflow.intentLabel,
+    onClick: () => closeWithAction(() => onChooseWorkflow?.(workflow.id)),
+  }))
 
   return (
     <SheetDrawer
@@ -91,6 +102,13 @@ export function AddTypeSelector({
       subtitle="Choose a real-world item, or add something that needs your attention."
       title="What would you like to keep track of?"
     >
+      {onChooseWorkflow ? (
+        <div className="add-option-group guided-add-options" aria-labelledby="common-tracking-heading">
+          <h3 id="common-tracking-heading">Common things to track</h3>
+          {guidedOptions.map((option) => <AddTypeOption option={option} key={option.ariaLabel} />)}
+        </div>
+      ) : null}
+
       <div className="add-option-group" aria-labelledby="important-items-heading">
         <h3 id="important-items-heading">Important items</h3>
         {itemOptions.map((option) => <AddTypeOption option={option} key={option.ariaLabel} />)}

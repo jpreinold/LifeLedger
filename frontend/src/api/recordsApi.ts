@@ -76,9 +76,10 @@ export const recordsApi = {
       cache: 'no-store',
     }),
 
-  createAttachmentUploadIntent: (id: string, input: RecordAttachmentUploadIntentInput) =>
+  createAttachmentUploadIntent: (id: string, input: RecordAttachmentUploadIntentInput, idempotencyKey?: string) =>
     apiRequest<RecordAttachmentUploadIntent>(`/records/${id}/attachments/upload-intent`, {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify(input),
       cache: 'no-store',
     }),
@@ -125,12 +126,12 @@ export const recordsApi = {
     }
   },
 
-  uploadRecordAttachment: async (id: string, file: File) => {
+  uploadRecordAttachment: async (id: string, file: File, idempotencyKey?: string) => {
     const intent = await recordsApi.createAttachmentUploadIntent(id, {
       filename: file.name,
       content_type: file.type,
       size_bytes: file.size,
-    })
+    }, idempotencyKey)
     await recordsApi.uploadAttachmentFile(intent.upload, file)
     return recordsApi.completeAttachmentUpload(id, intent.attachment_id)
   },

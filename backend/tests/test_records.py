@@ -402,6 +402,25 @@ def test_dynamic_record_field_crud_preserves_record_and_validates_types(client, 
     assert record_repo.get_record("local-dev-user", created["id"]) is not None
 
 
+def test_dynamic_record_field_key_rejects_duplicate_retry_without_overwriting(client):
+    created = client.post("/records", json=record_payload(record_type="vehicle", title="Vehicle")).json()
+    detail = {
+        "key": "registration_expiration",
+        "label": "Registration expiration date",
+        "field_type": "date",
+        "value": "2030-04-15",
+    }
+
+    first = client.post(f"/records/{created['id']}/fields", json=detail)
+    retry = client.post(f"/records/{created['id']}/fields", json={**detail, "value": "2031-04-15"})
+
+    assert first.status_code == 201
+    assert retry.status_code == 409
+    current = client.get(f"/records/{created['id']}").json()
+    assert len(current["dynamic_fields"]) == 1
+    assert current["dynamic_fields"][0]["value"] == "2030-04-15"
+
+
 def test_sensitive_dynamic_field_is_encrypted_masked_revealed_and_user_scoped(encrypted_client, record_repo, caplog):
     caplog.set_level("INFO", logger="app.security")
     set_auth_user("user-a")

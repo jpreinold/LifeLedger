@@ -75,6 +75,22 @@ def test_health(client):
     assert response.json() == {"status": "ok"}
 
 
+def test_reminder_create_idempotency_key_reuses_one_user_scoped_reminder(client):
+    headers = {"Idempotency-Key": "guided-passport-setup:responsibility"}
+    first = client.post("/reminders", json=make_payload(title="Passport renewal"), headers=headers)
+    second = client.post("/reminders", json=make_payload(title="Passport renewal"), headers=headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
+    assert len(client.get("/reminders").json()) == 1
+
+    set_auth_user("another-user")
+    other_user = client.post("/reminders", json=make_payload(title="Passport renewal"), headers=headers)
+    assert other_user.status_code == 201
+    assert other_user.json()["id"] != first.json()["id"]
+
+
 def test_health_stays_public_in_cognito_mode(client, monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "cognito")
     get_settings.cache_clear()

@@ -34,6 +34,7 @@ import {
 import { formatDynamicFieldValue, getVisibleDynamicFieldCount, hasDisplayValue, hasSensitiveDynamicFields, maskedValue } from '../lib/fieldRendering'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
 import type { SuggestedResponsibilityDefinition } from '../lib/entityRegistry'
+import { getGuidedWorkflowsForItemType, type GuidedWorkflowDefinition, type GuidedWorkflowId } from '../lib/guidedWorkflows'
 import { getCategoryPresentation, getResponsibilityPresentation, getSectionLabel, productTerms } from '../lib/terminology'
 import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
 import type { Reminder } from '../types/reminder'
@@ -55,6 +56,7 @@ interface RecordDetailDrawerProps {
   reminders: Reminder[]
   onArchive: (record: LifeRecord) => Promise<void>
   onAddResponsibility: (record: LifeRecord, suggestion?: SuggestedResponsibilityDefinition) => void
+  onStartGuidedWorkflow?: (record: LifeRecord, workflowId: GuidedWorkflowId) => void
   onBack?: () => void
   onClose: () => void
   onEdit: (record: LifeRecord) => void
@@ -79,6 +81,7 @@ export function RecordDetailDrawer({
   reminders,
   onArchive,
   onAddResponsibility,
+  onStartGuidedWorkflow,
   onBack,
   onClose,
   onEdit,
@@ -124,6 +127,7 @@ export function RecordDetailDrawer({
   const suggestedDynamicFields = definition.dynamicFieldPresets.filter(
     (field) => !protectedFieldKeys.has(field.key) && !record.dynamic_fields.some((existing) => existing.key === field.key),
   )
+  const guidedWorkflowSuggestions = getGuidedWorkflowsForItemType(record.record_type)
 
   const recordReminders = reminders.filter((reminder) =>
     reminder.linked_records.some((linkedRecord) => linkedRecord.id === record.id),
@@ -562,7 +566,9 @@ export function RecordDetailDrawer({
                 recentEvents={recentReminderEvents}
                 nextReminder={nextRecordReminder}
                 suggestions={definition.suggestedResponsibilities}
+                guidedSuggestions={guidedWorkflowSuggestions}
                 onAddResponsibility={(suggestion) => onAddResponsibility(record, suggestion)}
+                onStartGuidedWorkflow={onStartGuidedWorkflow ? (workflowId) => onStartGuidedWorkflow(record, workflowId) : undefined}
                 onOpenReminder={onOpenLinkedReminder}
               />
             </div>
@@ -658,13 +664,17 @@ function RecordReminderActivitySection({
   overdueCount,
   recentEvents,
   suggestions,
+  guidedSuggestions,
+  onStartGuidedWorkflow,
 }: {
   activeReminders: Reminder[]
   nextReminder: Reminder | null
   overdueCount: number
   recentEvents: RecordReminderEventSummary[]
   suggestions: SuggestedResponsibilityDefinition[]
+  guidedSuggestions: GuidedWorkflowDefinition[]
   onAddResponsibility: (suggestion?: SuggestedResponsibilityDefinition) => void
+  onStartGuidedWorkflow?: (workflowId: GuidedWorkflowId) => void
   onOpenReminder: (reminderId: string) => void
 }) {
   const presentation = getResponsibilityPresentation('item')
@@ -717,6 +727,21 @@ function RecordReminderActivitySection({
       ) : (
         <p className="linked-items-state">No upcoming responsibilities yet.</p>
       )}
+
+      {onStartGuidedWorkflow && guidedSuggestions.length > 0 ? (
+        <div className="responsibility-suggestions guided-responsibility-suggestions" aria-label="Guided tracking suggestions">
+          <h4>Set up together</h4>
+          <p>LifeLedger can guide you through the details, responsibility, and optional document.</p>
+          <div>
+            {guidedSuggestions.map((workflow) => (
+              <button type="button" className="small-outline-button" key={workflow.id} onClick={() => onStartGuidedWorkflow(workflow.id)}>
+                <Plus size={14} aria-hidden="true" />
+                {workflow.intentLabel}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {suggestions.length > 0 ? (
         <div className="responsibility-suggestions" aria-label="Suggested responsibilities">
