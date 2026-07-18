@@ -1,6 +1,9 @@
-import { Bell, Cake, ChevronRight, FileText, RefreshCcw, Wrench } from 'lucide-react'
+import { Bell, Cake, ChevronRight, Grid2X2Plus, RefreshCcw, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+
+import { getEntityDefinitions, primaryEntityTypes } from '../lib/entityRegistry'
 import { useDrawerCloseTransition } from '../lib/useDrawerCloseTransition'
+import type { RecordType } from '../types/record'
 import { SheetDrawer } from './SheetDrawer'
 
 interface AddTypeSelectorProps {
@@ -10,7 +13,8 @@ interface AddTypeSelectorProps {
   onChooseReminder: () => void
   onChooseRenewal: () => void
   onChooseMaintenance: () => void
-  onChooseRecord: () => void
+  onChooseItem: (type: RecordType) => void
+  onBrowseItemTypes: () => void
 }
 
 interface AddOption {
@@ -18,8 +22,8 @@ interface AddOption {
   description: string
   icon: LucideIcon
   tone: 'blue' | 'pink' | 'green' | 'orange'
-  disabled?: boolean
-  onClick?: () => void
+  ariaLabel: string
+  onClick: () => void
 }
 
 export function AddTypeSelector({
@@ -29,45 +33,50 @@ export function AddTypeSelector({
   onChooseReminder,
   onChooseRenewal,
   onChooseMaintenance,
-  onChooseRecord,
+  onChooseItem,
+  onBrowseItemTypes,
 }: AddTypeSelectorProps) {
   const { closeWithAction, isDrawerOpen, requestClose } = useDrawerCloseTransition({ isOpen, onClose })
-
-  const options: AddOption[] = [
+  const itemOptions: AddOption[] = getEntityDefinitions(primaryEntityTypes).map((definition) => ({
+    title: getChoiceLabel(definition.type, definition.singularLabel),
+    description: definition.shortDescription,
+    icon: definition.icon,
+    tone: definition.type === 'pet' ? 'pink' : definition.type === 'vehicle' || definition.type === 'home' ? 'green' : 'blue',
+    ariaLabel: definition.createActionLabel,
+    onClick: () => closeWithAction(() => onChooseItem(definition.type)),
+  }))
+  const responsibilityOptions: AddOption[] = [
     {
-      title: 'Reminder',
-      description: 'For one-time or recurring tasks.',
+      title: 'A reminder',
+      description: 'Remember a one-time or recurring task.',
       icon: Bell,
       tone: 'blue',
+      ariaLabel: 'Add reminder',
       onClick: () => closeWithAction(onChooseReminder),
     },
     {
-      title: 'Birthday',
-      description: 'Track birthdays and calculate age.',
+      title: 'A birthday',
+      description: 'Keep a birthday and age calculation on your radar.',
       icon: Cake,
       tone: 'pink',
+      ariaLabel: 'Add birthday reminder',
       onClick: () => closeWithAction(onChooseBirthday),
     },
     {
-      title: 'Renewal',
-      description: 'Track renewals, expirations, subscriptions, warranties, and review dates.',
+      title: 'A renewal',
+      description: 'Track an expiration, renewal, or review date.',
       icon: RefreshCcw,
       tone: 'orange',
+      ariaLabel: 'Add renewal reminder',
       onClick: () => closeWithAction(onChooseRenewal),
     },
     {
       title: 'Maintenance',
-      description: 'Track recurring home, vehicle, pet, and personal maintenance.',
+      description: 'Plan recurring home, vehicle, pet, or personal care.',
       icon: Wrench,
       tone: 'green',
+      ariaLabel: 'Add maintenance reminder',
       onClick: () => closeWithAction(onChooseMaintenance),
-    },
-    {
-      title: 'Record',
-      description: 'Save structured personal details.',
-      icon: FileText,
-      tone: 'green',
-      onClick: () => closeWithAction(onChooseRecord),
     },
   ]
 
@@ -79,36 +88,41 @@ export function AddTypeSelector({
       isOpen={isOpen && isDrawerOpen}
       labelledBy="add-type-heading"
       onClose={requestClose}
-      subtitle="Choose the kind of item to create."
-      title="What would you like to add?"
+      subtitle="Choose a real-world item, or add something that needs your attention."
+      title="What would you like to keep track of?"
     >
-      {options.map((option) => (
-        <AddTypeOption option={option} key={option.title} />
-      ))}
+      <div className="add-option-group" aria-labelledby="important-items-heading">
+        <h3 id="important-items-heading">Important items</h3>
+        {itemOptions.map((option) => <AddTypeOption option={option} key={option.ariaLabel} />)}
+        <button type="button" className="add-type-option add-type-option-blue" onClick={() => closeWithAction(onBrowseItemTypes)} aria-label="Browse all item types">
+          <span className="add-type-icon" aria-hidden="true"><Grid2X2Plus size={22} /></span>
+          <span className="add-type-copy"><strong>More item types</strong><span>See every item LifeLedger currently supports.</span></span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="add-option-group add-option-group-secondary" aria-labelledby="responsibilities-and-dates-heading">
+        <h3 id="responsibilities-and-dates-heading">Responsibilities and dates</h3>
+        {responsibilityOptions.map((option) => <AddTypeOption option={option} key={option.ariaLabel} />)}
+      </div>
     </SheetDrawer>
   )
 }
 
 function AddTypeOption({ option }: { option: AddOption }) {
   const Icon = option.icon
-
   return (
-    <button
-      type="button"
-      className={`add-type-option add-type-option-${option.tone}`}
-      disabled={option.disabled}
-      onClick={option.onClick}
-      aria-label={option.disabled ? `${option.title} coming soon` : `Add ${option.title}`}
-    >
-      <span className="add-type-icon" aria-hidden="true">
-        <Icon size={22} />
-      </span>
-      <span className="add-type-copy">
-        <strong>{option.title}</strong>
-        <span>{option.description}</span>
-      </span>
-      {option.disabled ? <small>Coming soon</small> : <ChevronRight size={18} aria-hidden="true" />}
+    <button type="button" className={`add-type-option add-type-option-${option.tone}`} onClick={option.onClick} aria-label={option.ariaLabel}>
+      <span className="add-type-icon" aria-hidden="true"><Icon size={22} /></span>
+      <span className="add-type-copy"><strong>{option.title}</strong><span>{option.description}</span></span>
+      <ChevronRight size={18} aria-hidden="true" />
     </button>
   )
 }
 
+function getChoiceLabel(type: RecordType, singularLabel: string) {
+  if (type === 'insurance') return 'Insurance'
+  if (type === 'general') return 'Something else'
+  if (type === 'appliance') return 'An appliance'
+  return `A ${singularLabel.toLocaleLowerCase()}`
+}

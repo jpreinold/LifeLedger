@@ -1,4 +1,5 @@
 import { getAuthorizationHeaders } from '../auth/session'
+import { translateApiPresentationMessage } from '../lib/terminology'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
@@ -55,7 +56,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   if (!response.ok) {
     const category = categoryForStatus(response.status)
     const detail = response.status < 500 ? await safeErrorDetail(response) : null
-    throw new ApiError(detail ?? defaultMessage(category), {
+    throw new ApiError(detail ? translateApiPresentationMessage(detail) : defaultMessage(category), {
       category,
       status: response.status,
       requestId,

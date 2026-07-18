@@ -35,7 +35,6 @@ const filters: TemplateFilter[] = [
   'Subscriptions',
   'Documents',
   'Maintenance',
-  'Coming soon',
 ]
 
 export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplate }: LifeAdminTemplatesProps) {
@@ -46,7 +45,7 @@ export function LifeAdminTemplates({ isOpen, onClose, onStartBlank, onUseTemplat
     const normalizedQuery = query.trim().toLowerCase()
 
     return lifeAdminTemplates.filter(
-      (template) => matchesFilter(template, activeFilter) && matchesQuery(template, normalizedQuery),
+      (template) => template.targetType !== 'comingSoon' && matchesFilter(template, activeFilter) && matchesQuery(template, normalizedQuery),
     )
   }, [activeFilter, query])
 

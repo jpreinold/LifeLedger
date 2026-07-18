@@ -19,10 +19,14 @@ import {
   tagsToText,
   type RecordField,
 } from '../lib/recordTypes'
+import type { SuggestedDetailDefinition } from '../lib/entityRegistry'
 import { formatDueDateLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
-import { relationshipLabels, type LinkedItem, type LinkedItemsResponse, type LinkCreateRequest, type RelationshipType } from '../types/linkedItem'
-import type { LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
+import { getDynamicFieldTypeLabel } from '../lib/fieldRendering'
+import { getRelationshipPresentation, productTerms } from '../lib/terminology'
+import type { LinkedItem, LinkedItemsResponse, LinkCreateRequest, RelationshipType } from '../types/linkedItem'
+import type { DynamicFieldValue, DynamicRecordFieldInput, LifeRecord, ProtectedRecordField, ProtectedRecordInput, RecordInput, RecordType } from '../types/record'
 import type { Reminder } from '../types/reminder'
+import { DetailDraftDrawer, DraftValueControl, type DetailDraft } from './DetailDraftDrawer'
 import { AddLinkedItemDrawer, LinkedItemsPanel, type LinkDraft } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
@@ -41,7 +45,7 @@ interface RecordFormProps {
   recordType: RecordType
   reminders: Reminder[]
   onClose: () => void
-  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[], links: LinkCreateRequest[], workflowId: string) => Promise<RecordCreationResult | boolean>
+  onCreate: (input: RecordInput, protectedInput: ProtectedRecordInput, files: File[], links: LinkCreateRequest[], workflowId: string, details?: DynamicRecordFieldInput[]) => Promise<RecordCreationResult | boolean>
   onContinueLater?: (recordId: string) => void
   onOpenRecord?: (recordId: string) => void
   onOpenReminder?: (reminderId: string) => void
@@ -89,6 +93,11 @@ export function RecordForm({
   const [stagedError, setStagedError] = useState<string | null>(null)
   const [stagedLinks, setStagedLinks] = useState<StagedLink[]>([])
   const [isStagedLinkPickerOpen, setIsStagedLinkPickerOpen] = useState(false)
+  const [customDetails, setCustomDetails] = useState<DetailDraft[]>([])
+  const [editingDetail, setEditingDetail] = useState<DetailDraft | null>(null)
+  const [isDetailDraftOpen, setIsDetailDraftOpen] = useState(false)
+  const [suggestedDetailValues, setSuggestedDetailValues] = useState<Record<string, DynamicFieldValue>>({})
+  const [touchedSuggestedDetails, setTouchedSuggestedDetails] = useState<Set<string>>(new Set())
   const formBodyRef = useRef<HTMLDivElement | null>(null)
   const stagedFileInputRef = useRef<HTMLInputElement | null>(null)
   const initialLinksRef = useRef<LinkedItemsResponse | null>(null)
@@ -124,6 +133,11 @@ export function RecordForm({
       clearStagedAttachments()
       setStagedLinks([])
       setIsStagedLinkPickerOpen(false)
+      setCustomDetails([])
+      setEditingDetail(null)
+      setIsDetailDraftOpen(false)
+      setSuggestedDetailValues({})
+      setTouchedSuggestedDetails(new Set())
       return
     }
 
@@ -142,6 +156,11 @@ export function RecordForm({
     clearStagedAttachments()
     setStagedLinks([])
     setIsStagedLinkPickerOpen(false)
+    setCustomDetails([])
+    setEditingDetail(null)
+    setIsDetailDraftOpen(false)
+    setSuggestedDetailValues({})
+    setTouchedSuggestedDetails(new Set())
   }, [isOpen, record, recordType])
 
   useEffect(() => {
@@ -193,7 +212,7 @@ export function RecordForm({
     if (!input.title) {
       setActiveTab('record')
       formBodyRef.current?.scrollTo({ top: 0 })
-      setValidationError('Title is required.')
+      setValidationError(`${definition.titleLabel} is required.`)
       return
     }
 
@@ -205,6 +224,19 @@ export function RecordForm({
         return
       }
       normalizedProtectedInput[field] = typeof value === 'string' ? value.trim() || null : value
+    }
+
+    const stagedDetailInputs = buildStagedDetailInputs(
+      definition.suggestedDetails,
+      suggestedDetailValues,
+      touchedSuggestedDetails,
+      customDetails,
+    )
+    const duplicateDetail = findDuplicateDetailKey(stagedDetailInputs)
+    if (duplicateDetail) {
+      setActiveTab('record')
+      setValidationError(`Only one detail named ${duplicateDetail} can be added.`)
+      return
     }
 
     setValidationError(null)
@@ -228,6 +260,7 @@ export function RecordForm({
         stagedAttachments.map((item) => item.file),
         stagedLinks.map(toLinkCreateRequest),
         creationWorkflowIdRef.current,
+        stagedDetailInputs,
       )
       const result: RecordCreationResult = typeof rawResult === 'boolean'
         ? { complete: rawResult, message: null, recordId: null }
@@ -336,6 +369,19 @@ export function RecordForm({
     setStagedLinks((current) => current.filter((item) => item.id !== id))
   }
 
+  function updateSuggestedDetail(key: string, value: DynamicFieldValue) {
+    setSuggestedDetailValues((current) => ({ ...current, [key]: value }))
+    setTouchedSuggestedDetails((current) => new Set([...current, key]))
+  }
+
+  function saveCustomDetail(detail: DetailDraft) {
+    setCustomDetails((current) => {
+      const exists = current.some((item) => item.id === detail.id)
+      return exists ? current.map((item) => item.id === detail.id ? detail : item) : [...current, detail]
+    })
+    setEditingDetail(null)
+  }
+
   function updateField(field: keyof RecordInput, value: string | null) {
     setForm((current) => ({ ...current, [field]: value }))
   }
@@ -379,17 +425,17 @@ export function RecordForm({
     >
       <div className="sheet-header">
         <div>
-          <h2 id="record-form-heading">{isEditing ? `Edit ${record.title}` : `Add ${definition.label}`}</h2>
-          <p>{definition.category}</p>
+          <h2 id="record-form-heading">{isEditing ? `Edit ${record.title}` : definition.createActionLabel}</h2>
+          <p>{definition.shortDescription}</p>
         </div>
-        <button type="button" className="icon-button ghost-icon-button" onClick={() => void handleRequestClose()} aria-label="Close record form">
+        <button type="button" className="icon-button ghost-icon-button" onClick={() => void handleRequestClose()} aria-label="Close item form">
           <X size={19} aria-hidden="true" />
         </button>
       </div>
 
       <form className="record-form-shell" onSubmit={handleSubmit}>
         <div className="reminder-form sheet-body record-form" data-drawer-scroll ref={formBodyRef}>
-          <div className="record-form-tabs record-form-tabs-three" role="tablist" aria-label="Edit record sections">
+          <div className="record-form-tabs record-form-tabs-three" role="tablist" aria-label="Edit item sections">
             <button
               type="button"
               className={activeTab === 'record' ? 'record-form-tab active' : 'record-form-tab'}
@@ -421,7 +467,7 @@ export function RecordForm({
               aria-controls="record-form-links-panel"
               onClick={() => selectTab('links')}
             >
-              Linked items
+              {productTerms.relatedItems}
             </button>
           </div>
 
@@ -434,10 +480,10 @@ export function RecordForm({
           >
             <section className="record-progressive-section record-essentials-section" aria-labelledby="record-essentials-heading">
               <div className="form-section-heading">
-                <span id="record-essentials-heading">Essentials</span>
+                <span id="record-essentials-heading">Important details</span>
               </div>
               <label>
-                <span>{form.record_type === 'pet' ? 'Pet name' : 'Title'}</span>
+                <span>{definition.titleLabel}</span>
                 <input
                   maxLength={120}
                   value={form.title}
@@ -447,8 +493,8 @@ export function RecordForm({
               </label>
 
               <div className="record-form-type-row">
-                <span>Record type</span>
-                <strong>{definition.label}</strong>
+                <span>{productTerms.itemType}</span>
+                <strong>{definition.singularLabel}</strong>
               </div>
 
               <RecordFieldGrid fields={visibleEssentialFields} form={form} onChange={updateField} />
@@ -468,7 +514,7 @@ export function RecordForm({
 
             {(visibleAdditionalFields.length > 0 || hiddenSuggestedFields.some((field) => !dateFields.includes(field))) ? (
               <details className="record-progressive-section record-collapsible-section">
-                <summary>Additional details</summary>
+                <summary>More details</summary>
                 <RecordFieldGrid fields={visibleAdditionalFields} form={form} onChange={updateField} />
                 <SuggestedFieldButtons
                   fields={hiddenSuggestedFields.filter((field) => !dateFields.includes(field))}
@@ -476,6 +522,29 @@ export function RecordForm({
                   onAdd={showOptionalField}
                 />
               </details>
+            ) : null}
+
+            {!record ? (
+              <SuggestedDetailsSection
+                details={definition.suggestedDetails.filter((detail) => detail.showByDefault && !detail.recordField && !detail.protectedField)}
+                values={suggestedDetailValues}
+                onChange={updateSuggestedDetail}
+              />
+            ) : null}
+
+            {!record ? (
+              <CustomDetailDraftsSection
+                details={customDetails}
+                onAdd={() => {
+                  setEditingDetail(null)
+                  setIsDetailDraftOpen(true)
+                }}
+                onEdit={(detail) => {
+                  setEditingDetail(detail)
+                  setIsDetailDraftOpen(true)
+                }}
+                onRemove={(id) => setCustomDetails((current) => current.filter((detail) => detail.id !== id))}
+              />
             ) : null}
 
             {(canShowNotes || canShowTags || definition.fields.includes('notes') || definition.fields.includes('tags')) ? (
@@ -515,7 +584,7 @@ export function RecordForm({
             {validationError ? <p className="field-error">{validationError}</p> : null}
             {creationResult?.message ? <p className={`${creationResult.complete ? 'form-status' : 'field-error'} record-workflow-message`} role={creationResult.complete ? 'status' : 'alert'}>{creationResult.message}</p> : null}
             {creationResult?.stages ? (
-              <ul className="record-workflow-stages" aria-label="Record setup progress">
+              <ul className="record-workflow-stages" aria-label="Item setup progress">
                 {creationResult.stages.map((stage) => (
                   <li key={stage.label}>
                     <span>{stage.label}</span>
@@ -534,7 +603,7 @@ export function RecordForm({
             aria-labelledby="record-form-documents-tab"
           >
             {record ? (
-              <RecordDocumentsPanel isActive={isOpen && activeTab === 'documents'} mode="edit" recordId={record.id} />
+              <RecordDocumentsPanel emptyStateCopy={definition.emptyStateCopy.documents} isActive={isOpen && activeTab === 'documents'} mode="edit" recordId={record.id} />
             ) : (
               <StagedAttachmentsPanel
                 attachments={stagedAttachments}
@@ -560,6 +629,7 @@ export function RecordForm({
                 tabLayout
                 sourceId={record.id}
                 sourceType="record"
+                title={productTerms.relatedItems}
                 onOpenRecord={onOpenRecord}
                 onOpenReminder={onOpenReminder}
               />
@@ -583,7 +653,7 @@ export function RecordForm({
           ) : null}
           <button className="primary-button" type="submit" disabled={isSaving}>
             {isEditing ? <Save size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
-            {isSaving ? 'Saving' : isEditing ? 'Save record' : creationResult?.recordId ? 'Retry unfinished setup' : 'Add record'}
+            {isSaving ? 'Saving' : isEditing ? 'Save item' : creationResult?.recordId ? 'Retry unfinished setup' : definition.createActionLabel}
           </button>
         </div>
       </form>
@@ -601,6 +671,18 @@ export function RecordForm({
         />
       ) : null}
 
+      {!record ? (
+        <DetailDraftDrawer
+          draft={editingDetail}
+          isOpen={isDetailDraftOpen}
+          onClose={() => {
+            setIsDetailDraftOpen(false)
+            setEditingDetail(null)
+          }}
+          onSave={saveCustomDetail}
+        />
+      ) : null}
+
       <input
         type="file"
         multiple
@@ -611,6 +693,121 @@ export function RecordForm({
       />
     </SheetDrawer>
   )
+}
+
+function SuggestedDetailsSection({
+  details,
+  onChange,
+  values,
+}: {
+  details: SuggestedDetailDefinition[]
+  values: Record<string, DynamicFieldValue>
+  onChange: (key: string, value: DynamicFieldValue) => void
+}) {
+  if (details.length === 0) return null
+
+  return (
+    <section className="record-progressive-section record-suggested-detail-section" aria-labelledby="suggested-details-heading">
+      <div className="form-section-heading">
+        <span id="suggested-details-heading">Suggested details</span>
+        <small>Optional</small>
+      </div>
+      <p className="field-helper">These details are commonly useful for this item type.</p>
+      <div className="record-form-grid">
+        {details.map((detail) => (
+          <div className="suggested-detail-input" key={detail.key}>
+            <DraftValueControl
+              choices={detail.selectOptions}
+              format={detail.dataType}
+              label={detail.label}
+              placeholder={detail.placeholder}
+              value={values[detail.key] ?? null}
+              onChange={(value) => onChange(detail.key, value)}
+            />
+            {detail.protectedByDefault ? <small className="protected-field-edit-status">Stored as a protected detail and excluded from search.</small> : null}
+            {detail.helperText ? <small className="field-helper">{detail.helperText}</small> : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function CustomDetailDraftsSection({
+  details,
+  onAdd,
+  onEdit,
+  onRemove,
+}: {
+  details: DetailDraft[]
+  onAdd: () => void
+  onEdit: (detail: DetailDraft) => void
+  onRemove: (id: string) => void
+}) {
+  return (
+    <section className="record-progressive-section record-custom-detail-section" aria-labelledby="custom-details-heading">
+      <div className="form-section-heading">
+        <span id="custom-details-heading">Additional details</span>
+        {details.length > 0 ? <small>{details.length}</small> : null}
+      </div>
+      {details.length > 0 ? (
+        <div className="staged-detail-list">
+          {details.map((detail) => (
+            <article className="staged-detail-row" key={detail.id}>
+              <button type="button" className="staged-detail-main" onClick={() => onEdit(detail)} aria-label={`Edit ${detail.label}`}>
+                <strong>{detail.label}</strong>
+                <span>{getDynamicFieldTypeLabel(detail.field_type)}{detail.is_sensitive ? ' · Protected' : ''}</span>
+              </button>
+              <button type="button" className="icon-button ghost-icon-button" onClick={() => onRemove(detail.id)} aria-label={`Remove ${detail.label}`}>
+                <Trash2 size={15} aria-hidden="true" />
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="field-helper">Add a detail only when the suggested information does not cover it.</p>
+      )}
+      <button type="button" className="secondary-button dynamic-add-field-button" onClick={onAdd}>
+        <Plus size={16} aria-hidden="true" />
+        {productTerms.addDetail}
+      </button>
+    </section>
+  )
+}
+
+function buildStagedDetailInputs(
+  suggestedDetails: SuggestedDetailDefinition[],
+  values: Record<string, DynamicFieldValue>,
+  touched: Set<string>,
+  customDetails: DetailDraft[],
+): DynamicRecordFieldInput[] {
+  const suggested = suggestedDetails
+    .filter((detail) => !detail.recordField && !detail.protectedField && touched.has(detail.key) && hasDetailValue(values[detail.key]))
+    .map((detail) => ({
+      key: detail.key,
+      label: detail.label,
+      field_type: detail.dataType,
+      value: values[detail.key] ?? null,
+      is_sensitive: detail.protectedByDefault,
+      select_options: detail.selectOptions ?? [],
+      display_order: detail.displayOrder,
+    }))
+  const custom = customDetails.map(({ id: _id, ...detail }) => detail)
+  return [...suggested, ...custom]
+}
+
+function hasDetailValue(value: DynamicFieldValue | undefined) {
+  return value !== null && value !== undefined && (typeof value !== 'string' || value.trim().length > 0)
+}
+
+function findDuplicateDetailKey(details: DynamicRecordFieldInput[]) {
+  const seen = new Set<string>()
+  for (const detail of details) {
+    const key = (detail.key || detail.label).trim().toLocaleLowerCase()
+    if (seen.has(key)) return detail.label
+    seen.add(key)
+  }
+  return null
 }
 
 function ProtectedDetailsSection({
@@ -727,25 +924,25 @@ function StagedLinkedItemsPanel({
   const hasLinks = stagedLinks.length > 0
 
   return (
-    <section className="detail-section linked-items-section linked-items-staged-section" aria-label="Linked items">
+    <section className="detail-section linked-items-section linked-items-staged-section" aria-label={productTerms.relatedItems}>
       <div className="linked-items-header">
         <div>
-          <h3>Linked items</h3>
-          <p>Choose records or reminders now. LifeLedger will link them after this record is saved.</p>
+          <h3>{productTerms.relatedItems}</h3>
+          <p>Choose items or reminders now. LifeLedger will connect them after this item is saved.</p>
         </div>
         <button type="button" className="small-outline-button linked-items-add-button" onClick={onAdd}>
           <Plus size={14} aria-hidden="true" />
-          Link item
+          {productTerms.addRelatedItem}
         </button>
       </div>
 
       {!hasLinks ? (
         <div className="linked-items-empty-state">
           <Link2 size={24} aria-hidden="true" />
-          <p>No linked items staged yet.</p>
+          <p>No related items added yet.</p>
           <button type="button" className="secondary-button" onClick={onAdd}>
             <Plus size={16} aria-hidden="true" />
-            Link an item
+            {productTerms.addRelatedItem}
           </button>
         </div>
       ) : null}
@@ -755,7 +952,7 @@ function StagedLinkedItemsPanel({
           records={records}
           reminders={reminders}
           stagedLinks={recordLinks}
-          title="Linked records"
+          title="Related items"
           onRemove={onRemove}
         />
       ) : null}
@@ -765,7 +962,7 @@ function StagedLinkedItemsPanel({
           records={records}
           reminders={reminders}
           stagedLinks={reminderLinks}
-          title="Linked reminders"
+          title="Related reminders"
           onRemove={onRemove}
         />
       ) : null}
@@ -820,7 +1017,7 @@ function StagedLinkCard({
 }) {
   const record = link.targetType === 'record' ? records.find((item) => item.id === link.targetId) ?? null : null
   const reminder = link.targetType === 'reminder' ? reminders.find((item) => item.id === link.targetId) ?? null : null
-  const title = record?.title ?? reminder?.title ?? 'Linked item'
+  const title = record?.title ?? reminder?.title ?? productTerms.relatedItem
   const meta = getStagedLinkMeta(link, record, reminder)
   const Icon = record ? getRecordTypeDefinition(record.record_type).icon : link.targetType === 'reminder' ? Bell : FileText
   const toneClass = record ? `tone-${getRecordTypeDefinition(record.record_type).tone}` : 'tone-other'
@@ -844,7 +1041,7 @@ function StagedLinkCard({
 }
 
 function getStagedLinkMeta(link: StagedLink, record: LifeRecord | null, reminder: Reminder | null) {
-  const relationship = link.label || relationshipLabels[link.relationshipType]
+  const relationship = link.label || getRelationshipPresentation(link.relationshipType)
 
   if (record) {
     return `${getRecordTypeDefinition(record.record_type).label} - ${relationship}`
@@ -890,15 +1087,15 @@ function StagedAttachmentsPanel({
   const canAddAttachment = attachments.length < attachmentMaxPerRecord
 
   return (
-    <section className="documents-panel documents-panel-create" aria-label="Attachments">
+    <section className="documents-panel documents-panel-create" aria-label={productTerms.documents}>
       <div className="documents-panel-header">
         <div className="documents-title-lockup">
           <span className="documents-title-icon" aria-hidden="true">
             <ShieldCheck size={18} />
           </span>
           <div>
-            <h3>Attachments</h3>
-            <p>Files upload automatically and are scanned right after LifeLedger saves this record.</p>
+            <h3>{productTerms.documents}</h3>
+            <p>Files upload automatically and are scanned right after LifeLedger saves this item.</p>
           </div>
         </div>
         <button
@@ -908,11 +1105,11 @@ function StagedAttachmentsPanel({
           onClick={onChoose}
         >
           <FileUp size={16} aria-hidden="true" />
-          Add attachment
+          {productTerms.addDocument}
         </button>
       </div>
 
-      <div className="documents-meta-strip" aria-label="Attachment limits">
+      <div className="documents-meta-strip" aria-label="Document limits">
         <span>{attachments.length} of {attachmentMaxPerRecord}</span>
         <span>PDF, JPEG, PNG</span>
         <span>10 MB max</span>
@@ -929,16 +1126,16 @@ function StagedAttachmentsPanel({
         <div className="documents-empty-state">
           <FileUp size={28} aria-hidden="true" />
           <div>
-            <strong>No attachments yet</strong>
-            <p>Add a scanned PDF, JPEG, or PNG. They upload as soon as the record is created.</p>
+            <strong>No documents yet</strong>
+            <p>Add a PDF, JPEG, or PNG. It will upload as soon as the item is created.</p>
           </div>
           <button type="button" className="secondary-button" disabled={!canAddAttachment} onClick={onChoose}>
             <FileUp size={16} aria-hidden="true" />
-            Add attachment
+            {productTerms.addDocument}
           </button>
         </div>
       ) : (
-        <div className="documents-grid" aria-label="Attachments ready to upload">
+        <div className="documents-grid" aria-label="Documents ready to upload">
           {attachments.map((attachment) => (
             <StagedAttachmentCard attachment={attachment} key={attachment.id} onRemove={() => onRemove(attachment.id)} />
           ))}
@@ -1009,7 +1206,7 @@ function SuggestedFieldButtons({
   }
 
   return (
-    <div className="record-suggested-fields" aria-label="Suggested fields">
+    <div className="record-suggested-fields" aria-label="Suggested details">
       {fields.map((field) => (
         <button type="button" className="small-outline-button" key={field} onClick={() => onAdd(field)}>
           <Plus size={14} aria-hidden="true" />

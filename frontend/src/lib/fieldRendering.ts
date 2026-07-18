@@ -54,8 +54,8 @@ export function getDynamicFieldTypeLabel(fieldType: DynamicFieldType) {
     phone: 'Phone',
     email: 'Email',
     url: 'URL',
-    boolean: 'Yes/No',
-    select: 'Select',
+    boolean: 'Yes or no',
+    select: 'Choice list',
   }
 
   return labels[fieldType]

@@ -30,6 +30,7 @@ import type { RecordAttachment } from '../types/record'
 import { ConfirmDialog } from './ConfirmDialog'
 
 interface RecordDocumentsPanelProps {
+  emptyStateCopy?: string
   initialAttachmentId?: string
   isActive: boolean
   mode?: 'detail' | 'edit'
@@ -41,7 +42,7 @@ const minViewerZoom = 0.75
 const maxViewerZoom = 2.5
 const viewerZoomStep = 0.25
 
-export function RecordDocumentsPanel({ initialAttachmentId, isActive, mode = 'detail', recordId }: RecordDocumentsPanelProps) {
+export function RecordDocumentsPanel({ emptyStateCopy = 'Keep supporting documents with the item they belong to.', initialAttachmentId, isActive, mode = 'detail', recordId }: RecordDocumentsPanelProps) {
   const [attachments, setAttachments] = useState<RecordAttachment[]>([])
   const [isAttachmentsLoading, setIsAttachmentsLoading] = useState(false)
   const [hasLoadedAttachments, setHasLoadedAttachments] = useState(false)
@@ -208,7 +209,7 @@ export function RecordDocumentsPanel({ initialAttachmentId, isActive, mode = 'de
     if (!target) {
       setSelectedAttachmentId(null)
       setAttachmentMessage(null)
-      setAttachmentError('This document is no longer available. You can continue using the record Documents tab.')
+      setAttachmentError('This document is no longer available. You can continue using the item Documents tab.')
       return
     }
 
@@ -360,7 +361,7 @@ export function RecordDocumentsPanel({ initialAttachmentId, isActive, mode = 'de
               <ShieldCheck size={18} />
             </span>
             <div>
-              <h3>Attachments</h3>
+              <h3>Documents</h3>
               <p>Files are encrypted in storage and scanned before they become available.</p>
             </div>
           </div>
@@ -370,7 +371,7 @@ export function RecordDocumentsPanel({ initialAttachmentId, isActive, mode = 'de
           </button>
         </div>
 
-        <div className="documents-meta-strip" aria-label="Document attachment limits">
+        <div className="documents-meta-strip" aria-label="Document limits">
           <span>{activeCount} of {attachmentMaxPerRecord}</span>
           <span>PDF, JPEG, PNG</span>
           <span>10 MB max</span>
@@ -396,7 +397,7 @@ export function RecordDocumentsPanel({ initialAttachmentId, isActive, mode = 'de
             <FileUp size={28} aria-hidden="true" />
             <div>
               <strong>No documents yet</strong>
-              <p>Add a scanned PDF, JPEG, or PNG after this record exists.</p>
+              <p>{emptyStateCopy}</p>
             </div>
             <button type="button" className="secondary-button" disabled={!canAddAttachment} onClick={handleChooseAttachment}>
               <FileUp size={16} aria-hidden="true" />

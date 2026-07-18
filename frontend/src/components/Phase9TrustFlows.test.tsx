@@ -77,7 +77,7 @@ function detailProps() {
     records: [protectedRecord],
     reminders: [],
     onArchive: vi.fn(async () => undefined),
-    onAddReminder: vi.fn(),
+    onAddResponsibility: vi.fn(),
     onClose: vi.fn(),
     onEdit: vi.fn(),
     onOpenLinkedRecord: vi.fn(),
@@ -128,10 +128,10 @@ describe('Phase 9 protected details and creation recovery', () => {
     await waitFor(() => expect(api.clearProtected).toHaveBeenCalledWith('record-protected'))
     expect(props.onProtectedStatusChange).toHaveBeenCalledWith('record-protected', expect.objectContaining({ has_protected_data: false }))
 
-    await user.click(screen.getByRole('button', { name: 'Add field' }))
-    expect(await screen.findByRole('heading', { name: 'Add field' })).toBeInTheDocument()
-    expect(screen.queryByText('Passport number')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Nationality/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add another detail' }))
+    const detailEditor = await screen.findByRole('dialog', { name: 'Add another detail' })
+    expect(within(detailEditor).queryByText('Passport number')).not.toBeInTheDocument()
+    expect(within(detailEditor).getByRole('button', { name: /Nationality/ })).toBeInTheDocument()
   })
 
   it('submits a protected detail during creation and retries unfinished setup without browser persistence', async () => {
@@ -149,7 +149,7 @@ describe('Phase 9 protected details and creation recovery', () => {
         recordId: 'record-created',
         message: 'Passport was created, but protected details were not saved. Retry now.',
         stages: [
-          { label: 'Record', status: 'saved' },
+          { label: 'Item', status: 'saved' },
           { label: 'Protected details', status: 'needs_retry' },
         ],
       })
@@ -170,15 +170,15 @@ describe('Phase 9 protected details and creation recovery', () => {
       />,
     )
 
-    await user.type(screen.getByLabelText('Title'), 'Passport')
-    const protectedInput = screen.getByLabelText('Document number')
+    await user.type(screen.getByLabelText('Passport holder'), 'Passport')
+    const protectedInput = screen.getByLabelText('Passport number')
     expect(protectedInput).toHaveAttribute('type', 'password')
     await user.type(protectedInput, 'P1234567')
-    await user.click(screen.getByRole('button', { name: 'Add record' }))
+    await user.click(screen.getByRole('button', { name: 'Add passport' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('was created')
-    const progress = screen.getByRole('list', { name: 'Record setup progress' })
-    expect(within(progress).getByText('Record').parentElement).toHaveTextContent('Saved')
+    const progress = screen.getByRole('list', { name: 'Item setup progress' })
+    expect(within(progress).getByText('Item').parentElement).toHaveTextContent('Saved')
     expect(within(progress).getByText('Protected details').parentElement).toHaveTextContent('Needs retry')
     expect(JSON.stringify(window.localStorage)).not.toContain('P1234567')
     expect(onCreate.mock.calls[0][1]).toEqual({ document_number: 'P1234567' })
@@ -211,8 +211,8 @@ describe('Phase 9 protected details and creation recovery', () => {
         onUpdate={onUpdate}
       />,
     )
-    await user.type(screen.getByLabelText('Document number'), 'P-NEW')
-    await user.click(screen.getByRole('button', { name: 'Save record' }))
+    await user.type(screen.getByLabelText('Passport number'), 'P-NEW')
+    await user.click(screen.getByRole('button', { name: 'Save item' }))
     expect(onUpdate).toHaveBeenCalledWith('record-protected', expect.any(Object), { document_number: 'P-NEW' })
 
     unmount()
@@ -231,7 +231,7 @@ describe('Phase 9 protected details and creation recovery', () => {
       />,
     )
     await user.click(await screen.findByRole('button', { name: 'Remove' }))
-    await user.click(screen.getByRole('button', { name: 'Save record' }))
+    await user.click(screen.getByRole('button', { name: 'Save item' }))
     expect(onUpdate).toHaveBeenCalledWith('record-protected', expect.any(Object), { document_number: null })
   })
 
@@ -253,8 +253,8 @@ describe('Phase 9 protected details and creation recovery', () => {
         onUpdate={vi.fn()}
       />,
     )
-    await userEvent.type(screen.getByLabelText('Title'), 'One record')
-    const form = screen.getByRole('button', { name: 'Add record' }).closest('form')
+    await userEvent.type(screen.getByLabelText('Item name'), 'One item')
+    const form = screen.getByRole('button', { name: 'Add other item' }).closest('form')
     fireEvent.submit(form!)
     fireEvent.submit(form!)
     expect(onCreate).toHaveBeenCalledTimes(1)

@@ -15,7 +15,8 @@ import {
 import { linkedItemsApi } from '../api/linkedItemsApi'
 import { formatDueDateLabel, getReminderTypeLabel } from '../lib/reminderDisplay'
 import { getRecordTypeDefinition } from '../lib/recordTypes'
-import { relationshipLabels, type LinkedEntityType, type LinkedItem, type LinkedItemsResponse, type RelationshipCandidate, type RelationshipType } from '../types/linkedItem'
+import { getRelationshipPresentation, productTerms } from '../lib/terminology'
+import type { LinkedEntityType, LinkedItem, LinkedItemsResponse, RelationshipCandidate, RelationshipType } from '../types/linkedItem'
 import type { LifeRecord } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -49,20 +50,22 @@ export interface LinkDraft {
 const emptyLinks: LinkedItemsResponse = { records: [], reminders: [], documents: [] }
 
 const relationshipOptions: Array<{ label: string; value: RelationshipType }> = [
-  { label: 'Related to', value: 'related' },
-  { label: 'Belongs to', value: 'belongs_to' },
-  { label: 'Owned by', value: 'owned_by' },
-  { label: 'Covers', value: 'covers' },
-  { label: 'Provided by', value: 'provided_by' },
-  { label: 'Reminder for', value: 'reminder_for' },
-  { label: 'Document for', value: 'document_for' },
-  { label: 'Associated with', value: 'associated_with' },
-  { label: 'Insurance for', value: 'insures' },
-  { label: 'Warranty for', value: 'warranty_for' },
-  { label: 'Maintenance for', value: 'maintains' },
-  { label: 'Appointment for', value: 'appointment_for' },
-  { label: 'Custom', value: 'custom' },
-]
+  'related',
+  'belongs_to',
+  'owned_by',
+  'covers',
+  'provided_by',
+  'reminder_for',
+  'document_for',
+  'insures',
+  'warranty_for',
+  'maintains',
+  'appointment_for',
+  'custom',
+].map((value) => ({
+  label: value === 'custom' ? 'Custom relationship' : getRelationshipPresentation(value),
+  value: value as RelationshipType,
+}))
 
 export function LinkedItemsPanel({
   documentsCount = null,
@@ -72,7 +75,7 @@ export function LinkedItemsPanel({
   sourceId,
   sourceTitle,
   sourceType,
-  title = 'Linked items',
+  title = productTerms.relatedItems,
   tabLayout = false,
   onOpenDocument,
   onOpenRecord,
@@ -102,7 +105,7 @@ export function LinkedItemsPanel({
       } catch (requestError) {
         if (!isCancelled) {
           setLinks(emptyLinks)
-          setError(requestError instanceof Error ? requestError.message : 'Unable to load linked items.')
+          setError(requestError instanceof Error ? requestError.message : 'Unable to load related items.')
         }
       } finally {
         if (!isCancelled) {
@@ -166,7 +169,7 @@ export function LinkedItemsPanel({
       await reloadLinks()
       setPendingRemove(null)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to remove link.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to remove this relationship.')
     } finally {
       setIsRemoving(false)
     }
@@ -179,10 +182,10 @@ export function LinkedItemsPanel({
   const canAdd = showAdd
   const usesTabLayout = tabLayout && sourceType === 'record'
   const overview = sourceType === 'record' ? (
-    <div className="linked-overview" aria-label="Linked items overview">
-      <span><strong>{links.records.length}</strong> Linked records</span>
-      <span><strong>{links.reminders.length}</strong> Linked reminders</span>
-      <span><strong>{links.documents.length}</strong> Linked documents</span>
+    <div className="linked-overview" aria-label="Related items overview">
+      <span><strong>{links.records.length}</strong> Related items</span>
+      <span><strong>{links.reminders.length}</strong> Responsibilities</span>
+      <span><strong>{links.documents.length}</strong> Related documents</span>
       {documentsCount !== null ? <span><strong>{documentsCount}</strong> Documents</span> : null}
     </div>
   ) : null
@@ -193,29 +196,29 @@ export function LinkedItemsPanel({
         <div className="linked-items-header">
           <div>
             <h3>{title}</h3>
-            <p>{sourceType === 'record' ? 'Records, reminders, and documents connected to this record.' : 'Items connected to this reminder.'}</p>
+            <p>{sourceType === 'record' ? 'Items, responsibilities, and documents connected to this item.' : 'Items connected to this reminder.'}</p>
           </div>
           {canAdd ? (
             <button type="button" className="small-outline-button linked-items-add-button" onClick={() => setIsPickerOpen(true)}>
               <Plus size={14} aria-hidden="true" />
-              Link item
+              {productTerms.addRelatedItem}
             </button>
           ) : null}
         </div>
       ) : null}
 
       {!usesTabLayout ? overview : null}
-      {isLoading ? <p className="linked-items-state">Loading linked items...</p> : null}
+      {isLoading ? <p className="linked-items-state">Loading related items...</p> : null}
       {error ? <p className="field-error linked-items-error" role="alert">{error}</p> : null}
 
       {!isLoading && !error && !hasLinks ? (
         <div className="linked-items-empty-state">
           <Link2 size={24} aria-hidden="true" />
-          <p>No linked items yet. Connect this item to documents, reminders, or other records so related information stays together.</p>
+          <p>Connect related items so LifeLedger can keep the full picture together.</p>
           {canAdd ? (
             <button type="button" className="secondary-button" onClick={() => setIsPickerOpen(true)}>
               <Plus size={16} aria-hidden="true" />
-              Add linked item
+              {productTerms.addRelatedItem}
             </button>
           ) : null}
         </div>
@@ -225,27 +228,27 @@ export function LinkedItemsPanel({
         <>
           <LinkedItemsGroup
             action={canAdd && usesTabLayout ? <AddGroupButton onClick={() => setIsPickerOpen(true)} /> : undefined}
-            emptyText="No linked records."
+            emptyText="No related items."
             items={links.records}
-            title="Linked records"
+            title="Items"
             onEdit={setEditingLink}
             onOpen={onOpenRecord}
             onRemove={setPendingRemove}
           />
           <LinkedItemsGroup
             action={canAdd && usesTabLayout ? <AddGroupButton onClick={() => setIsPickerOpen(true)} /> : undefined}
-            emptyText="No linked reminders."
+            emptyText="No related responsibilities."
             items={links.reminders}
-            title="Linked reminders"
+            title="Responsibilities"
             onEdit={setEditingLink}
             onOpen={onOpenReminder}
             onRemove={setPendingRemove}
           />
           <LinkedItemsGroup
             action={canAdd && usesTabLayout ? <AddGroupButton onClick={() => setIsPickerOpen(true)} /> : undefined}
-            emptyText="No linked documents."
+            emptyText="No related documents."
             items={links.documents}
-            title="Linked documents"
+            title="Documents"
             onEdit={setEditingLink}
             onOpenDocument={onOpenDocument}
             onRemove={setPendingRemove}
@@ -278,10 +281,10 @@ export function LinkedItemsPanel({
       <ConfirmDialog
         body={getRemoveLinkBody(sourceTitle, pendingRemove)}
         busyLabel="Removing"
-        confirmLabel="Remove link"
+        confirmLabel="Remove relationship"
         isBusy={isRemoving}
         isOpen={pendingRemove !== null}
-        title="Remove link?"
+        title="Remove relationship?"
         onCancel={() => setPendingRemove(null)}
         onConfirm={() => void confirmRemoveLink()}
       />
@@ -390,7 +393,7 @@ function LinkedItemCard({
         <button type="button" className="icon-button linked-item-edit-button" onClick={onEdit} aria-label={`Edit relationship to ${entity.title}`}>
           <Pencil size={15} aria-hidden="true" />
         </button>
-        <button type="button" className="icon-button linked-item-remove-button" onClick={onRemove} aria-label={`Remove link to ${entity.title}`}>
+        <button type="button" className="icon-button linked-item-remove-button" onClick={onRemove} aria-label={`Remove relationship to ${entity.title}`}>
           <Trash2 size={15} aria-hidden="true" />
         </button>
       </span>
@@ -565,7 +568,7 @@ export function AddLinkedItemDrawer({
         label: label.trim() || null,
       })
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to link item.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to add related item.')
     } finally {
       setIsSaving(false)
     }
@@ -581,11 +584,11 @@ export function AddLinkedItemDrawer({
             </button>
           ) : null}
           <div>
-            <h2 id="linked-picker-heading">Add linked item</h2>
+            <h2 id="linked-picker-heading">{productTerms.addRelatedItem}</h2>
             <p>{getPickerSubcopy(step, targetType)}</p>
           </div>
         </div>
-        <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close add linked item">
+        <button type="button" className="icon-button ghost-icon-button" onClick={onClose} aria-label="Close add related item">
           <X size={19} aria-hidden="true" />
         </button>
       </div>
@@ -595,18 +598,18 @@ export function AddLinkedItemDrawer({
           <div className="linked-picker-type-options">
             <button type="button" className="linked-picker-type-card" onClick={() => chooseType('record')}>
               <span className="linked-picker-type-icon linked-picker-record-icon" aria-hidden="true"><FileText size={24} /></span>
-              <span><strong>Record</strong><small>Link another record like insurance, warranty, or a vehicle.</small></span>
+              <span><strong>Item</strong><small>Connect another item, such as insurance, a warranty, or a vehicle.</small></span>
               <ChevronRight size={18} aria-hidden="true" />
             </button>
             <button type="button" className="linked-picker-type-card" onClick={() => chooseType('reminder')}>
               <span className="linked-picker-type-icon linked-picker-reminder-icon" aria-hidden="true"><Bell size={24} /></span>
-              <span><strong>Reminder</strong><small>Link a reminder like registration renewal or maintenance.</small></span>
+              <span><strong>Responsibility</strong><small>Connect a renewal, maintenance date, or other reminder.</small></span>
               <ChevronRight size={18} aria-hidden="true" />
             </button>
             {sourceId ? (
               <button type="button" className="linked-picker-type-card" onClick={() => chooseType('document')}>
                 <span className="linked-picker-type-icon linked-picker-document-icon" aria-hidden="true"><FileText size={24} /></span>
-                <span><strong>Document</strong><small>Link a document attached to one of your records.</small></span>
+                <span><strong>Document</strong><small>Connect a document stored with one of your items.</small></span>
                 <ChevronRight size={18} aria-hidden="true" />
               </button>
             ) : null}
@@ -617,18 +620,22 @@ export function AddLinkedItemDrawer({
           <div className="linked-picker-select-step">
             <label className="linked-picker-search">
               <Search size={16} aria-hidden="true" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${targetType === 'document' ? 'documents' : `${targetType}s`}...`} />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={`Search ${targetType === 'document' ? 'documents' : targetType === 'record' ? 'items' : 'responsibilities'}...`}
+              />
             </label>
             {targetType === 'record' ? (
               <CandidateList
-                emptyText="No records available to link."
+                emptyText="No items available to connect."
                 records={filteredRecords}
                 onChooseRecord={chooseRecord}
               />
             ) : null}
             {targetType === 'reminder' ? (
               <CandidateList
-                emptyText="No reminders available to link."
+                emptyText="No responsibilities available to connect."
                 reminders={filteredReminders}
                 onChooseReminder={chooseReminder}
               />
@@ -637,12 +644,12 @@ export function AddLinkedItemDrawer({
               isSearchingDocuments ? <p className="linked-items-state linked-picker-empty">Searching documents...</p> : (
                 <CandidateList
                   documents={documentCandidates}
-                  emptyText="No documents available to link."
+                  emptyText="No documents available to connect."
                   onChooseDocument={chooseDocument}
                 />
               )
             ) : null}
-            <p className="linked-picker-footnote">Items already linked to this record are hidden.</p>
+            <p className="linked-picker-footnote">Items already related to this item are hidden.</p>
           </div>
         ) : null}
 
@@ -654,37 +661,41 @@ export function AddLinkedItemDrawer({
               </span>
               <div>
                 <strong>{selectedTitle}</strong>
-                <span>{targetType === 'record' ? 'Record' : targetType === 'document' ? 'Document' : 'Reminder'}</span>
+                <span>{targetType === 'record' ? selectedRecord ? getRecordTypeDefinition(selectedRecord.record_type).singularLabel : productTerms.item : targetType === 'document' ? productTerms.document : productTerms.responsibility}</span>
               </div>
             </div>
 
-            <fieldset className="linked-relationship-options">
-              <legend>How are they related?</legend>
-              {relationshipOptions.map((option) => (
-                <label key={option.value}>
-                  <input
-                    checked={relationshipType === option.value}
-                    name="relationship_type"
-                    type="radio"
-                    value={option.value}
-                    onChange={() => setRelationshipType(option.value)}
-                  />
-                  <span>{option.label}</span>
-                </label>
-              ))}
-            </fieldset>
+            <p className="linked-picker-default-relationship">Relationship: <strong>{getRelationshipPresentation(relationshipType)}</strong></p>
+            <details className="linked-relationship-advanced">
+              <summary>Customize relationship</summary>
+              <fieldset className="linked-relationship-options">
+                <legend>Relationship</legend>
+                {relationshipOptions.map((option) => (
+                  <label key={option.value}>
+                    <input
+                      checked={relationshipType === option.value}
+                      name="relationship_type"
+                      type="radio"
+                      value={option.value}
+                      onChange={() => setRelationshipType(option.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </fieldset>
 
-            <label className="linked-picker-label-field">
-              <span>Optional label</span>
-              <input maxLength={40} value={label} onChange={(event) => setLabel(event.target.value)} placeholder="e.g. Primary insurance" />
-              <small>{label.length}/40</small>
-            </label>
+              <label className="linked-picker-label-field">
+                <span>Custom description</span>
+                <input maxLength={40} value={label} onChange={(event) => setLabel(event.target.value)} placeholder="For example, primary insurance" />
+                <small>{label.length}/40</small>
+              </label>
+            </details>
 
             {error ? <p className="field-error" role="alert">{error}</p> : null}
 
             <button type="button" className="primary-button" disabled={isSaving} onClick={() => void submit()}>
               <Link2 size={17} aria-hidden="true" />
-              {isSaving ? 'Linking...' : 'Link item'}
+              {isSaving ? 'Adding...' : productTerms.addRelatedItem}
             </button>
           </div>
         ) : null}
@@ -864,12 +875,12 @@ function filterReminders(reminders: Reminder[], search: string) {
 
 function getPickerSubcopy(step: AddStep, targetType: CandidateType | null) {
   if (step === 'type') {
-    return 'Choose what you want to link.'
+    return 'Choose what you want to connect.'
   }
   if (step === 'select') {
-    return targetType === 'record' ? 'Pick the record to link.' : targetType === 'document' ? 'Pick the document to link.' : 'Pick the reminder to link.'
+    return targetType === 'record' ? 'Choose the item to connect.' : targetType === 'document' ? 'Choose the document to connect.' : 'Choose the responsibility to connect.'
   }
-  return 'Pick how the items are related.'
+  return 'Review the contextual relationship, or customize it if needed.'
 }
 
 function getDefaultRecordRelationship(record: LifeRecord): RelationshipType {
@@ -884,10 +895,10 @@ function getDefaultRecordRelationship(record: LifeRecord): RelationshipType {
 
 function getLinkedItemMeta(item: LinkedItem) {
   const entity = item.linked_entity
-  const relationship = item.label || relationshipLabels[item.relationship_type]
+  const relationship = item.label || getRelationshipPresentation(item.relationship_type)
 
   if (entity.entity_type === 'record') {
-    const typeLabel = entity.record_type ? getRecordTypeDefinition(entity.record_type).label : 'Record'
+    const typeLabel = entity.record_type ? getRecordTypeDefinition(entity.record_type).singularLabel : productTerms.item
     const status = entity.status === 'archived' ? 'Archived' : null
     return [typeLabel, relationship, status].filter(Boolean).join(' - ')
   }
@@ -938,7 +949,7 @@ function getRemoveLinkBody(sourceTitle: string | undefined, item: LinkedItem | n
     return ''
   }
   const left = sourceTitle || 'This item'
-  return `The link between ${left} and ${item.linked_entity.title} will be removed. Neither item will be deleted. You can add the link again later.`
+  return `The relationship between ${left} and ${item.linked_entity.title} will be removed. Neither item will be deleted. You can add the relationship again later.`
 }
 
 function formatDocumentStatus(status: string | null) {

@@ -331,7 +331,7 @@ export function ReminderDetailDrawer({
           sourceId={reminder.id}
           sourceTitle={reminder.title}
           sourceType="reminder"
-          title="Linked items"
+          title="Related items"
           onOpenDocument={onOpenLinkedDocument}
           onOpenRecord={onOpenLinkedRecord}
         />
