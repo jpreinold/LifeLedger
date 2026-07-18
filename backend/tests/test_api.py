@@ -134,9 +134,16 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
         ("post", "/reminders/example-id/snooze/clear", None),
         ("post", "/reminders/example-id/renew", {"new_due_date": "2030-01-01"}),
         ("post", "/reminders/example-id/complete", None),
+        ("post", "/reminders/example-id/reopen", None),
+        ("get", "/reminders/example-id/history", None),
+        ("post", "/reminders/example-id/history/evidence", {"record_id": "record-id", "document_id": "document-id", "related_event_id": "event-id"}),
+        ("post", "/reminders/example-id/history/reconcile", None),
+        ("post", "/responsibility-history/reconcile", None),
+        ("get", "/responsibility-events/example-event", None),
         ("get", "/records", None),
         ("post", "/records", {"record_type": "general", "title": "Emergency folder"}),
         ("get", "/records/example-id", None),
+        ("get", "/records/example-id/activity", None),
         ("put", "/records/example-id", {"title": "Updated record"}),
         ("get", "/records/example-id/protected/status", None),
         ("get", "/records/example-id/protected", None),
@@ -997,7 +1004,8 @@ def test_snooze_defers_attention_without_changing_due_date(client):
     assert body["due_date"] == date.today().isoformat()
     assert body["snoozed_until"] is not None
     assert body["effective_attention_date"] == snoozed_until.date().isoformat()
-    assert [event["event_type"] for event in body["lifecycle_events"]][-1] == "snoozed"
+    history = client.get(f"/reminders/{created['id']}/history").json()["items"]
+    assert history[0]["event_type"] == "snoozed"
     assert client.get("/alerts").json() == []
 
     clear_response = client.post(f"/reminders/{created['id']}/snooze/clear")
@@ -1007,7 +1015,8 @@ def test_snooze_defers_attention_without_changing_due_date(client):
     assert cleared["snoozed_until"] is None
     assert cleared["alert_snoozed_until"] is None
     assert cleared["effective_attention_date"] == date.today().isoformat()
-    assert [event["event_type"] for event in cleared["lifecycle_events"]][-1] == "snooze_cleared"
+    history = client.get(f"/reminders/{created['id']}/history").json()["items"]
+    assert history[0]["event_type"] == "snooze_cleared"
 
 
 def test_snooze_rejects_completed_reminder(client):
@@ -1032,7 +1041,8 @@ def test_complete_is_idempotent_and_preserves_history(client):
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["completed"] is True
-    assert [event["event_type"] for event in second.json()["lifecycle_events"]].count("completed") == 1
+    history = client.get(f"/reminders/{created['id']}/history").json()["items"]
+    assert [event["event_type"] for event in history].count("completed") == 1
 
 
 def test_renew_advances_current_cycle_and_updates_linked_record_date(client):
@@ -1078,10 +1088,10 @@ def test_renew_advances_current_cycle_and_updates_linked_record_date(client):
     assert body["snoozed_until"] is None
     assert body["alert_snoozed_until"] is None
     assert body["renewal_details"]["renewal_date"] == new_due_date.isoformat()
-    renewed_event = body["lifecycle_events"][-1]
+    renewed_event = client.get(f"/reminders/{reminder['id']}/history").json()["items"][0]
     assert renewed_event["event_type"] == "renewed"
     assert renewed_event["previous_due_date"] == previous_due_date.isoformat()
-    assert renewed_event["new_due_date"] == new_due_date.isoformat()
+    assert renewed_event["next_due_date"] == new_due_date.isoformat()
 
     updated_record = client.get(f"/records/{record['id']}").json()
     assert updated_record["renewal_date"] == new_due_date.isoformat()

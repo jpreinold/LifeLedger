@@ -1,5 +1,3 @@
-import { Amplify } from 'aws-amplify'
-
 export const authMode = import.meta.env.VITE_AUTH_MODE === 'cognito' ? 'cognito' : 'local'
 export const isCognitoAuthEnabled = authMode === 'cognito'
 
@@ -7,7 +5,7 @@ const cognitoRegion = import.meta.env.VITE_COGNITO_REGION
 const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID
 const userPoolClientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID
 
-export function configureAuth() {
+export async function configureAuth() {
   if (!isCognitoAuthEnabled) {
     return
   }
@@ -22,6 +20,7 @@ export function configureAuth() {
     throw new Error(`Missing Cognito configuration: ${missingConfig.map(([key]) => key).join(', ')}`)
   }
 
+  const { Amplify } = await import('aws-amplify')
   Amplify.configure({
     Auth: {
       Cognito: {

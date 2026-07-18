@@ -15,12 +15,12 @@ The global Add drawer and Home quick starts expose all four. Compatible item Res
 
 ## Architecture
 
-- `frontend/src/lib/guidedWorkflows.ts` defines stable IDs, user-facing copy, steps, entity-registry mappings, reminder defaults, document guidance, relationship semantics, review copy, and completion copy.
+- `frontend/src/lib/guidedWorkflows.ts` defines stable IDs, user-facing copy, steps, entity-registry mappings, reminder defaults, document guidance, relationship semantics, review copy, completion copy, and the bounded workflow ID persisted on its responsibility for date synchronization.
 - `frontend/src/components/GuidedWorkflowDrawer.tsx` owns the active in-memory form, progress, conflict choices, optional file, accessibility behavior, and completion UI.
 - `frontend/src/lib/guidedWorkflowEngine.ts` composes the existing APIs, records completed operations, and retries only unfinished operations.
 - The current record, dynamic-detail, protected-detail, reminder, relationship, attachment, and search-projection services remain authoritative.
 
-No workflow state is serialized into record titles, categories, notes, browser storage, or opaque metadata. The engine correlation ID exists only for the active setup and idempotency requests.
+No workflow draft or progress state is serialized into record titles, categories, notes, browser storage, or opaque metadata. The stable workflow ID on a created responsibility is configuration, not recovery state. The engine correlation ID exists only for the active setup and idempotency requests.
 
 ## Primitive mapping
 
@@ -45,7 +45,7 @@ No workflow state is serialized into record titles, categories, notes, browser s
 | Item-to-responsibility connection | Existing `reminder_for` relationship |
 | Optional file | Existing secure record attachment metadata and S3 quarantine/scan/clean workflow |
 
-Every dynamic detail key above is registered in `entityRegistry.ts`. The workflow stores no hidden scenario marker. Search is refreshed by the normal item, detail, reminder, relationship, and document mutations and continues to exclude protected values.
+Every dynamic detail key above is registered in `entityRegistry.ts`. The responsibility stores the explicit workflow ID so renewal/completion can select that registered current-date key without guessing from titles. Search is refreshed by the normal item, detail, reminder, relationship, document, and lifecycle synchronization paths and continues to exclude protected values and completion notes.
 
 ## Existing-item safety
 
@@ -76,4 +76,4 @@ The engine keeps successful item/reminder IDs, detail keys, relationship status,
 
 ## Deferred
 
-General event/history persistence, timelines, renewal history, household sharing, new owner/provider entities, OCR, document extraction, AI/RAG, automatic recommendations from document contents, new notification channels, two-way calendar sync, and additional workflows are not implemented.
+General item version history, editable events, household sharing, new owner/provider entities, OCR, document extraction, AI/RAG, automatic recommendations from document contents, new notification channels, two-way calendar sync, and additional workflows are not implemented. Focused responsibility History and item Activity are documented in [responsibility-history.md](responsibility-history.md).

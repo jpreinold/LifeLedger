@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Cake, CalendarCheck, CalendarPlus, CalendarX, CheckCircle2, Clock3, Pencil, RefreshCcw, Trash2, Wrench } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Cake, CalendarCheck, CalendarPlus, CalendarX, CheckCircle2, Clock3, History, Pencil, RefreshCcw, RotateCcw, Trash2, Wrench } from 'lucide-react'
 
 import { getMaintenanceAreaLabel, getMaintenanceDueDate } from '../lib/maintenanceUx'
 import {
@@ -28,6 +28,7 @@ import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
 const drawerCloseMs = 220
+const ResponsibilityHistoryPanel = lazy(() => import('./ResponsibilityHistoryPanel'))
 
 interface ReminderDetailDrawerProps {
   reminder: Reminder
@@ -45,6 +46,7 @@ interface ReminderDetailDrawerProps {
   onOpenLinkedDocument?: (recordId: string, documentId: string) => void
   onOpenLinkedRecord: (recordId: string) => void
   onRenew: (id: string, newDueDate: string) => Promise<boolean>
+  onReopen: (id: string, occurrenceId: string | null) => Promise<boolean>
   onRequestDelete: (reminder: Reminder) => void
   onSnooze: (id: string, snoozedUntil: string) => Promise<boolean>
   isActionPending: boolean
@@ -66,6 +68,7 @@ export function ReminderDetailDrawer({
   onOpenLinkedDocument,
   onOpenLinkedRecord,
   onRenew,
+  onReopen,
   onRequestDelete,
   onSnooze,
   isActionPending,
@@ -74,7 +77,7 @@ export function ReminderDetailDrawer({
   const [isCalendarSyncSaving, setIsCalendarSyncSaving] = useState(false)
   const [isCalendarDisableConfirmOpen, setIsCalendarDisableConfirmOpen] = useState(false)
   const [customSnoozeDate, setCustomSnoozeDate] = useState(() => addDaysDateOnly(3))
-  const [renewDate, setRenewDate] = useState(reminder.due_date)
+  const [showHistory, setShowHistory] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
@@ -90,7 +93,7 @@ export function ReminderDetailDrawer({
 
   useEffect(() => {
     setCustomSnoozeDate(addDaysDateOnly(3))
-    setRenewDate(reminder.due_date)
+    setShowHistory(false)
     setIsDrawerOpen(false)
     resetDetailScroll()
     openFrameRef.current = window.requestAnimationFrame(() => {
@@ -183,11 +186,12 @@ export function ReminderDetailDrawer({
   }
 
   async function handleRenew() {
-    if (!renewDate) {
-      return
-    }
+    const started = await onRenew(reminder.id, reminder.due_date)
+    if (started) requestClose()
+  }
 
-    await onRenew(reminder.id, renewDate)
+  async function handleReopen() {
+    await onReopen(reminder.id, reminder.current_occurrence_id ?? null)
   }
   async function handleCalendarSyncToggle() {
     if (reminder.calendar_sync_enabled) {
@@ -235,6 +239,12 @@ export function ReminderDetailDrawer({
             <CheckCircle2 size={17} aria-hidden="true" />
             {isActionPending ? 'Saving' : reminder.completed ? 'Completed' : 'Complete'}
           </button>
+          {reminder.completed && reminder.repeat === 'None' ? (
+            <button type="button" className="small-outline-button" onClick={() => void handleReopen()} disabled={isActionPending}>
+              <RotateCcw size={15} aria-hidden="true" />
+              Reopen
+            </button>
+          ) : null}
           {!reminder.completed ? (
             <button type="button" className="small-outline-button" onClick={() => void handleQuickSnooze(1)} disabled={isActionPending}>
               <Clock3 size={14} aria-hidden="true" />
@@ -306,16 +316,26 @@ export function ReminderDetailDrawer({
           customSnoozeDate={customSnoozeDate}
           isSaving={isActionPending}
           reminder={reminder}
-          renewDate={renewDate}
           onClearSnooze={() => void handleClearSnooze()}
           onCustomSnooze={() => void handleCustomSnooze()}
           onQuickSnooze={(days) => void handleQuickSnooze(days)}
           onRenew={() => void handleRenew()}
-          onRenewDateChange={setRenewDate}
           onSnoozeDateChange={setCustomSnoozeDate}
         />
 
-        <LifecycleHistorySection reminder={reminder} />
+        <section className="detail-section history-feature-boundary" aria-labelledby="history-feature-heading">
+          <div className="history-feature-heading">
+            <div><h3 id="history-feature-heading">History</h3><p>See completed cycles, renewals, due-date changes, snoozes, and evidence.</p></div>
+            <button type="button" className="small-outline-button" onClick={() => setShowHistory((current) => !current)} aria-expanded={showHistory}>
+              <History size={15} aria-hidden="true" />{showHistory ? 'Hide history' : 'Show history'}
+            </button>
+          </div>
+          {showHistory ? (
+            <Suspense fallback={<p className="linked-items-state" role="status" aria-live="polite">Loading history...</p>}>
+              <ResponsibilityHistoryPanel entityId={reminder.id} mode="reminder" onOpenDocument={onOpenLinkedDocument} />
+            </Suspense>
+          ) : null}
+        </section>
         <CalendarSyncSection
           reminder={reminder}
           calendarStatus={calendarStatus}
@@ -365,20 +385,16 @@ function LifecycleActionsSection({
   onCustomSnooze,
   onQuickSnooze,
   onRenew,
-  onRenewDateChange,
   onSnoozeDateChange,
   reminder,
-  renewDate,
 }: {
   customSnoozeDate: string
   isSaving: boolean
   reminder: Reminder
-  renewDate: string
   onClearSnooze: () => void
   onCustomSnooze: () => void
   onQuickSnooze: (days: number) => void
   onRenew: () => void
-  onRenewDateChange: (value: string) => void
   onSnoozeDateChange: (value: string) => void
 }) {
   if (reminder.completed) {
@@ -418,13 +434,9 @@ function LifecycleActionsSection({
           <div className="lifecycle-action-panel">
             <strong>Renew</strong>
             <p>Record this cycle and set the next active date.</p>
-            <label className="lifecycle-date-field">
-              <span>New date</span>
-              <input type="date" value={renewDate} onChange={(event) => onRenewDateChange(event.target.value)} />
-            </label>
-            <button type="button" className="primary-button lifecycle-renew-button" disabled={isSaving || !renewDate} onClick={onRenew}>
+            <button type="button" className="primary-button lifecycle-renew-button" disabled={isSaving} onClick={onRenew}>
               <RefreshCcw size={16} aria-hidden="true" />
-              {isSaving ? 'Saving...' : 'Renew'}
+              {isSaving ? 'Saving...' : 'Review renewal'}
             </button>
           </div>
         ) : null}
@@ -433,27 +445,6 @@ function LifecycleActionsSection({
   )
 }
 
-function LifecycleHistorySection({ reminder }: { reminder: Reminder }) {
-  const events = [...reminder.lifecycle_events].reverse()
-
-  return (
-    <section className="detail-section lifecycle-history-section" aria-labelledby="lifecycle-history-heading">
-      <h3 id="lifecycle-history-heading">History</h3>
-      {events.length === 0 ? <p className="linked-items-state">No lifecycle history yet.</p> : null}
-      {events.length > 0 ? (
-        <ol className="lifecycle-history-list">
-          {events.map((event) => (
-            <li key={event.event_id}>
-              <strong>{formatLifecycleEventType(event.event_type)}</strong>
-              <span>{event.summary}</span>
-              <time dateTime={event.occurred_at}>{formatLifecycleTimestamp(event.occurred_at)}</time>
-            </li>
-          ))}
-        </ol>
-      ) : null}
-    </section>
-  )
-}
 function CalendarSyncSection({
   reminder,
   calendarStatus,
@@ -686,33 +677,6 @@ function formatDateOnly(value: Date) {
   return `${year}-${month}-${day}`
 }
 
-function formatLifecycleEventType(type: Reminder['lifecycle_events'][number]['event_type']) {
-  const labels: Record<Reminder['lifecycle_events'][number]['event_type'], string> = {
-    created: 'Created',
-    edited: 'Edited',
-    date_changed: 'Date changed',
-    snoozed: 'Snoozed',
-    snooze_cleared: 'Snooze cleared',
-    completed: 'Completed',
-    renewed: 'Renewed',
-    archived: 'Archived',
-    restored: 'Restored',
-  }
-
-  return labels[type]
-}
-
-function formatLifecycleTimestamp(value: string) {
-  const timestamp = new Date(value)
-  if (Number.isNaN(timestamp.getTime())) {
-    return 'Time not recorded'
-  }
-
-  return timestamp.toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-}
 function formatBirthday(month: number, day: number) {
   const value = `2000-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   return formatMonthDay(value)

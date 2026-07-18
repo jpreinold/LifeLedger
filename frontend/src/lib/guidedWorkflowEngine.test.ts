@@ -116,7 +116,7 @@ describe('guided workflow recovery', () => {
       title: 'Passport renewal',
       due_date: '2032-10-01',
       repeat: 'None',
-    }), 'passport-attempt:responsibility')
+    }), 'passport-attempt:responsibility', 'passport-1')
     expect(createRelationship).toHaveBeenCalledWith('passport-1', 'passport-reminder', 'reminder_for')
   })
 
@@ -186,7 +186,7 @@ describe('guided workflow recovery', () => {
     expect(createRelationship).toHaveBeenCalledTimes(2)
     expect(uploadDocument).toHaveBeenCalledTimes(2)
     expect(createItem).toHaveBeenCalledWith(expect.objectContaining({ title: 'Family car' }), 'guided-attempt:item')
-    expect(createReminder).toHaveBeenCalledWith(expect.objectContaining({ due_date: '2030-04-15' }), 'guided-attempt:responsibility')
+    expect(createReminder).toHaveBeenCalledWith(expect.objectContaining({ due_date: '2030-04-15' }), 'guided-attempt:responsibility', 'vehicle-1')
     expect(uploadDocument).toHaveBeenCalledWith('vehicle-1', document, 'guided-attempt:document')
   })
 

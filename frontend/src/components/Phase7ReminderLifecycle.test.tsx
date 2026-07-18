@@ -213,6 +213,7 @@ describe('Phase 7 reminder lifecycle UI', () => {
         onEnableCalendarSync={vi.fn(async () => true)}
         onOpenLinkedRecord={vi.fn()}
         onRenew={onRenew}
+        onReopen={vi.fn(async () => true)}
         onRequestDelete={vi.fn()}
         onSnooze={onSnooze}
       />,
@@ -228,10 +229,7 @@ describe('Phase 7 reminder lifecycle UI', () => {
     await user.click(within(lifecycleSection as HTMLElement).getByRole('button', { name: 'Clear snooze' }))
     expect(onClearSnooze).toHaveBeenCalledWith('renewal')
 
-    await user.clear(screen.getByLabelText('New date'))
-    await user.type(screen.getByLabelText('New date'), '2027-07-14')
-    await user.click(within(lifecycleSection as HTMLElement).getByRole('button', { name: 'Renew' }))
-    expect(onRenew).toHaveBeenCalledWith('renewal', '2027-07-14')
-    expect(screen.getByText('Renewed')).toBeInTheDocument()
+    await user.click(within(lifecycleSection as HTMLElement).getByRole('button', { name: 'Review renewal' }))
+    expect(onRenew).toHaveBeenCalledWith('renewal', renewalReminder.due_date)
   })
 })

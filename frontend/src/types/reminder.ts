@@ -35,6 +35,7 @@ export const reminderLifecycleEventTypes = [
   'restored',
 ] as const
 export const reminderTypes = ['generic', 'birthday', 'renewal', 'maintenance'] as const
+export const responsibilityWorkflowIds = ['passport_expiration', 'vehicle_registration', 'pet_vaccination', 'subscription_renewal'] as const
 
 export const reminderAlertReasons = ['Overdue', 'Due today', 'Reminder window'] as const
 
@@ -53,6 +54,7 @@ export type ReminderLeadUnit = (typeof reminderLeadUnits)[number]
 export type ReminderStatus = (typeof reminderStatuses)[number]
 export type ReminderLifecycleEventType = (typeof reminderLifecycleEventTypes)[number]
 export type ReminderType = (typeof reminderTypes)[number]
+export type ResponsibilityWorkflowId = (typeof responsibilityWorkflowIds)[number]
 export type ReminderAlertReason = (typeof reminderAlertReasons)[number]
 export type CalendarSyncStatus = (typeof calendarSyncStatuses)[number]
 export type RenewalKind = (typeof renewalKinds)[number]
@@ -156,6 +158,7 @@ export interface Reminder {
   birthday_details: BirthdayDetails | null
   renewal_details: RenewalDetails | null
   maintenance_details: MaintenanceDetails | null
+  workflow_id?: ResponsibilityWorkflowId | null
   completed: boolean
   alert_dismissed_until: string | null
   alert_last_seen_at: string | null
@@ -168,6 +171,9 @@ export interface Reminder {
   created_at: string
   updated_at: string
   completed_at: string | null
+  current_occurrence_id?: string | null
+  lifecycle_reconciliation_status?: 'pending' | 'consistent' | 'needs_attention' | null
+  last_lifecycle_event_id?: string | null
   lifecycle_events: ReminderLifecycleEvent[]
   linked_records: ReminderLinkedRecordSummary[]
   next_due_date: string | null
@@ -203,4 +209,5 @@ export interface ReminderInput {
   birthday_details: BirthdayDetailsInput | null
   renewal_details: RenewalDetailsInput | null
   maintenance_details: MaintenanceDetailsInput | null
+  workflow_id?: ResponsibilityWorkflowId | null
 }

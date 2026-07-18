@@ -54,6 +54,9 @@ Parameters:
   SavedViewsTableName:
     Type: String
     Default: lifeledger-saved-views-auth
+  ResponsibilityHistoryTableName:
+    Type: String
+    Default: lifeledger-responsibility-history-auth
   DocumentStorageMode:
     Type: String
     Default: s3
@@ -421,6 +424,7 @@ Resources:
           LINKED_ITEMS_TABLE_NAME: !Ref LinkedItemsTable
           SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable
           SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable
+          RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
@@ -431,6 +435,7 @@ Resources:
           LOCAL_LINKED_ITEMS_FILE: /tmp/lifeledger-linked-items.json
           LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json
           LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json
+          LOCAL_RESPONSIBILITY_HISTORY_FILE: /tmp/lifeledger-responsibility-history.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
@@ -465,6 +470,8 @@ Resources:
             TableName: !Ref SearchIndexTable
         - DynamoDBCrudPolicy:
             TableName: !Ref SavedViewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ResponsibilityHistoryTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
@@ -696,6 +703,63 @@ Resources:
           KeyType: HASH
         - AttributeName: id
           KeyType: RANGE
+
+  ResponsibilityHistoryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref ResponsibilityHistoryTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: event_id
+          AttributeType: S
+        - AttributeName: reminder_partition
+          AttributeType: S
+        - AttributeName: item_partition
+          AttributeType: S
+        - AttributeName: idempotency_hash
+          AttributeType: S
+        - AttributeName: event_sort
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: event_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ReminderHistoryIndex
+          KeySchema:
+            - AttributeName: reminder_partition
+              KeyType: HASH
+            - AttributeName: event_sort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ItemActivityIndex
+          KeySchema:
+            - AttributeName: item_partition
+              KeyType: HASH
+            - AttributeName: event_sort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: HistoryIdempotencyIndex
+          KeySchema:
+            - AttributeName: idempotency_hash
+              KeyType: HASH
+            - AttributeName: event_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   RecordAttachmentsTable:
     Type: AWS::DynamoDB::Table
@@ -1167,6 +1231,9 @@ Outputs:
   SavedViewsTable:
     Description: DynamoDB saved search views table name.
     Value: !Ref SavedViewsTable
+  ResponsibilityHistoryTable:
+    Description: DynamoDB responsibility lifecycle history table name.
+    Value: !Ref ResponsibilityHistoryTable
   PushSubscriptionsTable:
     Description: DynamoDB push subscriptions table name.
     Value: !Ref PushSubscriptionsTable

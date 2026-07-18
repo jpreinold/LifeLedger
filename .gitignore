@@ -25,6 +25,9 @@ backend/samconfig.toml
 # Local frontend env
 frontend/.env.local
 frontend/.env.*.local
+frontend/playwright-report/
+frontend/test-results/
+frontend/.auth/
 
 # AWS SAM build output
 backend/.aws-sam/

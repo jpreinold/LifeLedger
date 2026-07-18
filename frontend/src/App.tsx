@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import { Authenticator } from '@aws-amplify/ui-react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import {
   AlertCircle,
@@ -30,25 +29,21 @@ import { pushApi, type PushStatus, type PushSubscriptionSummary } from './api/pu
 import { isCognitoAuthEnabled } from './auth/config'
 import { AddTypeSelector } from './components/AddTypeSelector'
 import { AlertCenter } from './components/AlertCenter'
-import { CalendarView } from './components/CalendarView'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { DailyDigestDrawer } from './components/DailyDigestDrawer'
 import { Dashboard } from './components/Dashboard'
 import { EditReminderDrawer } from './components/EditReminderDrawer'
 import { HomeDashboard } from './components/HomeDashboard'
-import { GuidedWorkflowDrawer } from './components/GuidedWorkflowDrawer'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
-import { RecordDetailDrawer, type RecordDetailTab } from './components/RecordDetailDrawer'
-import { RecordForm, type RecordCreationResult } from './components/RecordForm'
+import type { RecordDetailTab } from './components/RecordDetailDrawer'
+import type { RecordCreationResult } from './components/RecordForm'
 import { RecordsView } from './components/RecordsView'
 import { RecordTypeSelector } from './components/RecordTypeSelector'
-import { ReminderDetailDrawer } from './components/ReminderDetailDrawer'
 import { ReminderForm } from './components/ReminderForm'
 import type { TemplateDraft } from './components/ReminderForm'
 import { ReminderList } from './components/ReminderList'
-import { SearchView } from './components/SearchView'
 import { buildDailyDigest } from './lib/digest'
-import { formatCompletionNotice, type ReminderStatusFilter, type ReminderTypeFilter } from './lib/reminderDisplay'
+import type { ReminderStatusFilter, ReminderTypeFilter } from './lib/reminderDisplay'
 import {
   createBirthdayReminderInput,
   createGenericReminderInput,
@@ -76,6 +71,15 @@ import type { DynamicRecordFieldInput, LifeRecord, ProtectedRecordInput, Protect
 import type { LinkCreateRequest } from './types/linkedItem'
 import type { RecordFilter } from './lib/recordTypes'
 
+const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
+const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
+const GuidedWorkflowDrawer = lazy(() => import('./components/GuidedWorkflowDrawer').then((module) => ({ default: module.GuidedWorkflowDrawer })))
+const LifecycleActionDrawer = lazy(() => import('./components/LifecycleActionDrawer').then((module) => ({ default: module.LifecycleActionDrawer })))
+const RecordDetailDrawer = lazy(() => import('./components/RecordDetailDrawer').then((module) => ({ default: module.RecordDetailDrawer })))
+const RecordForm = lazy(() => import('./components/RecordForm').then((module) => ({ default: module.RecordForm })))
+const ReminderDetailDrawer = lazy(() => import('./components/ReminderDetailDrawer').then((module) => ({ default: module.ReminderDetailDrawer })))
+const SearchView = lazy(() => import('./components/SearchView').then((module) => ({ default: module.SearchView })))
+
 function App() {
   const {
     needRefresh: [needRefresh, setNeedRefresh],
@@ -100,16 +104,7 @@ function App() {
     )
   }
 
-  return (
-    <>
-      <Authenticator hideSignUp>
-        {({ signOut, user }) => (
-          <ReminderApp onSignOut={signOut} userLabel={user?.signInDetails?.loginId ?? user?.username} />
-        )}
-      </Authenticator>
-      {updateToast}
-    </>
-  )
+  return <Suspense fallback={<main className="app-loading" role="status">Loading secure workspace…</main>}><AuthenticatedApp updateToast={updateToast} /></Suspense>
 }
 
 interface PwaUpdateToastProps {
@@ -154,7 +149,7 @@ type RecordCreationProgress = {
   successfulDetails: Set<string>
 }
 
-function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
+export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [records, setRecords] = useState<LifeRecord[]>([])
   const [alerts, setAlerts] = useState<ReminderAlert[]>([])
@@ -178,6 +173,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const recordCreationProgressRef = useRef(new Map<string, RecordCreationProgress>())
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
   const [pendingReminderActionId, setPendingReminderActionId] = useState<string | null>(null)
+  const [lifecycleAction, setLifecycleAction] = useState<{ action: 'complete' | 'renew'; reminder: Reminder } | null>(null)
   const [pendingRecordDelete, setPendingRecordDelete] = useState<LifeRecord | null>(null)
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null)
   const [activePage, setActivePage] = useState<AppPage>('home')
@@ -357,7 +353,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setNotice(null)
 
     try {
-      const created = await remindersApi.create(input)
+      const created = await remindersApi.create(input, undefined, responsibilityRecordId ?? undefined)
       if (responsibilityRecordId) {
         try {
           await linkedItemsApi.createRecordLink(responsibilityRecordId, {
@@ -382,25 +378,14 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   async function handleComplete(id: string) {
-    if (pendingReminderActionId === id) {
-      return
-    }
-
-    setPendingReminderActionId(id)
     setError(null)
     setNotice(null)
     const reminder = reminders.find((item) => item.id === id)
-
-    try {
-      const completedReminder = await remindersApi.complete(id)
-      replaceReminder(completedReminder)
-      await loadReminderData()
-      setNotice(formatCompletionNotice(reminder, completedReminder))
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to complete reminder.')
-    } finally {
-      setPendingReminderActionId(null)
+    if (!reminder) {
+      setError('Unable to find this responsibility.')
+      return
     }
+    setLifecycleAction({ action: 'complete', reminder })
   }
 
   async function handleSnoozeReminder(id: string, snoozedUntil: string) {
@@ -449,27 +434,43 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
   }
 
-  async function handleRenewReminder(id: string, newDueDate: string) {
-    if (pendingReminderActionId === id) {
+  async function handleRenewReminder(id: string, _newDueDate: string) {
+    setError(null)
+    setNotice(null)
+    const reminder = reminders.find((item) => item.id === id)
+    if (!reminder) {
+      setError('Unable to find this responsibility.')
       return false
     }
+    setLifecycleAction({ action: 'renew', reminder })
+    return true
+  }
 
+  async function handleReopenReminder(id: string, occurrenceId: string | null) {
+    if (pendingReminderActionId === id) return false
     setPendingReminderActionId(id)
     setError(null)
     setNotice(null)
-
     try {
-      const updated = await remindersApi.renew(id, newDueDate)
+      const updated = await remindersApi.reopen(id, occurrenceId, crypto.randomUUID())
       replaceReminder(updated)
       await loadReminderData()
-      setNotice('Reminder renewed.')
+      setNotice('Responsibility reopened. Earlier completion history is unchanged.')
       return true
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to renew reminder.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to reopen responsibility.')
       return false
     } finally {
       setPendingReminderActionId(null)
     }
+  }
+
+  async function handleLifecycleSaved(updated: Reminder, message: string) {
+    replaceReminder(updated)
+    setLifecycleAction(null)
+    setNotice(message)
+    setError(null)
+    await Promise.all([loadReminderData(), loadRecordData()])
   }
 
   async function handleUpdate(id: string, input: ReminderInput) {
@@ -1198,7 +1199,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const useBrandHeader = activePage === 'home' || activePage === 'calendar'
 
   return (
-    <>
+    <Suspense fallback={<main className="app-loading" role="status">Loading feature…</main>}>
+      <>
       <main className="app-shell" id="app-top">
         <header className="app-header app-header-main">
           <button
@@ -1494,6 +1496,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onOpenLinkedDocument={openLinkedDocument}
           onOpenLinkedRecord={openLinkedRecord}
           onRenew={handleRenewReminder}
+          onReopen={handleReopenReminder}
           onRequestDelete={requestDelete}
           onSnooze={handleSnoozeReminder}
           isActionPending={pendingReminderActionId === viewingReminder.reminder.id}
@@ -1525,6 +1528,15 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onRestore={handleRestoreRecord}
         />
       ) : null}
+      {lifecycleAction ? (
+        <LifecycleActionDrawer
+          action={lifecycleAction.action}
+          reminder={lifecycleAction.reminder}
+          records={records}
+          onClose={() => setLifecycleAction(null)}
+          onSaved={(updated, message) => void handleLifecycleSaved(updated, message)}
+        />
+      ) : null}
       {editingReminder ? (
         <EditReminderDrawer
           reminder={editingReminder}
@@ -1552,7 +1564,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onCancel={() => setPendingRecordDelete(null)}
         onConfirm={() => void confirmRecordDelete()}
       />
-    </>
+      </>
+    </Suspense>
   )
 }
 

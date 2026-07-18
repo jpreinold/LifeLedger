@@ -12,6 +12,7 @@ from app.config import (
     DEFAULT_PUSH_SUBSCRIPTIONS_TABLE_NAME,
     DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME,
     DEFAULT_RECORDS_TABLE_NAME,
+    DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME,
     DEFAULT_REMINDERS_TABLE_NAME,
     DOCUMENT_STORAGE_DISABLED,
     DOCUMENT_STORAGE_S3,
@@ -63,6 +64,7 @@ def test_config_defaults_are_local_safe():
     assert settings.google_oauth_states_table_name == DEFAULT_GOOGLE_OAUTH_STATES_TABLE_NAME
     assert settings.record_attachments_table_name == DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME
     assert settings.linked_items_table_name == DEFAULT_LINKED_ITEMS_TABLE_NAME
+    assert settings.responsibility_history_table_name == DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME
     assert settings.aws_region == "us-east-1"
     assert settings.local_data_file.endswith("backend\\data\\reminders.json") or settings.local_data_file.endswith(
         "backend/data/reminders.json"
@@ -88,6 +90,9 @@ def test_config_defaults_are_local_safe():
     assert settings.local_google_oauth_states_file.endswith(
         "backend\\data\\google-oauth-states.json"
     ) or settings.local_google_oauth_states_file.endswith("backend/data/google-oauth-states.json")
+    assert settings.local_responsibility_history_file.endswith(
+        "backend\\data\\responsibility-history.json"
+    ) or settings.local_responsibility_history_file.endswith("backend/data/responsibility-history.json")
     assert settings.push_notifications_configured is False
     assert settings.google_calendar_configured is False
     assert settings.google_calendar_scopes == DEFAULT_GOOGLE_CALENDAR_SCOPES
@@ -123,6 +128,8 @@ def test_config_reads_environment_values():
             "GOOGLE_OAUTH_STATES_TABLE_NAME": "custom-google-states",
             "RECORD_ATTACHMENTS_TABLE_NAME": "custom-attachments",
             "LINKED_ITEMS_TABLE_NAME": "custom-linked-items",
+            "RESPONSIBILITY_HISTORY_TABLE_NAME": "custom-history",
+            "LOCAL_RESPONSIBILITY_HISTORY_FILE": "custom-history.json",
             "VAPID_PUBLIC_KEY": "public",
             "VAPID_PRIVATE_KEY": "private",
             "VAPID_SUBJECT": "mailto:test@example.com",
@@ -159,6 +166,8 @@ def test_config_reads_environment_values():
     assert settings.google_oauth_states_table_name == "custom-google-states"
     assert settings.record_attachments_table_name == "custom-attachments"
     assert settings.linked_items_table_name == "custom-linked-items"
+    assert settings.responsibility_history_table_name == "custom-history"
+    assert settings.local_responsibility_history_file == "custom-history.json"
     assert settings.push_notifications_configured is True
     assert settings.google_calendar_configured is True
     assert settings.record_encryption_mode == RECORD_ENCRYPTION_KMS

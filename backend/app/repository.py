@@ -40,6 +40,12 @@ class LocalReminderRepository:
     def create_reminder(self, reminder: Reminder) -> Reminder:
         with self._lock:
             reminders = self._read_all_unlocked()
+            if any(existing.user_id == reminder.user_id and existing.id == reminder.id for existing in reminders):
+                return next(
+                    existing
+                    for existing in reminders
+                    if existing.user_id == reminder.user_id and existing.id == reminder.id
+                )
             reminders.append(reminder)
             self._write_all_unlocked(reminders)
             return reminder
@@ -59,7 +65,7 @@ class LocalReminderRepository:
         with self._lock:
             reminders = self._read_all_unlocked()
             for index, existing in enumerate(reminders):
-                if existing.id == reminder.id:
+                if existing.user_id == reminder.user_id and existing.id == reminder.id:
                     reminders[index] = reminder
                     self._write_all_unlocked(reminders)
                     return reminder

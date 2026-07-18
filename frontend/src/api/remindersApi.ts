@@ -1,4 +1,5 @@
 import type { Reminder, ReminderAlert, ReminderInput } from '../types/reminder'
+import type { CompleteResponsibilityInput, LifecycleReconciliationResult, RenewResponsibilityInput, ResponsibilityEvent, ResponsibilityHistoryPage } from '../types/responsibilityHistory'
 import { getAuthorizationHeaders } from '../auth/session'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -48,8 +49,8 @@ export const remindersApi = {
 
   alerts: () => request<ReminderAlert[]>('/alerts'),
 
-  create: (input: ReminderInput, idempotencyKey?: string) =>
-    request<Reminder>('/reminders', {
+  create: (input: ReminderInput, idempotencyKey?: string, itemId?: string) =>
+    request<Reminder>(`/reminders${itemId ? `?item_id=${encodeURIComponent(itemId)}` : ''}`, {
       method: 'POST',
       headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify(input),
@@ -61,9 +62,11 @@ export const remindersApi = {
       body: JSON.stringify(input),
     }),
 
-  complete: (id: string) =>
+  complete: (id: string, input?: CompleteResponsibilityInput, idempotencyKey?: string) =>
     request<Reminder>(`/reminders/${id}/complete`, {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      body: input ? JSON.stringify(input) : undefined,
     }),
 
 
@@ -78,10 +81,35 @@ export const remindersApi = {
       method: 'POST',
     }),
 
-  renew: (id: string, newDueDate: string) =>
+  renew: (id: string, input: RenewResponsibilityInput, idempotencyKey?: string) =>
     request<Reminder>(`/reminders/${id}/renew`, {
       method: 'POST',
-      body: JSON.stringify({ new_due_date: newDueDate }),
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      body: JSON.stringify(input),
+    }),
+
+  reopen: (id: string, occurrenceId: string | null, idempotencyKey?: string) =>
+    request<Reminder>(`/reminders/${id}/reopen${occurrenceId ? `?occurrence_id=${encodeURIComponent(occurrenceId)}` : ''}`, {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+    }),
+
+  history: (id: string, cursor?: string | null, limit = 10) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (cursor) params.set('cursor', cursor)
+    return request<ResponsibilityHistoryPage>(`/reminders/${id}/history?${params.toString()}`)
+  },
+
+  reconcileHistory: (id: string, dryRun = false) =>
+    request<LifecycleReconciliationResult>(`/reminders/${id}/history/reconcile?dry_run=${dryRun}`, {
+      method: 'POST',
+    }),
+
+  addEvidence: (id: string, input: { record_id: string; document_id: string; occurrence_id: string | null; related_event_id: string }, idempotencyKey?: string) =>
+    request<ResponsibilityEvent>(`/reminders/${id}/history/evidence`, {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      body: JSON.stringify(input),
     }),
 
   dismissAlert: (id: string) =>

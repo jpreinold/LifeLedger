@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import {
   Archive,
   Bell,
   CalendarDays,
-  CheckCircle2,
   ChevronRight,
   Eye,
   EyeOff,
@@ -45,7 +44,9 @@ import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
-export type RecordDetailTab = 'details' | 'responsibilities' | 'documents' | 'linkedItems'
+const ResponsibilityHistoryPanel = lazy(() => import('./ResponsibilityHistoryPanel'))
+
+export type RecordDetailTab = 'details' | 'responsibilities' | 'documents' | 'linkedItems' | 'activity'
 
 interface RecordDetailDrawerProps {
   canGoBack?: boolean
@@ -135,7 +136,6 @@ export function RecordDetailDrawer({
   const activeRecordReminders = recordReminders.filter(isActionableReminder).sort(sortActionCenterReminders)
   const nextRecordReminder = activeRecordReminders[0] ?? null
   const overdueRecordReminderCount = activeRecordReminders.filter((reminder) => reminder.status === 'Overdue').length
-  const recentReminderEvents = getRecentRecordReminderEvents(recordReminders)
   const resetDetailScroll = useCallback(() => {
     detailBodyRef.current?.scrollTo({ top: 0 })
   }, [])
@@ -420,7 +420,7 @@ export function RecordDetailDrawer({
             </div>
           </section>
 
-          <div className="record-detail-tabs record-detail-tabs-four" role="tablist" aria-label="Item detail sections">
+          <div className="record-detail-tabs record-detail-tabs-five" role="tablist" aria-label="Item detail sections">
             <button
               type="button"
               className={activeTab === 'details' ? 'record-detail-tab active' : 'record-detail-tab'}
@@ -466,6 +466,17 @@ export function RecordDetailDrawer({
               onClick={() => selectTab('linkedItems')}
             >
               {getSectionLabel('relatedItems')}
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'activity' ? 'record-detail-tab active' : 'record-detail-tab'}
+              id="record-activity-tab"
+              role="tab"
+              aria-selected={activeTab === 'activity'}
+              aria-controls="record-activity-panel"
+              onClick={() => selectTab('activity')}
+            >
+              Activity
             </button>
           </div>
 
@@ -563,7 +574,6 @@ export function RecordDetailDrawer({
               <RecordReminderActivitySection
                 activeReminders={activeRecordReminders}
                 overdueCount={overdueRecordReminderCount}
-                recentEvents={recentReminderEvents}
                 nextReminder={nextRecordReminder}
                 suggestions={definition.suggestedResponsibilities}
                 guidedSuggestions={guidedWorkflowSuggestions}
@@ -611,6 +621,25 @@ export function RecordDetailDrawer({
               onOpenReminder={onOpenLinkedReminder}
             />
           </div>
+
+          <div
+            className="record-tab-panel"
+            hidden={activeTab !== 'activity'}
+            id="record-activity-panel"
+            role="tabpanel"
+            aria-labelledby="record-activity-tab"
+          >
+            {activeTab === 'activity' ? (
+              <Suspense fallback={<p className="linked-items-state" role="status">Loading activity…</p>}>
+                <ResponsibilityHistoryPanel
+                  entityId={record.id}
+                  mode="item"
+                  onOpenDocument={onOpenLinkedDocument}
+                  onOpenReminder={onOpenLinkedReminder}
+                />
+              </Suspense>
+            ) : null}
+          </div>
       </SheetDrawer>
 
 
@@ -647,22 +676,12 @@ export function RecordDetailDrawer({
   )
 }
 
-interface RecordReminderEventSummary {
-  eventId: string
-  label: string
-  occurredAt: string
-  reminderId: string
-  reminderTitle: string
-  summary: string
-}
-
 function RecordReminderActivitySection({
   activeReminders,
   nextReminder,
   onAddResponsibility,
   onOpenReminder,
   overdueCount,
-  recentEvents,
   suggestions,
   guidedSuggestions,
   onStartGuidedWorkflow,
@@ -670,7 +689,6 @@ function RecordReminderActivitySection({
   activeReminders: Reminder[]
   nextReminder: Reminder | null
   overdueCount: number
-  recentEvents: RecordReminderEventSummary[]
   suggestions: SuggestedResponsibilityDefinition[]
   guidedSuggestions: GuidedWorkflowDefinition[]
   onAddResponsibility: (suggestion?: SuggestedResponsibilityDefinition) => void
@@ -757,72 +775,8 @@ function RecordReminderActivitySection({
         </div>
       ) : null}
 
-      <div className="record-reminder-history">
-        <h4>Recent activity</h4>
-        {recentEvents.length === 0 ? <p className="linked-items-state">Completed and renewed responsibilities will appear here.</p> : null}
-        {recentEvents.length > 0 ? (
-          <ol>
-            {recentEvents.map((event) => (
-              <li key={event.eventId}>
-                <CheckCircle2 size={15} aria-hidden="true" />
-                <span>
-                  <strong>{event.label}</strong>
-                  <small>{event.reminderTitle} {'\u2022'} {event.summary}</small>
-                </span>
-                <time dateTime={event.occurredAt}>{formatReminderEventDate(event.occurredAt)}</time>
-              </li>
-            ))}
-          </ol>
-        ) : null}
-      </div>
     </section>
   )
-}
-
-function getRecentRecordReminderEvents(reminders: Reminder[]): RecordReminderEventSummary[] {
-  const visibleTypes = new Set(['completed', 'renewed', 'date_changed', 'snoozed', 'snooze_cleared'])
-
-  return reminders
-    .flatMap((reminder) => reminder.lifecycle_events
-      .filter((event) => visibleTypes.has(event.event_type))
-      .map((event) => ({
-        eventId: event.event_id,
-        label: formatReminderEventType(event.event_type),
-        occurredAt: event.occurred_at,
-        reminderId: reminder.id,
-        reminderTitle: reminder.title,
-        summary: event.summary,
-      })))
-    .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
-    .slice(0, 4)
-}
-
-function formatReminderEventType(type: Reminder['lifecycle_events'][number]['event_type']) {
-  const labels: Record<Reminder['lifecycle_events'][number]['event_type'], string> = {
-    created: 'Created',
-    edited: 'Edited',
-    date_changed: 'Date changed',
-    snoozed: 'Snoozed',
-    snooze_cleared: 'Snooze cleared',
-    completed: 'Completed',
-    renewed: 'Renewed',
-    archived: 'Archived',
-    restored: 'Restored',
-  }
-
-  return labels[type]
-}
-
-function formatReminderEventDate(value: string) {
-  const timestamp = new Date(value)
-  if (Number.isNaN(timestamp.getTime())) {
-    return 'Date unknown'
-  }
-
-  return timestamp.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })
 }
 
 function isRenewableReminder(reminder: Reminder) {

@@ -99,6 +99,13 @@ def test_sam_template_defaults_to_secure_production_modes():
     assert "SavedViewsTable:" in template
     assert "SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable" in template
     assert "SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable" in template
+    assert "RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable" in template
+    assert "LOCAL_RESPONSIBILITY_HISTORY_FILE: /tmp/lifeledger-responsibility-history.json" in template
+    assert "ResponsibilityHistoryTableName:" in template
+    assert "ResponsibilityHistoryTable:" in template
+    assert "ReminderHistoryIndex" in template
+    assert "ItemActivityIndex" in template
+    assert "HistoryIdempotencyIndex" in template
     assert "LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json" in template
     assert "LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json" in template
     assert "SourceLinksIndex" in template
@@ -153,6 +160,7 @@ def test_sam_template_defaults_to_secure_production_modes():
     assert "LifeLedgerDocumentsKey" not in digest_section
     assert "LinkedItemsTable" not in digest_section
     assert "LINKED_ITEMS_TABLE_NAME" not in digest_section
+    assert "RESPONSIBILITY_HISTORY_TABLE_NAME" not in digest_section
 
 
 def test_sam_kms_permissions_split_app_and_dynamodb_access():
@@ -219,6 +227,8 @@ def test_sam_local_env_file_uses_local_persistence():
     assert function_env["LOCAL_SAVED_VIEWS_FILE"] == "/tmp/lifeledger-saved-views.json"
     assert function_env["SEARCH_INDEX_TABLE_NAME"] == "lifeledger-search-index-auth"
     assert function_env["SAVED_VIEWS_TABLE_NAME"] == "lifeledger-saved-views-auth"
+    assert function_env["LOCAL_RESPONSIBILITY_HISTORY_FILE"] == "/tmp/lifeledger-responsibility-history.json"
+    assert function_env["RESPONSIBILITY_HISTORY_TABLE_NAME"] == "lifeledger-responsibility-history-auth"
     assert function_env["GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME"] == "lifeledger-google-calendar-connections-auth"
     assert function_env["GOOGLE_OAUTH_STATES_TABLE_NAME"] == "lifeledger-google-oauth-states-auth"
     assert function_env["LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE"] == "/tmp/lifeledger-google-calendar-connections.json"

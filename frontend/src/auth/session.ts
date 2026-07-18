@@ -1,5 +1,3 @@
-import { fetchAuthSession } from 'aws-amplify/auth'
-
 import { isCognitoAuthEnabled } from './config'
 
 export async function getAuthorizationHeaders(): Promise<Record<string, string>> {
@@ -7,6 +5,7 @@ export async function getAuthorizationHeaders(): Promise<Record<string, string>>
     return {}
   }
 
+  const { fetchAuthSession } = await import('aws-amplify/auth')
   const session = await fetchAuthSession()
   const accessToken = session.tokens?.accessToken?.toString()
 

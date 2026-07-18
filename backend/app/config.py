@@ -39,6 +39,7 @@ LAMBDA_LOCAL_PREFERENCES_FILE = "/tmp/lifeledger-preferences.json"
 LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE = "/tmp/lifeledger-push-subscriptions.json"
 LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE = "/tmp/lifeledger-google-calendar-connections.json"
 LAMBDA_LOCAL_GOOGLE_OAUTH_STATES_FILE = "/tmp/lifeledger-google-oauth-states.json"
+LAMBDA_LOCAL_RESPONSIBILITY_HISTORY_FILE = "/tmp/lifeledger-responsibility-history.json"
 DEFAULT_LOCAL_DEV_USER_ID = "local-dev-user"
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -58,6 +59,7 @@ DEFAULT_RECORD_ATTACHMENTS_TABLE_NAME = "lifeledger-record-attachments-auth"
 DEFAULT_LINKED_ITEMS_TABLE_NAME = "lifeledger-linked-items-auth"
 DEFAULT_SEARCH_INDEX_TABLE_NAME = "lifeledger-search-index-auth"
 DEFAULT_SAVED_VIEWS_TABLE_NAME = "lifeledger-saved-views-auth"
+DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME = "lifeledger-responsibility-history-auth"
 DEFAULT_GOOGLE_CALENDAR_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
@@ -83,6 +85,7 @@ class Settings:
     linked_items_table_name: str = DEFAULT_LINKED_ITEMS_TABLE_NAME
     search_index_table_name: str = DEFAULT_SEARCH_INDEX_TABLE_NAME
     saved_views_table_name: str = DEFAULT_SAVED_VIEWS_TABLE_NAME
+    responsibility_history_table_name: str = DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME
     aws_region: str = "us-east-1"
     local_data_file: str = ""
     local_records_file: str = ""
@@ -94,6 +97,7 @@ class Settings:
     local_push_subscriptions_file: str = ""
     local_google_calendar_connections_file: str = ""
     local_google_oauth_states_file: str = ""
+    local_responsibility_history_file: str = ""
     cors_allowed_origins: list[str] | None = None
     vapid_public_key: str = ""
     vapid_private_key: str = ""
@@ -223,6 +227,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEFAULT_SEARCH_INDEX_TABLE_NAME,
         saved_views_table_name=source.get("SAVED_VIEWS_TABLE_NAME", DEFAULT_SAVED_VIEWS_TABLE_NAME).strip()
         or DEFAULT_SAVED_VIEWS_TABLE_NAME,
+        responsibility_history_table_name=source.get(
+            "RESPONSIBILITY_HISTORY_TABLE_NAME",
+            DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME,
+        ).strip()
+        or DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME,
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
         local_records_file=source.get("LOCAL_RECORDS_FILE", "").strip() or default_local_records_file(source),
@@ -242,6 +251,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or default_local_google_calendar_connections_file(source),
         local_google_oauth_states_file=source.get("LOCAL_GOOGLE_OAUTH_STATES_FILE", "").strip()
         or default_local_google_oauth_states_file(source),
+        local_responsibility_history_file=source.get("LOCAL_RESPONSIBILITY_HISTORY_FILE", "").strip()
+        or default_local_responsibility_history_file(source),
         cors_allowed_origins=parse_csv_list(source.get("CORS_ALLOWED_ORIGINS", ""))
         or DEFAULT_CORS_ALLOWED_ORIGINS,
         vapid_public_key=source.get("VAPID_PUBLIC_KEY", "").strip(),
@@ -420,6 +431,14 @@ def default_local_google_oauth_states_file(env: Mapping[str, str] | None = None)
 
     backend_root = Path(__file__).resolve().parents[1]
     return str(backend_root / "data" / "google-oauth-states.json")
+
+
+def default_local_responsibility_history_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_RESPONSIBILITY_HISTORY_FILE
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "responsibility-history.json")
 
 
 def parse_csv_list(value: str) -> list[str]:

@@ -16,9 +16,13 @@ from app.schemas import (
     ReminderCategory,
     ReminderLeadUnit,
     ReminderLifecycleEvent,
+    LifecycleReconciliationStatus,
     RecordStatus,
     RecordType,
     ReminderType,
+    ResponsibilityEventSource,
+    ResponsibilityEventType,
+    ResponsibilityWorkflowId,
     RenewalDetails,
     RepeatOption,
 )
@@ -40,6 +44,7 @@ class Reminder(BaseModel):
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
     maintenance_details: MaintenanceDetails | None = None
+    workflow_id: ResponsibilityWorkflowId | None = None
     completed: bool = False
     created_at: datetime
     alert_dismissed_until: datetime | None = None
@@ -49,6 +54,8 @@ class Reminder(BaseModel):
     snoozed_until: datetime | None = None
     archived_at: datetime | None = None
     lifecycle_events: list[ReminderLifecycleEvent] = Field(default_factory=list)
+    current_occurrence_id: str | None = None
+    version: int = 0
     calendar_sync_enabled: bool = False
     calendar_provider: str | None = None
     calendar_id: str | None = None
@@ -58,6 +65,35 @@ class Reminder(BaseModel):
     calendar_sync_error: str | None = None
     updated_at: datetime
     completed_at: datetime | None = None
+
+
+class ResponsibilityEvent(BaseModel):
+    event_id: str
+    user_id: str
+    reminder_id: str
+    item_id: str | None = None
+    occurrence_id: str | None = None
+    event_type: ResponsibilityEventType
+    occurred_at: datetime
+    effective_date: date | None = None
+    previous_due_date: date | None = None
+    next_due_date: date | None = None
+    completed_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=500)
+    related_document_ids: list[str] = Field(default_factory=list)
+    related_event_id: str | None = None
+    source: ResponsibilityEventSource = ResponsibilityEventSource.USER
+    idempotency_key: str
+    correlation_id: str
+    schema_version: int = 1
+    created_at: datetime
+    responsibility_title_snapshot: str | None = Field(default=None, max_length=120)
+    item_title_snapshot: str | None = Field(default=None, max_length=120)
+    item_type_snapshot: RecordType | None = None
+    item_date_sync_key: str | None = Field(default=None, max_length=80)
+    reconciliation_status: LifecycleReconciliationStatus = LifecycleReconciliationStatus.PENDING
+    search_sync_status: LifecycleReconciliationStatus = LifecycleReconciliationStatus.PENDING
+    document_reference_status: LifecycleReconciliationStatus = LifecycleReconciliationStatus.CONSISTENT
 
 
 class ReminderPatch(BaseModel):

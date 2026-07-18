@@ -14,12 +14,19 @@ import type {
   RecordAttachmentUploadIntentInput,
   RecordInput,
 } from '../types/record'
+import type { ResponsibilityHistoryPage } from '../types/responsibilityHistory'
 
 export const recordsApi = {
   list: (includeArchived = false) =>
     apiRequest<LifeRecord[]>(`/records${includeArchived ? '?include_archived=true' : ''}`),
 
   get: (id: string) => apiRequest<LifeRecord>(`/records/${id}`),
+
+  activity: (id: string, cursor?: string | null, limit = 10) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (cursor) params.set('cursor', cursor)
+    return apiRequest<ResponsibilityHistoryPage>(`/records/${id}/activity?${params.toString()}`, { cache: 'no-store' })
+  },
 
   revealProtected: (id: string) =>
     apiRequest<ProtectedRecordPayload>(`/records/${id}/protected`, {

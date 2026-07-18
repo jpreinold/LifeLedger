@@ -58,6 +58,37 @@ class ReminderLifecycleEventType(str, Enum):
     RESTORED = "restored"
 
 
+class ResponsibilityWorkflowId(str, Enum):
+    PASSPORT_EXPIRATION = "passport_expiration"
+    VEHICLE_REGISTRATION = "vehicle_registration"
+    PET_VACCINATION = "pet_vaccination"
+    SUBSCRIPTION_RENEWAL = "subscription_renewal"
+
+
+class ResponsibilityEventType(str, Enum):
+    RESPONSIBILITY_CREATED = "responsibility_created"
+    COMPLETED = "completed"
+    RENEWED = "renewed"
+    SNOOZED = "snoozed"
+    SNOOZE_CLEARED = "snooze_cleared"
+    REOPENED = "reopened"
+    DUE_DATE_CHANGED = "due_date_changed"
+    SUPPORTING_DOCUMENT_ADDED = "supporting_document_added"
+    HISTORY_TRACKING_STARTED = "history_tracking_started"
+
+
+class ResponsibilityEventSource(str, Enum):
+    USER = "user"
+    GUIDED_WORKFLOW = "guided_workflow"
+    RECONCILIATION = "reconciliation"
+
+
+class LifecycleReconciliationStatus(str, Enum):
+    PENDING = "pending"
+    CONSISTENT = "consistent"
+    NEEDS_ATTENTION = "needs_attention"
+
+
 class ReminderAlertReason(str, Enum):
     OVERDUE = "Overdue"
     DUE_TODAY = "Due today"
@@ -306,6 +337,7 @@ class ReminderBase(BaseModel):
     birthday_details: BirthdayDetails | None = None
     renewal_details: RenewalDetails | None = None
     maintenance_details: MaintenanceDetails | None = None
+    workflow_id: ResponsibilityWorkflowId | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -441,6 +473,42 @@ class ReminderRenewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     new_due_date: date
+    renewed_on: date | None = None
+    occurrence_id: str | None = Field(default=None, max_length=120)
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class ReminderCompleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    completed_on: date | None = None
+    occurrence_id: str | None = Field(default=None, max_length=120)
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class ResponsibilityEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    record_id: str = Field(..., min_length=1, max_length=120)
+    document_id: str = Field(..., min_length=1, max_length=120)
+    occurrence_id: str | None = Field(default=None, max_length=120)
+    related_event_id: str | None = Field(default=None, max_length=120)
 
 
 class ReminderResponse(ReminderBase):
@@ -459,6 +527,9 @@ class ReminderResponse(ReminderBase):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    current_occurrence_id: str | None = None
+    lifecycle_reconciliation_status: LifecycleReconciliationStatus | None = None
+    last_lifecycle_event_id: str | None = None
     lifecycle_events: list[ReminderLifecycleEvent] = Field(default_factory=list)
     linked_records: list[ReminderLinkedRecordSummary] = Field(default_factory=list)
     next_due_date: date | None = None
@@ -475,6 +546,60 @@ class ReminderResponse(ReminderBase):
     calendar_last_synced_at: datetime | None = None
     calendar_sync_status: CalendarSyncStatus = CalendarSyncStatus.NOT_SYNCED
     calendar_sync_error: str | None = None
+
+
+class ResponsibilityDocumentEvidence(BaseModel):
+    document_id: str
+    record_id: str | None = None
+    display_name: str
+    status: str
+    available: bool = False
+
+
+class ResponsibilityEventResponse(BaseModel):
+    event_id: str
+    reminder_id: str
+    item_id: str | None = None
+    occurrence_id: str | None = None
+    event_type: ResponsibilityEventType
+    occurred_at: datetime
+    effective_date: date | None = None
+    previous_due_date: date | None = None
+    next_due_date: date | None = None
+    completed_at: datetime | None = None
+    note: str | None = None
+    source: ResponsibilityEventSource
+    schema_version: int
+    created_at: datetime
+    responsibility_title_snapshot: str | None = None
+    item_title_snapshot: str | None = None
+    item_type_snapshot: RecordType | None = None
+    related_event_id: str | None = None
+    reconciliation_status: LifecycleReconciliationStatus
+    search_sync_status: LifecycleReconciliationStatus
+    document_reference_status: LifecycleReconciliationStatus
+    documents: list[ResponsibilityDocumentEvidence] = Field(default_factory=list)
+
+
+class ResponsibilityHistoryPage(BaseModel):
+    items: list[ResponsibilityEventResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class LifecycleReconciliationResult(BaseModel):
+    reminder_id: str
+    dry_run: bool = False
+    inspected: int = 0
+    repaired: int = 0
+    remaining: int = 0
+    results: list[str] = Field(default_factory=list)
+
+
+class LifecycleReconciliationPage(BaseModel):
+    items: list[LifecycleReconciliationResult] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
 class ReminderAlertResponse(ReminderResponse):
     alert_reason: ReminderAlertReason
     alert_reminder_start_date: date | None = None

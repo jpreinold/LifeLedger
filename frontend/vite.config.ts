@@ -4,6 +4,19 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  build: {
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('@aws-amplify/ui-react') || id.includes('@xstate')) return 'amplify-ui'
+          if (id.includes('aws-amplify')) return 'amplify-core'
+          if (id.includes('@mui') || id.includes('@emotion')) return 'mui-ui'
+          return undefined
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

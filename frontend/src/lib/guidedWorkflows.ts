@@ -298,6 +298,8 @@ export const guidedWorkflowRegistry: Record<GuidedWorkflowId, GuidedWorkflowDefi
       field('next_due_date', 'Next due date', 'responsibility', 'date', {
         required: true,
         reviewLabel: 'Next due',
+        registryDetailKey: 'next_vaccination_due_date',
+        dynamicDetailKey: 'next_vaccination_due_date',
       }),
       field('vaccination_provider', 'Veterinarian for this vaccination', 'responsibility', 'text', {
         reviewLabel: 'Veterinarian',
@@ -562,7 +564,8 @@ export function buildGuidedReminderInput(
     const provider = values.vaccination_provider?.trim()
     const notes = values.vaccination_notes?.trim()
     const instructions = [provider ? `Veterinarian: ${provider}` : null, notes].filter(Boolean).join('\n') || null
-    return createMaintenanceReminderInput({
+    return {
+      ...createMaintenanceReminderInput({
       title: `${vaccinationName} vaccination`.replace(/vaccination vaccination$/i, 'vaccination'),
       category: 'Family',
       due_date: values.next_due_date,
@@ -580,7 +583,9 @@ export function buildGuidedReminderInput(
         interval_unit: null,
         instructions,
       },
-    })
+      }),
+      workflow_id: workflow.id,
+    }
   }
 
   const dueDate = workflow.id === 'passport_expiration'
@@ -596,7 +601,8 @@ export function buildGuidedReminderInput(
   const frequency = workflow.id === 'subscription_renewal' ? values.billing_frequency : repeat
   const renewalKind = workflow.id === 'passport_expiration' ? 'expiration' as const : 'renewal' as const
 
-  return createRenewalReminderInput({
+  return {
+    ...createRenewalReminderInput({
     title: workflow.responsibilityConfiguration.title,
     category: workflow.id === 'vehicle_registration' ? 'Car' : workflow.id === 'subscription_renewal' ? 'Subscriptions' : 'Other',
     due_date: dueDate,
@@ -613,7 +619,9 @@ export function buildGuidedReminderInput(
       expiration_date: renewalKind === 'expiration' ? dueDate : null,
       frequency: normalizeValue(frequency),
     },
-  })
+    }),
+    workflow_id: workflow.id,
+  }
 }
 
 export function getWorkflowDueDate(workflow: GuidedWorkflowDefinition, values: GuidedWorkflowValues) {

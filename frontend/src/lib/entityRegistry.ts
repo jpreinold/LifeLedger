@@ -441,6 +441,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
       detail('breed', 'Breed', 'short_text', 100, { placeholder: 'Breed or mix', showByDefault: true, section: 'overview' }),
       detail('birthday', 'Birthday', 'date', 110, { placeholder: 'Choose a date', showByDefault: true, section: 'overview' }),
       detail('vet', 'Veterinarian', 'short_text', 120, { placeholder: 'Veterinarian or clinic', showByDefault: true, section: 'overview' }),
+      detail('next_vaccination_due_date', 'Next vaccination due', 'date', 125, { placeholder: 'Choose a date', showByDefault: true, section: 'overview' }),
       detail('microchip', 'Microchip number', 'short_text', 130, { placeholder: 'Microchip number', protectedByDefault: true, searchable: false, showByDefault: true, section: 'overview' }),
       detail('owner_name', 'Owner', 'short_text', 140, { recordField: 'owner_name', placeholder: 'Owner name', showByDefault: true, section: 'overview' }),
       detail('start_date', 'Adoption or start date', 'date', 150, { recordField: 'start_date' }),

@@ -67,7 +67,7 @@ export interface GuidedWorkflowDependencies {
   createDetail: (recordId: string, input: DynamicRecordFieldInput) => Promise<LifeRecord>
   updateDetail: (recordId: string, fieldId: string, input: DynamicRecordFieldUpdateInput) => Promise<LifeRecord>
   saveProtected: (recordId: string, input: ProtectedRecordInput, existingItem: boolean) => Promise<ProtectedRecordStatus>
-  createReminder: (input: ReminderInput, idempotencyKey: string) => Promise<Reminder>
+  createReminder: (input: ReminderInput, idempotencyKey: string, itemId?: string) => Promise<Reminder>
   createRelationship: (recordId: string, reminderId: string, type: RelationshipType) => Promise<unknown>
   uploadDocument: (recordId: string, file: File, idempotencyKey: string) => Promise<RecordAttachment>
 }
@@ -174,6 +174,7 @@ export async function runGuidedWorkflowAttempt(
       progress.reminder = await dependencies.createReminder(
         buildGuidedReminderInput(workflow, values, itemForChildren.title),
         `${progress.correlationId}:responsibility`,
+        itemForChildren.id,
       )
     } catch {
       failed.add('responsibility')

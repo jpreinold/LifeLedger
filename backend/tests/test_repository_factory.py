@@ -10,6 +10,7 @@ from app.google_calendar_repository import (
 from app.push_repository import DynamoPushSubscriptionRepository, LocalPushSubscriptionRepository
 from app.records_repository import LocalRecordRepository
 from app.repository import LocalReminderRepository
+from app.responsibility_history_repository import DynamoResponsibilityHistoryRepository, LocalResponsibilityHistoryRepository
 from app.repository_factory import (
     create_google_calendar_connection_repository,
     create_google_oauth_state_repository,
@@ -17,6 +18,7 @@ from app.repository_factory import (
     create_record_attachment_repository,
     create_record_repository,
     create_repository,
+    create_responsibility_history_repository,
 )
 
 
@@ -46,6 +48,24 @@ def test_repository_factory_selects_dynamodb_without_real_aws_call():
 
     assert isinstance(repo, DynamoReminderRepository)
     assert repo.table is fake_table
+
+
+def test_responsibility_history_factory_matches_local_and_dynamo_modes(tmp_path):
+    local_path = tmp_path / "history.json"
+    local_repo = create_responsibility_history_repository(load_settings({}), local_file_path=local_path)
+    assert isinstance(local_repo, LocalResponsibilityHistoryRepository)
+    assert local_repo.file_path == local_path
+
+    fake_table = FakeDynamoTable()
+    fake_client = object()
+    dynamo_repo = create_responsibility_history_repository(
+        load_settings({"PERSISTENCE_MODE": "dynamodb"}),
+        dynamo_table=fake_table,
+        dynamo_client=fake_client,
+    )
+    assert isinstance(dynamo_repo, DynamoResponsibilityHistoryRepository)
+    assert dynamo_repo.table is fake_table
+    assert dynamo_repo.client is fake_client
 
 
 def test_record_repository_factory_defaults_to_local(tmp_path):

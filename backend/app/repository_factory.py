@@ -34,6 +34,11 @@ from app.search_repository import (
     SearchIndexRepository,
 )
 from app.repository import LocalReminderRepository, ReminderRepository
+from app.responsibility_history_repository import (
+    DynamoResponsibilityHistoryRepository,
+    LocalResponsibilityHistoryRepository,
+    ResponsibilityHistoryRepository,
+)
 
 
 def create_repository(
@@ -70,6 +75,27 @@ def create_record_repository(
         )
 
     return LocalRecordRepository(local_file_path or resolved_settings.local_records_file)
+
+
+def create_responsibility_history_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+    dynamo_client: Any | None = None,
+) -> ResponsibilityHistoryRepository:
+    resolved_settings = settings or get_settings()
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoResponsibilityHistoryRepository(
+            table_name=resolved_settings.responsibility_history_table_name,
+            reminder_table_name=resolved_settings.reminders_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+            client=dynamo_client,
+        )
+    return LocalResponsibilityHistoryRepository(
+        local_file_path or resolved_settings.local_responsibility_history_file
+    )
 
 
 def create_record_attachment_repository(
