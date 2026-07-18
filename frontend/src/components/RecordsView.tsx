@@ -8,6 +8,7 @@ import {
 } from '../lib/recordDisplay'
 import { hasSensitiveDynamicFields } from '../lib/fieldRendering'
 import { getRecordTypeDefinition, recordFilterOptions, type RecordFilter } from '../lib/recordTypes'
+import { getCategoryPresentation, productTerms } from '../lib/terminology'
 import type { LifeRecord } from '../types/record'
 
 interface RecordsViewProps {
@@ -35,22 +36,22 @@ export function RecordsView({
   const activeCount = records.filter((record) => record.status !== 'archived').length
   const visibleRecords = records
     .filter((record) => (showArchived ? record.status === 'archived' : record.status !== 'archived'))
-    .filter((record) => activeFilter === 'all' || getRecordTypeDefinition(record.record_type).category === activeFilter)
+    .filter((record) => activeFilter === 'all' || record.record_type === activeFilter)
 
   return (
     <section className="records-page" aria-labelledby="records-heading">
       <div className="records-page-header">
         <div>
-          <h2 id="records-heading">Records</h2>
-          <p>Keep important personal details organized.</p>
+          <h2 id="records-heading">{productTerms.items}</h2>
+          <p>Keep the important things in your life organized in one place.</p>
         </div>
         <button type="button" className="primary-button records-add-button" onClick={onAddRecord}>
           <Plus size={17} aria-hidden="true" />
-          Add record
+          {productTerms.addItem}
         </button>
       </div>
 
-      <div className="records-summary-strip" aria-label="Records summary">
+      <div className="records-summary-strip" aria-label="Items summary">
         <span>
           <strong>{activeCount}</strong>
           Active
@@ -61,7 +62,7 @@ export function RecordsView({
         </span>
       </div>
 
-      <div className="filter-tabs record-filter-tabs" role="tablist" aria-label="Record filters">
+      <div className="filter-tabs record-filter-tabs" role="tablist" aria-label="Item filters">
         {recordFilterOptions.map((filter) => (
           <button
             type="button"
@@ -87,23 +88,23 @@ export function RecordsView({
         </button>
       ) : null}
 
-      {isLoading ? <p className="empty-state">Loading records...</p> : null}
+      {isLoading ? <p className="empty-state">Loading items...</p> : null}
 
       {!isLoading && visibleRecords.length === 0 ? (
         <div className="empty-state empty-state-card records-empty-state">
           <FileText size={28} aria-hidden="true" />
-          <p>{showArchived ? 'No archived records match this filter.' : 'No records yet.'}</p>
+          <p>{showArchived ? 'No archived items match this filter.' : 'Keep the important things in your life organized in one place. Start with a vehicle, pet, home, policy, or important document.'}</p>
           {!showArchived ? (
             <button type="button" className="primary-button empty-add-button" onClick={onAddRecord}>
               <Plus size={17} aria-hidden="true" />
-              Add record
+              {productTerms.addItem}
             </button>
           ) : null}
         </div>
       ) : null}
 
       {!isLoading && visibleRecords.length > 0 ? (
-        <div className="records-list" aria-label="Records list">
+        <div className="records-list" aria-label="Items list">
           {visibleRecords.map((record) => (
             <RecordCard record={record} key={record.id} onView={() => onViewRecord(record)} />
           ))}
@@ -119,6 +120,7 @@ function RecordCard({ record, onView }: { record: LifeRecord; onView: () => void
   const keyDate = formatRecordKeyDate(record)
   const providerLine = getRecordProviderLine(record)
   const hasSensitiveFields = record.has_protected_data || hasSensitiveDynamicFields(record.dynamic_fields)
+  const category = getCategoryPresentation(record.record_type, record.category)
 
   return (
     <article className="record-card">
@@ -132,13 +134,13 @@ function RecordCard({ record, onView }: { record: LifeRecord; onView: () => void
             <span className={`status-chip ${getRecordStatusClass(record)}`}>{getRecordStatusLabel(record)}</span>
           </span>
           <strong>{record.title}</strong>
-          <span>{record.subtitle || definition.category}</span>
+          {record.subtitle || category ? <span>{record.subtitle || category}</span> : null}
           {keyDate ? <small>{keyDate}</small> : null}
           {providerLine ? <small>{providerLine}</small> : null}
           {hasSensitiveFields ? (
             <small className="record-protected-indicator">
               <LockKeyhole size={13} aria-hidden="true" />
-              Sensitive fields saved
+              Protected details saved
             </small>
           ) : null}
         </span>

@@ -118,7 +118,7 @@ export function HomeDashboard({
       onClick: onViewReminders,
     },
     {
-      label: 'Records',
+      label: 'Items',
       value: String(recordsCount),
       sublabel: recordsCount === 0 ? 'Ready to add' : 'Active',
       icon: FileText,
@@ -142,6 +142,19 @@ export function HomeDashboard({
         </button>
       </section>
 
+      {recordsCount === 0 ? (
+        <section className="home-first-item-card" aria-labelledby="first-item-heading">
+          <div>
+            <h2 id="first-item-heading">What would you like to keep track of?</h2>
+            <p>LifeLedger keeps important information, responsibilities, dates, documents, and relationships together. Start with one useful item.</p>
+          </div>
+          <button type="button" className="primary-button" onClick={onAddRecord}>
+            <Plus size={17} aria-hidden="true" />
+            Add your first item
+          </button>
+        </section>
+      ) : null}
+
       <section className="home-digest-card" aria-labelledby="daily-digest-card-heading">
         <div className="home-digest-icon" aria-hidden="true">
           <CalendarDays size={24} />
@@ -162,7 +175,7 @@ export function HomeDashboard({
       <section className="quick-actions-card" aria-label="Quick actions">
         <QuickAction label="Add reminder" icon={Plus} tone="blue" onClick={onAddReminder} />
         <QuickAction label="Browse templates" icon={ListChecks} tone="blue-soft" onClick={onBrowseTemplates} />
-        <QuickAction label="Add record" icon={FileText} tone="green" onClick={onAddRecord} />
+        <QuickAction label="Add item" icon={FileText} tone="green" onClick={onAddRecord} />
         <QuickAction label="Review renewals" icon={RefreshCcw} tone="orange" onClick={onViewReminders} />
       </section>
 
@@ -243,28 +256,24 @@ function QuickAction({
   label,
   icon: Icon,
   tone,
-  disabled = false,
   onClick,
 }: {
   label: string
   icon: LucideIcon
   tone: string
-  disabled?: boolean
   onClick?: () => void
 }) {
   return (
     <button
       type="button"
       className={`quick-action quick-action-${tone}`}
-      disabled={disabled}
       onClick={onClick}
-      aria-label={disabled ? `${label} coming soon` : label}
+      aria-label={label}
     >
       <span className="quick-action-icon" aria-hidden="true">
         <Icon size={22} />
       </span>
       <span>{label}</span>
-      {disabled ? <small>Coming soon</small> : null}
     </button>
   )
 }

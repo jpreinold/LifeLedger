@@ -100,21 +100,3 @@ export interface RelationshipCandidate {
 export interface RelationshipCandidatesResponse {
   items: RelationshipCandidate[]
 }
-
-export const relationshipLabels: Record<RelationshipType, string> = {
-  related_to: 'Related to',
-  related: 'Related to',
-  belongs_to: 'Belongs to',
-  owned_by: 'Owned by',
-  covers: 'Covers',
-  provided_by: 'Provided by',
-  reminder_for: 'Reminder for',
-  renews: 'Reminder for',
-  maintains: 'Maintenance for',
-  insures: 'Insurance for',
-  warranty_for: 'Warranty for',
-  document_for: 'Document for',
-  appointment_for: 'Appointment for',
-  associated_with: 'Associated with',
-  custom: 'Custom',
-}

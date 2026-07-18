@@ -100,11 +100,11 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
 
   async function saveField() {
     if (!activeField.label) {
-      setError('Field name is required.')
+      setError('Detail name is required.')
       return
     }
     if (activeField.field_type === 'select' && (activeField.select_options ?? []).length === 0) {
-      setError('Add at least one select option.')
+      setError('Add at least one choice.')
       return
     }
 
@@ -133,7 +133,7 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
       onSaved(updated)
       onClose()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : isEditing ? 'Unable to update field.' : 'Unable to add field.')
+      setError(requestError instanceof Error ? requestError.message : isEditing ? 'Unable to update detail.' : 'Unable to add detail.')
     } finally {
       setIsSaving(false)
     }
@@ -143,23 +143,23 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
     <SheetDrawer
       bodyClassName="sheet-body add-field-body"
       className="add-dialog add-field-dialog"
-      closeLabel="Close add field"
+      closeLabel="Close detail editor"
       footer={canSave ? (
         <button type="button" className="primary-button add-field-save-button" disabled={isSaving} onClick={() => void saveField()}>
           <Check size={17} aria-hidden="true" />
-          {isSaving ? 'Saving...' : isEditing ? 'Save changes' : 'Save field'}
+          {isSaving ? 'Saving...' : isEditing ? 'Save changes' : 'Save detail'}
         </button>
       ) : null}
       isOpen={isOpen}
       labelledBy="add-field-heading"
       onBack={!isEditing && selectedPreset ? backToSuggestedList : undefined}
       onClose={onClose}
-      backLabel="Back to suggested fields"
+      backLabel="Back to suggested details"
       subtitle={record.title}
-      title={isEditing ? 'Edit field' : 'Add field'}
+      title={isEditing ? 'Edit detail' : 'Add another detail'}
     >
         {selectedPreset === null && !isEditing ? (
-          <div className="add-field-mode-tabs" role="tablist" aria-label="Field source">
+          <div className="add-field-mode-tabs" role="tablist" aria-label="Detail options">
             <button
               type="button"
               className={mode === 'suggested' ? 'active' : ''}
@@ -176,7 +176,7 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
               aria-selected={mode === 'custom'}
               onClick={() => selectMode('custom')}
             >
-              Custom
+              Create my own
             </button>
           </div>
         ) : null}
@@ -184,7 +184,7 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
         {mode === 'suggested' && selectedPreset === null && !isEditing ? (
           suggestedFields.length > 0 ? (
             <>
-              <p className="add-field-list-heading">Choose a suggested field</p>
+              <p className="add-field-list-heading">Choose a suggested detail</p>
               <div className="add-field-suggestions">
                 {suggestedFields.map((field) => (
                   <button type="button" className="add-field-suggestion" key={field.key} onClick={() => chooseSuggested(field)}>
@@ -203,8 +203,8 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
           ) : (
             <div className="add-field-empty">
               <ListPlus size={22} aria-hidden="true" />
-              <p>All suggested fields are already on this record.</p>
-              <button type="button" className="secondary-button" onClick={() => setMode('custom')}>Create custom field</button>
+              <p>All suggested details are already on this item.</p>
+              <button type="button" className="secondary-button" onClick={() => setMode('custom')}>Add another detail</button>
             </div>
           )
         ) : null}
@@ -212,11 +212,11 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
         {isCustomMode ? (
           <div className="add-field-form">
             <label>
-              <span>Field name</span>
+              <span>Detail name</span>
               <input ref={firstInputRef as RefObject<HTMLInputElement>} maxLength={80} value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} placeholder="e.g. Insurance policy #" />
             </label>
             <label>
-              <span>Type</span>
+              <span>Value format</span>
               <select value={customType} onChange={(event) => setCustomType(event.target.value as DynamicFieldType)}>
                 {dynamicFieldTypes.map((type) => <option value={type} key={type}>{getDynamicFieldTypeLabel(type)}</option>)}
               </select>
@@ -229,8 +229,8 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
             />
             {customType === 'select' ? (
               <label>
-                <span>Select options</span>
-                <textarea rows={3} maxLength={400} value={selectOptionsText} onChange={(event) => setSelectOptionsText(event.target.value)} placeholder="One option per line" />
+                <span>Choices</span>
+                <textarea rows={3} maxLength={400} value={selectOptionsText} onChange={(event) => setSelectOptionsText(event.target.value)} placeholder="One choice per line" />
               </label>
             ) : null}
             {field?.is_sensitive && field.has_value && !hasValueChanged ? (

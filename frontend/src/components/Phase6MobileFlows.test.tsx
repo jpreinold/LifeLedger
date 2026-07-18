@@ -134,18 +134,18 @@ describe('Phase 6 mobile flows', () => {
       />,
     )
 
-    expect(screen.getByText('Choose a suggested field')).toBeInTheDocument()
+    expect(screen.getByText('Choose a suggested detail')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Custom' }))
+    await user.click(screen.getByRole('tab', { name: 'Create my own' }))
 
-    expect(screen.getByLabelText('Field name')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Custom' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('Detail name')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Create my own' })).toHaveAttribute('aria-selected', 'true')
 
     await user.click(screen.getByRole('tab', { name: 'Suggested' }))
 
     expect(screen.getByRole('button', { name: /Microchip/ })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Close add field' }))
+    await user.click(screen.getByRole('button', { name: 'Close detail editor' }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -168,9 +168,9 @@ describe('Phase 6 mobile flows', () => {
     expect(screen.getByText('Microchip')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Enter microchip')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Back to suggested fields' }))
+    await user.click(screen.getByRole('button', { name: 'Back to suggested details' }))
 
-    expect(screen.getByText('Choose a suggested field')).toBeInTheDocument()
+    expect(screen.getByText('Choose a suggested detail')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Vet/ })).toBeInTheDocument()
   })
 
@@ -189,11 +189,11 @@ describe('Phase 6 mobile flows', () => {
       />,
     )
 
-    await user.click(screen.getByRole('tab', { name: 'Custom' }))
-    await user.type(screen.getByLabelText('Field name'), 'Microchip')
+    await user.click(screen.getByRole('tab', { name: 'Create my own' }))
+    await user.type(screen.getByLabelText('Detail name'), 'Microchip')
     await user.click(screen.getByRole('switch', { name: /Protected detail/ }))
     await user.type(screen.getByLabelText('Value'), '987654321')
-    await user.click(screen.getByRole('button', { name: /Save field/ }))
+    await user.click(screen.getByRole('button', { name: /Save detail/ }))
 
     await waitFor(() => expect(addFieldMock).toHaveBeenCalledTimes(1))
     expect(addFieldMock).toHaveBeenCalledWith('record-1', {
@@ -256,7 +256,7 @@ describe('Phase 6 mobile flows', () => {
         records={[]}
         reminders={[]}
         onArchive={onArchive}
-        onAddReminder={vi.fn()}
+        onAddResponsibility={vi.fn()}
         onClose={vi.fn()}
         onEdit={onEdit}
         onOpenLinkedRecord={vi.fn()}
@@ -268,8 +268,8 @@ describe('Phase 6 mobile flows', () => {
       />,
     )
 
-    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Record dashboard' })).toBeVisible())
-    const actions = screen.getByLabelText('Record actions')
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Item details' })).toBeVisible())
+    const actions = screen.getByLabelText('Item actions')
 
     await user.click(within(actions).getByRole('button', { name: /Archive/ }))
     await user.click(within(actions).getByRole('button', { name: /Delete/ }))
@@ -309,19 +309,19 @@ describe('Phase 6 mobile flows', () => {
       />,
     )
 
-    await user.type(screen.getByLabelText('Title'), 'Travel folder')
-    await user.click(screen.getByRole('tab', { name: 'Linked items' }))
-    await user.click(screen.getByRole('button', { name: 'Link item' }))
+    await user.type(screen.getByLabelText('Item name'), 'Travel folder')
+    await user.click(screen.getByRole('tab', { name: 'Related items' }))
+    await user.click(screen.getAllByRole('button', { name: 'Add related item' })[0])
 
-    const picker = screen.getByRole('dialog', { name: 'Add linked item' })
-    await user.click(within(picker).getByRole('button', { name: /^Record/ }))
+    const picker = screen.getByRole('dialog', { name: 'Add related item' })
+    await user.click(within(picker).getByRole('button', { name: /^Item/ }))
     await user.click(within(picker).getByRole('button', { name: /Passport/ }))
-    await user.click(within(picker).getByRole('button', { name: 'Link item' }))
+    await user.click(within(picker).getByRole('button', { name: 'Add related item' }))
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add linked item' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add related item' })).not.toBeInTheDocument())
     expect(await screen.findByText('Passport')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Add record/ }))
+    await user.click(screen.getByRole('button', { name: /Add other item/ }))
 
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1))
     expect(onCreate.mock.calls[0][3]).toEqual([
@@ -357,7 +357,7 @@ describe('Phase 6 mobile flows', () => {
     )
 
     await user.click(screen.getByRole('tab', { name: 'Documents' }))
-    await user.click(screen.getByRole('button', { name: /Save record/ }))
+    await user.click(screen.getByRole('button', { name: /Save item/ }))
 
     await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
     expect(onUpdate.mock.calls[0][0]).toBe(baseRecord.id)

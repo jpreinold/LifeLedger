@@ -7,7 +7,7 @@ const allowedAttachmentExtensions = new Set(['.pdf', '.jpg', '.jpeg', '.png'])
 
 export function validateAttachmentFile(file: File, currentActiveCount: number) {
   if (currentActiveCount >= attachmentMaxPerRecord) {
-    return 'Records can have up to 5 active attachments.'
+    return 'Items can have up to 5 active documents.'
   }
   if (file.size <= 0) {
     return 'File must not be empty.'

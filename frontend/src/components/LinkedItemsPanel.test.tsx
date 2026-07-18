@@ -192,7 +192,7 @@ describe('LinkedItemsPanel', () => {
       />,
     )
 
-    expect(screen.getByText('Loading linked items...')).toBeInTheDocument()
+    expect(screen.getByText('Loading related items...')).toBeInTheDocument()
     expect(await screen.findByText('Queen City Animal Hospital')).toBeInTheDocument()
     expect(screen.getByText('Rabies vaccination')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Open Adoption document.pdf' }))
@@ -225,9 +225,9 @@ describe('LinkedItemsPanel', () => {
       custom_label: 'Annual visit',
     }))
 
-    await user.click(screen.getByRole('button', { name: 'Remove link to Adoption document.pdf' }))
-    expect(screen.getByText('The link between Baxter and Adoption document.pdf will be removed. Neither item will be deleted. You can add the link again later.')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Remove link' }))
+    await user.click(screen.getByRole('button', { name: 'Remove relationship to Adoption document.pdf' }))
+    expect(screen.getByText('The relationship between Baxter and Adoption document.pdf will be removed. Neither item will be deleted. You can add the relationship again later.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remove relationship' }))
     expect(api.deleteRelationship).toHaveBeenCalledWith('link-document')
   })
 
@@ -246,12 +246,12 @@ describe('LinkedItemsPanel', () => {
       />,
     )
 
-    await screen.findByText(/No linked items yet/)
-    await user.click(screen.getByRole('button', { name: 'Add linked item' }))
-    const picker = screen.getByRole('dialog', { name: 'Add linked item' })
-    await user.click(within(picker).getByRole('button', { name: /^Record/ }))
+    await screen.findByText(/Connect related items/)
+    await user.click(screen.getAllByRole('button', { name: 'Add related item' })[0])
+    const picker = screen.getByRole('dialog', { name: 'Add related item' })
+    await user.click(within(picker).getByRole('button', { name: /^Item/ }))
     await user.click(within(picker).getByRole('button', { name: /Queen City Animal Hospital/ }))
-    await user.click(within(picker).getByRole('button', { name: 'Link item' }))
+    await user.click(within(picker).getByRole('button', { name: 'Add related item' }))
 
     expect(await within(picker).findByText('This item is already linked')).toBeInTheDocument()
   })

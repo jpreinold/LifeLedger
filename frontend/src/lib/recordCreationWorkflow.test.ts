@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/apiClient'
 import type { LinkCreateRequest } from '../types/linkedItem'
-import type { ProtectedRecordStatus } from '../types/record'
+import type { DynamicRecordFieldInput, LifeRecord, ProtectedRecordStatus } from '../types/record'
 import { runRecordSetupAttempt, type RecordSetupProgress } from './recordCreationWorkflow'
 
 const protectedStatus: ProtectedRecordStatus = {
@@ -80,5 +80,34 @@ describe('record creation child setup recovery', () => {
     expect(first.linkFailures).toBe(0)
     expect(second.linkFailures).toBe(0)
     expect(createLink).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries only unfinished creation-time details and keeps the latest item response', async () => {
+    const state = progress()
+    const details: DynamicRecordFieldInput[] = [
+      { key: 'breed', label: 'Breed', field_type: 'short_text', value: 'Beagle' },
+      { key: 'microchip', label: 'Microchip number', field_type: 'short_text', value: '123', is_sensitive: true },
+    ]
+    const item = { id: 'record-created', title: 'Baxter', dynamic_fields: [] } as unknown as LifeRecord
+    const addDetail = vi.fn(async (_recordId: string, detail: DynamicRecordFieldInput) => {
+      const attempts = addDetail.mock.calls.filter((call) => call[1].key === detail.key).length
+      if (detail.key === 'microchip' && attempts === 1) throw new TypeError('network unavailable')
+      return { ...item, dynamic_fields: [{ key: detail.key }] } as unknown as LifeRecord
+    })
+    const dependencies = {
+      saveProtected: vi.fn().mockResolvedValue(protectedStatus),
+      uploadFile: vi.fn(),
+      createLink: vi.fn(),
+      addDetail,
+    }
+
+    const first = await runRecordSetupAttempt('record-created', {}, [], [], state, dependencies, details)
+    const second = await runRecordSetupAttempt('record-created', {}, [], [], state, dependencies, details)
+
+    expect(first.detailFailures).toBe(1)
+    expect(second.detailFailures).toBe(0)
+    expect(second.latestRecord?.id).toBe('record-created')
+    expect(addDetail.mock.calls.filter((call) => call[1].key === 'breed')).toHaveLength(1)
+    expect(addDetail.mock.calls.filter((call) => call[1].key === 'microchip')).toHaveLength(2)
   })
 })

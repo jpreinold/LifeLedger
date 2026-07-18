@@ -1,12 +1,13 @@
 import { ApiError } from '../api/apiClient'
 import type { LinkCreateRequest } from '../types/linkedItem'
-import type { ProtectedRecordInput, ProtectedRecordStatus } from '../types/record'
+import type { DynamicRecordFieldInput, LifeRecord, ProtectedRecordInput, ProtectedRecordStatus } from '../types/record'
 import { hasProtectedRecordInput } from './recordTypes'
 
 export interface RecordSetupProgress {
   protectedSaved: boolean
   successfulFiles: Set<string>
   successfulLinks: Set<string>
+  successfulDetails?: Set<string>
 }
 
 export interface RecordSetupAttempt {
@@ -14,12 +15,15 @@ export interface RecordSetupAttempt {
   linkFailures: number
   protectedFailed: boolean
   protectedStatus: ProtectedRecordStatus | null
+  detailFailures: number
+  latestRecord: LifeRecord | null
 }
 
 interface RecordSetupDependencies {
   saveProtected: (recordId: string, input: ProtectedRecordInput) => Promise<ProtectedRecordStatus>
   uploadFile: (recordId: string, file: File) => Promise<unknown>
   createLink: (recordId: string, link: LinkCreateRequest) => Promise<unknown>
+  addDetail?: (recordId: string, detail: DynamicRecordFieldInput) => Promise<LifeRecord>
 }
 
 export async function runRecordSetupAttempt(
@@ -29,6 +33,7 @@ export async function runRecordSetupAttempt(
   links: LinkCreateRequest[],
   progress: RecordSetupProgress,
   dependencies: RecordSetupDependencies,
+  details: DynamicRecordFieldInput[] = [],
 ): Promise<RecordSetupAttempt> {
   let protectedFailed = false
   let protectedStatus: ProtectedRecordStatus | null = null
@@ -69,7 +74,29 @@ export async function runRecordSetupAttempt(
     }
   }
 
-  return { failedFiles, linkFailures, protectedFailed, protectedStatus }
+  let detailFailures = 0
+  let latestRecord: LifeRecord | null = null
+  progress.successfulDetails ??= new Set<string>()
+  for (const detail of details) {
+    const detailKey = getDetailAttemptKey(detail)
+    if (progress.successfulDetails.has(detailKey)) continue
+    if (!dependencies.addDetail) {
+      detailFailures += 1
+      continue
+    }
+    try {
+      latestRecord = await dependencies.addDetail(recordId, detail)
+      progress.successfulDetails.add(detailKey)
+    } catch (error) {
+      if (error instanceof ApiError && error.category === 'conflict') {
+        progress.successfulDetails.add(detailKey)
+      } else {
+        detailFailures += 1
+      }
+    }
+  }
+
+  return { detailFailures, failedFiles, latestRecord, linkFailures, protectedFailed, protectedStatus }
 }
 
 function getFileAttemptKey(file: File): string {
@@ -78,4 +105,15 @@ function getFileAttemptKey(file: File): string {
 
 function getLinkAttemptKey(link: LinkCreateRequest): string {
   return `${link.target_type}:${link.target_id}`
+}
+
+function getDetailAttemptKey(detail: DynamicRecordFieldInput): string {
+  return JSON.stringify({
+    key: detail.key,
+    label: detail.label,
+    field_type: detail.field_type,
+    value: detail.value,
+    is_sensitive: detail.is_sensitive ?? false,
+    select_options: detail.select_options ?? [],
+  })
 }

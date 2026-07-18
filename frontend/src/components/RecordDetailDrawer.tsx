@@ -33,6 +33,8 @@ import {
 } from '../lib/reminderDisplay'
 import { formatDynamicFieldValue, getVisibleDynamicFieldCount, hasDisplayValue, hasSensitiveDynamicFields, maskedValue } from '../lib/fieldRendering'
 import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
+import type { SuggestedResponsibilityDefinition } from '../lib/entityRegistry'
+import { getCategoryPresentation, getResponsibilityPresentation, getSectionLabel, productTerms } from '../lib/terminology'
 import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { AddFieldDrawer } from './AddFieldDrawer'
@@ -42,7 +44,7 @@ import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
 import { SheetDrawer } from './SheetDrawer'
 
-export type RecordDetailTab = 'details' | 'documents' | 'linkedItems'
+export type RecordDetailTab = 'details' | 'responsibilities' | 'documents' | 'linkedItems'
 
 interface RecordDetailDrawerProps {
   canGoBack?: boolean
@@ -52,7 +54,7 @@ interface RecordDetailDrawerProps {
   records: LifeRecord[]
   reminders: Reminder[]
   onArchive: (record: LifeRecord) => Promise<void>
-  onAddReminder: () => void
+  onAddResponsibility: (record: LifeRecord, suggestion?: SuggestedResponsibilityDefinition) => void
   onBack?: () => void
   onClose: () => void
   onEdit: (record: LifeRecord) => void
@@ -76,7 +78,7 @@ export function RecordDetailDrawer({
   records,
   reminders,
   onArchive,
-  onAddReminder,
+  onAddResponsibility,
   onBack,
   onClose,
   onEdit,
@@ -117,7 +119,7 @@ export function RecordDetailDrawer({
   const dynamicFieldCount = getVisibleDynamicFieldCount(record.dynamic_fields)
   const hasSensitiveFields = record.has_protected_data || hasSensitiveDynamicFields(record.dynamic_fields)
   const isArchived = record.status === 'archived'
-  const showCategoryChip = definition.category.trim().toLowerCase() !== definition.label.trim().toLowerCase()
+  const categoryPresentation = getCategoryPresentation(record.record_type, record.category)
   const protectedFieldKeys = new Set<string>(definition.protectedFields)
   const suggestedDynamicFields = definition.dynamicFieldPresets.filter(
     (field) => !protectedFieldKeys.has(field.key) && !record.dynamic_fields.some((existing) => existing.key === field.key),
@@ -323,7 +325,7 @@ export function RecordDetailDrawer({
       }
       dynamicRevealTimersRef.current[field.field_id] = window.setTimeout(() => hideDynamicField(field.field_id), sensitiveRevealMs)
     } catch (requestError) {
-      setFieldError(requestError instanceof Error ? requestError.message : 'Unable to reveal this field.')
+      setFieldError(requestError instanceof Error ? requestError.message : 'Unable to reveal this detail.')
     } finally {
       setRevealingFieldId(null)
     }
@@ -338,7 +340,7 @@ export function RecordDetailDrawer({
       setPendingFieldRemoval(null)
       onRecordChange(updated)
     } catch (requestError) {
-      setFieldError(requestError instanceof Error ? requestError.message : 'Unable to remove this field.')
+      setFieldError(requestError instanceof Error ? requestError.message : 'Unable to remove this detail.')
     } finally {
       setRemovingFieldId(null)
     }
@@ -363,9 +365,9 @@ export function RecordDetailDrawer({
         bodyClassName="detail-body"
         bodyRef={detailBodyRef}
         className="detail-dialog record-detail-dialog"
-        closeLabel="Close record details"
+        closeLabel="Close item details"
         footer={activeTab === 'details' ? (
-          <section className="detail-actions" aria-label="Record actions">
+          <section className="detail-actions" aria-label="Item actions">
             <button type="button" className="primary-button" onClick={handleEdit}>
               <Pencil size={17} aria-hidden="true" />
               Edit
@@ -384,9 +386,9 @@ export function RecordDetailDrawer({
         labelledBy="record-detail-heading"
         onBack={canGoBack && onBack ? onBack : undefined}
         onClose={requestClose}
-        backLabel="Back to previous record"
-        subtitle={definition.label}
-        title="Record dashboard"
+        backLabel="Back to previous item"
+        subtitle={definition.singularLabel}
+        title="Item details"
       >
           <section className={`detail-hero tone-${definition.tone}`} aria-labelledby="record-detail-title">
             <div className={`category-icon category-icon-large tone-${definition.tone}`} aria-hidden="true">
@@ -394,8 +396,7 @@ export function RecordDetailDrawer({
             </div>
             <div className="detail-hero-copy">
               <div className="card-chip-row">
-                <span className="type-chip">{definition.label}</span>
-                {showCategoryChip ? <span className="category-chip">{definition.category}</span> : null}
+                <span className="type-chip">{definition.singularLabel}</span>
                 <span className={`status-chip ${getRecordStatusClass(record)}`}>{getRecordStatusLabel(record)}</span>
               </div>
               <h3 id="record-detail-title">{record.title}</h3>
@@ -407,15 +408,15 @@ export function RecordDetailDrawer({
                   {keyDate}
                 </p>
               ) : null}
-              <div className="detail-hero-meta" aria-label="Record summary">
+              <div className="detail-hero-meta" aria-label="Item summary">
                 {documentsCount !== null ? <span className="detail-hero-pill">{documentsCount} document{documentsCount === 1 ? '' : 's'}</span> : null}
-                <span className="detail-hero-pill">{dynamicFieldCount} custom field{dynamicFieldCount === 1 ? '' : 's'}</span>
-                {hasSensitiveFields ? <span className="detail-hero-pill">Sensitive fields saved</span> : null}
+                <span className="detail-hero-pill">{dynamicFieldCount} additional detail{dynamicFieldCount === 1 ? '' : 's'}</span>
+                {hasSensitiveFields ? <span className="detail-hero-pill">Protected details saved</span> : null}
               </div>
             </div>
           </section>
 
-          <div className="record-detail-tabs" role="tablist" aria-label="Record dashboard tabs">
+          <div className="record-detail-tabs record-detail-tabs-four" role="tablist" aria-label="Item detail sections">
             <button
               type="button"
               className={activeTab === 'details' ? 'record-detail-tab active' : 'record-detail-tab'}
@@ -425,8 +426,21 @@ export function RecordDetailDrawer({
               aria-controls="record-details-panel"
               onClick={() => selectTab('details')}
             >
-              Overview
+              {getSectionLabel('overview')}
             </button>
+            {definition.supportedSections.includes('responsibilities') ? (
+              <button
+                type="button"
+                className={activeTab === 'responsibilities' ? 'record-detail-tab active' : 'record-detail-tab'}
+                id="record-responsibilities-tab"
+                role="tab"
+                aria-selected={activeTab === 'responsibilities'}
+                aria-controls="record-responsibilities-panel"
+                onClick={() => selectTab('responsibilities')}
+              >
+                {getSectionLabel('responsibilities')}
+              </button>
+            ) : null}
             <button
               type="button"
               className={activeTab === 'documents' ? 'record-detail-tab active' : 'record-detail-tab'}
@@ -436,7 +450,7 @@ export function RecordDetailDrawer({
               aria-controls="record-documents-panel"
               onClick={() => selectTab('documents')}
             >
-              Documents
+              {getSectionLabel('documents')}
             </button>
             <button
               type="button"
@@ -447,7 +461,7 @@ export function RecordDetailDrawer({
               aria-controls="record-linked-items-panel"
               onClick={() => selectTab('linkedItems')}
             >
-              Linked items
+              {getSectionLabel('relatedItems')}
             </button>
           </div>
 
@@ -459,14 +473,14 @@ export function RecordDetailDrawer({
             aria-labelledby="record-details-tab"
           >
             <DetailSection
-              title="Essentials"
+              title="Important details"
               rows={[
-                { label: 'Type', value: definition.label },
-                { label: 'Category', value: definition.category },
-                { label: 'Owner', value: record.owner_name },
-                { label: 'Provider/brand', value: record.provider_or_brand },
+                { label: productTerms.itemType, value: definition.singularLabel },
+                { label: 'Category', value: categoryPresentation },
+                { label: definition.labels.owner_name ?? productTerms.owner, value: record.owner_name },
+                { label: definition.labels.provider_or_brand ?? productTerms.provider, value: record.provider_or_brand },
                 { label: 'Summary', value: providerLine },
-                { label: 'Location', value: record.location_hint },
+                { label: definition.labels.location_hint ?? 'Location', value: record.location_hint },
               ]}
             />
 
@@ -480,15 +494,6 @@ export function RecordDetailDrawer({
                 { label: 'Purchase date', value: formatRecordDate(record.purchase_date) },
                 { label: 'Renewal date', value: formatRecordDate(record.renewal_date) },
               ]}
-            />
-
-            <RecordReminderActivitySection
-              activeReminders={activeRecordReminders}
-              overdueCount={overdueRecordReminderCount}
-              recentEvents={recentReminderEvents}
-              nextReminder={nextRecordReminder}
-              onAddReminder={onAddReminder}
-              onOpenReminder={onOpenLinkedReminder}
             />
 
             <DynamicFieldsSection
@@ -535,13 +540,33 @@ export function RecordDetailDrawer({
             ) : null}
 
             <DetailSection
-              title="History"
+              title="Item information"
               rows={[
                 { label: 'Created', value: formatRecordTimestamp(record.created_at) },
                 { label: 'Updated', value: formatRecordTimestamp(record.updated_at) },
               ]}
             />
           </div>
+
+          {definition.supportedSections.includes('responsibilities') ? (
+            <div
+              className="record-tab-panel"
+              hidden={activeTab !== 'responsibilities'}
+              id="record-responsibilities-panel"
+              role="tabpanel"
+              aria-labelledby="record-responsibilities-tab"
+            >
+              <RecordReminderActivitySection
+                activeReminders={activeRecordReminders}
+                overdueCount={overdueRecordReminderCount}
+                recentEvents={recentReminderEvents}
+                nextReminder={nextRecordReminder}
+                suggestions={definition.suggestedResponsibilities}
+                onAddResponsibility={(suggestion) => onAddResponsibility(record, suggestion)}
+                onOpenReminder={onOpenLinkedReminder}
+              />
+            </div>
+          ) : null}
 
           <div
             className="record-tab-panel"
@@ -551,6 +576,7 @@ export function RecordDetailDrawer({
             aria-labelledby="record-documents-tab"
           >
             <RecordDocumentsPanel
+              emptyStateCopy={definition.emptyStateCopy.documents}
               initialAttachmentId={initialDocumentId}
               isActive={isDrawerOpen && activeTab === 'documents'}
               recordId={record.id}
@@ -573,6 +599,7 @@ export function RecordDetailDrawer({
               sourceId={record.id}
               sourceTitle={record.title}
               sourceType="record"
+              title={productTerms.relatedItems}
               onOpenDocument={onOpenLinkedDocument}
               onOpenRecord={onOpenLinkedRecord}
               onOpenReminder={onOpenLinkedReminder}
@@ -582,7 +609,7 @@ export function RecordDetailDrawer({
 
 
       <ConfirmDialog
-        body="The encrypted protected details will be permanently removed from this record. The record, documents, reminders, and links will remain. This cannot be undone."
+        body="The encrypted protected details will be permanently removed from this item. The item, documents, reminders, and related items will remain. This cannot be undone."
         confirmLabel="Clear protected details"
         isBusy={isClearingProtected}
         isOpen={isProtectedClearConfirmOpen}
@@ -591,7 +618,7 @@ export function RecordDetailDrawer({
         onConfirm={() => void handleClearProtected()}
       />
       <ConfirmDialog
-        body={pendingFieldRemoval ? `${pendingFieldRemoval.label} will be permanently removed from this record. Related records, reminders, documents, and links will remain. This cannot be undone.` : ''}
+        body={pendingFieldRemoval ? `${pendingFieldRemoval.label} will be permanently removed from this item. Related items, reminders, and documents will remain. This cannot be undone.` : ''}
         confirmLabel="Remove detail"
         isBusy={removingFieldId !== null}
         isOpen={pendingFieldRemoval !== null}
@@ -626,32 +653,35 @@ interface RecordReminderEventSummary {
 function RecordReminderActivitySection({
   activeReminders,
   nextReminder,
-  onAddReminder,
+  onAddResponsibility,
   onOpenReminder,
   overdueCount,
   recentEvents,
+  suggestions,
 }: {
   activeReminders: Reminder[]
   nextReminder: Reminder | null
   overdueCount: number
   recentEvents: RecordReminderEventSummary[]
-  onAddReminder: () => void
+  suggestions: SuggestedResponsibilityDefinition[]
+  onAddResponsibility: (suggestion?: SuggestedResponsibilityDefinition) => void
   onOpenReminder: (reminderId: string) => void
 }) {
+  const presentation = getResponsibilityPresentation('item')
   return (
-    <section className="detail-section record-reminder-section" aria-labelledby="record-reminders-heading">
+    <section className="detail-section record-reminder-section" aria-labelledby="record-responsibilities-heading">
       <div className="record-reminder-header">
         <div>
-          <h3 id="record-reminders-heading">Reminder activity</h3>
-          <p>{activeReminders.length === 0 ? 'No active linked reminders.' : `${activeReminders.length} active linked reminder${activeReminders.length === 1 ? '' : 's'}.`}</p>
+          <h3 id="record-responsibilities-heading">{presentation.plural}</h3>
+          <p>{activeReminders.length === 0 ? 'Keep renewals, service dates, payments, and other tasks connected to this item.' : `${activeReminders.length} upcoming responsibilit${activeReminders.length === 1 ? 'y' : 'ies'}.`}</p>
         </div>
-        <button type="button" className="small-outline-button" onClick={onAddReminder}>
+        <button type="button" className="small-outline-button" onClick={() => onAddResponsibility()}>
           <Bell size={14} aria-hidden="true" />
-          Add reminder
+          {presentation.add}
         </button>
       </div>
 
-      <div className="record-reminder-stats" aria-label="Reminder summary">
+      <div className="record-reminder-stats" aria-label="Responsibility summary">
         <div>
           <span>Next date</span>
           <strong>{nextReminder ? formatLongDate(getReminderEffectiveDate(nextReminder)) : 'None'}</strong>
@@ -685,12 +715,26 @@ function RecordReminderActivitySection({
           ))}
         </div>
       ) : (
-        <p className="linked-items-state">Link a reminder to keep this record visible in the Action Center.</p>
+        <p className="linked-items-state">No upcoming responsibilities yet.</p>
       )}
 
+      {suggestions.length > 0 ? (
+        <div className="responsibility-suggestions" aria-label="Suggested responsibilities">
+          <h4>Suggested for this item</h4>
+          <div>
+            {suggestions.map((suggestion) => (
+              <button type="button" className="small-outline-button" key={suggestion.label} onClick={() => onAddResponsibility(suggestion)}>
+                <Plus size={14} aria-hidden="true" />
+                {suggestion.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="record-reminder-history">
-        <h4>Recent lifecycle history</h4>
-        {recentEvents.length === 0 ? <p className="linked-items-state">No completed or renewed activity yet.</p> : null}
+        <h4>Recent activity</h4>
+        {recentEvents.length === 0 ? <p className="linked-items-state">Completed and renewed responsibilities will appear here.</p> : null}
         {recentEvents.length > 0 ? (
           <ol>
             {recentEvents.map((event) => (
@@ -845,7 +889,7 @@ function DynamicFieldsSection({
 
       <button type="button" className="secondary-button dynamic-add-field-button" onClick={onAddField}>
         <Plus size={16} aria-hidden="true" />
-        Add field
+        {productTerms.addDetail}
       </button>
     </section>
   )

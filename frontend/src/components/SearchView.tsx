@@ -20,6 +20,8 @@ import {
 import type { LucideIcon } from 'lucide-react'
 
 import { searchApi } from '../api/searchApi'
+import { getRecordTypeDefinition } from '../lib/recordTypes'
+import { getCategoryPresentation, getSearchResultTypeLabel, productTerms } from '../lib/terminology'
 import {
   clearRecentSearches,
   isRememberRecentSearchesEnabled,
@@ -31,9 +33,11 @@ import {
 } from '../lib/recentSearches'
 import type { LinkedEntityType } from '../types/linkedItem'
 import type { SavedSearchView, SearchInput, SearchResponse, SearchResultItem, SearchSort, SearchStatus } from '../types/search'
+import type { LifeRecord } from '../types/record'
 import { ConfirmDialog } from './ConfirmDialog'
 
 interface SearchViewProps {
+  records?: LifeRecord[]
   onViewRecord: (recordId: string) => void
   onViewReminder: (reminderId: string) => void
   onViewDocument: (recordId: string, documentId: string) => void
@@ -44,9 +48,9 @@ type StatusFilter = 'all' | SearchStatus
 
 const typeOptions: Array<{ id: TypeFilter; label: string; icon: LucideIcon }> = [
   { id: 'all', label: 'All', icon: Layers },
-  { id: 'record', label: 'Records', icon: Folder },
-  { id: 'document', label: 'Documents', icon: FileText },
-  { id: 'reminder', label: 'Reminders', icon: Bell },
+  { id: 'record', label: productTerms.items, icon: Folder },
+  { id: 'document', label: productTerms.documents, icon: FileText },
+  { id: 'reminder', label: productTerms.reminders, icon: Bell },
 ]
 
 const statusOptions: Array<{ id: StatusFilter; label: string }> = [
@@ -65,7 +69,7 @@ const sortOptions: Array<{ id: SearchSort; label: string }> = [
   { id: 'title_asc', label: 'Title' },
 ]
 
-export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: SearchViewProps) {
+export function SearchView({ records = [], onViewRecord, onViewReminder, onViewDocument }: SearchViewProps) {
   const [query, setQuery] = useState('')
   const [activeType, setActiveType] = useState<TypeFilter>('all')
   const [activeStatus, setActiveStatus] = useState<StatusFilter>('all')
@@ -150,7 +154,8 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
         return
       }
       setResponse(nextResponse)
-      setItems((current) => (options.append ? [...current, ...nextResponse.items] : nextResponse.items))
+      const presentedItems = nextResponse.items.map(presentSearchItem)
+      setItems((current) => (options.append ? [...current, ...presentedItems] : presentedItems))
     } catch (requestError) {
       if (requestId !== requestIdRef.current) {
         return
@@ -282,7 +287,7 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
           <input
             type="search"
             value={query}
-            placeholder="Search records, docs, reminders..."
+            placeholder="Search items, documents, reminders..."
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
           {query ? (
@@ -359,7 +364,14 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
               </button>
             </div>
           ) : null}
-          {!isLoading && items.map((item) => <SearchResultCard item={item} key={`${item.source_item_type}-${item.source_item_id}`} onOpen={() => openResult(item)} />)}
+          {!isLoading && items.map((item) => (
+            <SearchResultCard
+              item={item}
+              key={`${item.source_item_type}-${item.source_item_id}`}
+              record={findResultRecord(item, records)}
+              onOpen={() => openResult(item)}
+            />
+          ))}
           {!isLoading && response?.next_cursor ? (
             <button type="button" className="secondary-button search-load-more" disabled={isLoadingMore} onClick={loadMore}>
               {isLoadingMore ? 'Loading...' : 'Load more'}
@@ -426,7 +438,7 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
               <label className="search-toggle-row">
                 <span>
                   <Layers size={16} aria-hidden="true" />
-                  Linked items
+                  Related items
                 </span>
                 <input type="checkbox" checked={hasLinkedItems} onChange={(event) => setHasLinkedItems(event.currentTarget.checked)} />
               </label>
@@ -491,7 +503,7 @@ export function SearchView({ onViewRecord, onViewReminder, onViewDocument }: Sea
       ) : null}
 
       <ConfirmDialog
-        body={pendingSavedViewDelete ? `The saved view "${pendingSavedViewDelete.name}" will be permanently deleted. Records, reminders, documents, and recent searches will remain.` : ''}
+        body={pendingSavedViewDelete ? `The saved view "${pendingSavedViewDelete.name}" will be permanently deleted. Items, reminders, documents, and recent searches will remain.` : ''}
         confirmLabel="Delete saved view"
         isBusy={isDeletingSavedView}
         isOpen={pendingSavedViewDelete !== null}
@@ -595,8 +607,10 @@ function SearchFilterSection({ title, children }: { title: string; children: Rea
   )
 }
 
-function SearchResultCard({ item, onOpen }: { item: SearchResultItem; onOpen: () => void }) {
-  const Icon = item.source_item_type === 'record' ? Folder : item.source_item_type === 'document' ? FileText : Calendar
+function SearchResultCard({ item, onOpen, record }: { item: SearchResultItem; onOpen: () => void; record: LifeRecord | null }) {
+  const definition = record ? getRecordTypeDefinition(record.record_type) : null
+  const Icon = item.source_item_type === 'record' && definition ? definition.icon : item.source_item_type === 'record' ? Folder : item.source_item_type === 'document' ? FileText : Calendar
+  const subtitle = formatResultSubtitle(item, record)
 
   return (
     <article className="search-result-card">
@@ -606,12 +620,12 @@ function SearchResultCard({ item, onOpen }: { item: SearchResultItem; onOpen: ()
         </span>
         <span className="search-result-copy">
           <span className="search-result-kicker">
-            {formatItemType(item.source_item_type)}
+            {getSearchResultTypeLabel(item.source_item_type, record?.record_type)}
             {item.status ? <em>{formatStatus(item.status)}</em> : null}
           </span>
           <strong>{item.title}</strong>
-          {item.subtitle ? <span>{item.subtitle}</span> : null}
-          <small>{formatResultMeta(item)}</small>
+          {subtitle ? <span>{subtitle}</span> : null}
+          <small>{formatResultMeta(item, record)}</small>
           {item.match_context.length > 0 || item.linked_context.length > 0 ? (
             <span className="search-result-context">{[...item.match_context, ...item.linked_context].slice(0, 2).join(' · ')}</span>
           ) : null}
@@ -636,17 +650,42 @@ function sortSavedViews(a: SavedSearchView, b: SavedSearchView) {
   return a.name.localeCompare(b.name)
 }
 
-function formatItemType(type: LinkedEntityType) {
-  return type === 'record' ? 'Record' : type === 'document' ? 'Document' : 'Reminder'
-}
-
 function formatStatus(status: string) {
   return status.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toLocaleUpperCase())
 }
 
-function formatResultMeta(item: SearchResultItem) {
-  const parts = [item.category, item.relevant_date ? formatDate(item.relevant_date) : null].filter(Boolean)
+function formatResultMeta(item: SearchResultItem, record: LifeRecord | null) {
+  const category = item.source_item_type === 'record'
+    ? getCategoryPresentation(record?.record_type, record?.category ?? item.category)
+    : item.source_item_type === 'reminder' ? item.category : null
+  const parts = [category, item.relevant_date ? formatDate(item.relevant_date) : null].filter(Boolean)
   return parts.length > 0 ? parts.join(' · ') : formatDate(item.updated_at)
+}
+
+function formatResultSubtitle(item: SearchResultItem, record: LifeRecord | null) {
+  if (item.source_item_type === 'document') {
+    const relatedTitle = record?.title ?? item.subtitle
+    return relatedTitle ? `Related to ${relatedTitle}` : null
+  }
+  if (item.source_item_type === 'record') return record?.subtitle ?? item.subtitle
+  return item.linked_context.find((context) => context.startsWith('Related to ')) ?? item.subtitle
+}
+
+function presentSearchItem(item: SearchResultItem): SearchResultItem {
+  const present = (value: string) => value
+    .replace(/^Linked to /, 'Related to ')
+    .replace(/record type/gi, 'item type')
+    .replace(/field/gi, 'detail')
+  return {
+    ...item,
+    match_context: item.match_context.map(present),
+    linked_context: item.linked_context.map(present),
+  }
+}
+
+function findResultRecord(item: SearchResultItem, records: LifeRecord[]) {
+  const recordId = item.navigation_metadata.record_id ?? (item.source_item_type === 'record' ? item.source_item_id : null)
+  return recordId ? records.find((record) => record.id === recordId) ?? null : null
 }
 
 function formatDate(value: string) {
@@ -677,7 +716,7 @@ function formatSavedFilters(filters: Record<string, unknown>) {
   const itemTypes = Array.isArray(filters.itemTypes) ? filters.itemTypes : []
   const statuses = Array.isArray(filters.statuses) ? filters.statuses : []
   if (itemTypes.length > 0) {
-    parts.push(itemTypes.map(String).join(', '))
+    parts.push(itemTypes.map((value) => value === 'record' ? 'items' : value === 'document' ? 'documents' : value === 'reminder' ? 'reminders' : String(value)).join(', '))
   }
   if (statuses.length > 0) {
     parts.push(statuses.map(String).join(', '))
@@ -686,7 +725,7 @@ function formatSavedFilters(filters: Record<string, unknown>) {
     parts.push('documents')
   }
   if (filters.hasLinkedItems) {
-    parts.push('linked')
+    parts.push('related items')
   }
   if (filters.archived) {
     parts.push('archived')

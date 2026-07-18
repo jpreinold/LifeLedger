@@ -59,6 +59,8 @@ import {
 } from './lib/reminderInput'
 import { runRecordSetupAttempt } from './lib/recordCreationWorkflow'
 import { hasProtectedRecordInput } from './lib/recordTypes'
+import type { SuggestedResponsibilityDefinition } from './lib/entityRegistry'
+import { productTerms } from './lib/terminology'
 import {
   defaultDigestPreferences,
   digestLookaheadOptions,
@@ -68,7 +70,7 @@ import {
   type DigestPreferencesUpdate,
 } from './types/preferences'
 import type { Reminder, ReminderAlert, ReminderInput } from './types/reminder'
-import type { LifeRecord, ProtectedRecordInput, ProtectedRecordStatus, RecordInput, RecordType } from './types/record'
+import type { DynamicRecordFieldInput, LifeRecord, ProtectedRecordInput, ProtectedRecordStatus, RecordInput, RecordType } from './types/record'
 import type { LinkCreateRequest } from './types/linkedItem'
 import type { RecordFilter } from './lib/recordTypes'
 
@@ -147,6 +149,7 @@ type RecordCreationProgress = {
   protectedSaved: boolean
   successfulFiles: Set<string>
   successfulLinks: Set<string>
+  successfulDetails: Set<string>
 }
 
 function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
@@ -188,6 +191,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
   const [isRecordTypeSelectorOpen, setIsRecordTypeSelectorOpen] = useState(false)
   const [selectedRecordType, setSelectedRecordType] = useState<RecordType>('general')
+  const [responsibilityRecordId, setResponsibilityRecordId] = useState<string | null>(null)
   const [addDateContext, setAddDateContext] = useState<string | null>(null)
   const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false)
   const [isDigestOpen, setIsDigestOpen] = useState(false)
@@ -216,7 +220,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       const recordData = await recordsApi.list(true)
       setRecords(recordData)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to load records.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load items.')
     } finally {
       setIsRecordsLoading(false)
     }
@@ -350,8 +354,21 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setNotice(null)
 
     try {
-      await remindersApi.create(input)
+      const created = await remindersApi.create(input)
+      if (responsibilityRecordId) {
+        try {
+          await linkedItemsApi.createRecordLink(responsibilityRecordId, {
+            target_type: 'reminder',
+            target_id: created.id,
+            relationship_type: 'reminder_for',
+          })
+          setNotice('Responsibility added to this item.')
+        } catch {
+          setError('The reminder was added, but LifeLedger could not connect it to this item. You can add it from Related items.')
+        }
+      }
       await loadReminderData()
+      setResponsibilityRecordId(null)
       return true
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to create reminder.')
@@ -476,6 +493,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     files: File[] = [],
     links: LinkCreateRequest[] = [],
     workflowId: string,
+    details: DynamicRecordFieldInput[] = [],
   ): Promise<RecordCreationResult> {
     setIsSaving(true)
     setError(null)
@@ -490,6 +508,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           protectedSaved: false,
           successfulFiles: new Set(),
           successfulLinks: new Set(),
+          successfulDetails: new Set(),
         }
         recordCreationProgressRef.current.set(workflowId, progress)
       } else {
@@ -507,9 +526,15 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           saveProtected: recordsApi.setProtected,
           uploadFile: recordsApi.uploadRecordAttachment,
           createLink: linkedItemsApi.createRecordLink,
+          addDetail: recordsApi.addField,
         },
+        details,
       )
-      const { failedFiles, linkFailures, protectedFailed, protectedStatus } = setupAttempt
+      const { detailFailures, failedFiles, latestRecord, linkFailures, protectedFailed, protectedStatus } = setupAttempt
+      if (latestRecord) {
+        nextRecord = latestRecord
+        progress.record = latestRecord
+      }
       if (protectedStatus) {
         nextRecord = withProtectedStatus(nextRecord, protectedStatus)
         progress.record = nextRecord
@@ -517,22 +542,24 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       recordCreationProgressRef.current.set(workflowId, progress)
       await loadRecordData()
-      const incomplete = protectedFailed || failedFiles.length > 0 || linkFailures > 0
+      const incomplete = protectedFailed || detailFailures > 0 || failedFiles.length > 0 || linkFailures > 0
       if (incomplete) {
         const failures = [
           protectedFailed ? 'protected details were not saved' : null,
+          detailFailures ? `${detailFailures} detail${detailFailures === 1 ? '' : 's'} could not be saved` : null,
           failedFiles.length ? `${failedFiles.length} document${failedFiles.length === 1 ? '' : 's'} could not be uploaded` : null,
-          linkFailures ? `${linkFailures} link${linkFailures === 1 ? '' : 's'} could not be saved` : null,
+          linkFailures ? `${linkFailures} related item${linkFailures === 1 ? '' : 's'} could not be saved` : null,
         ].filter(Boolean).join('; ')
         return {
           complete: false,
           recordId: nextRecord.id,
           message: `${nextRecord.title} was created, but ${failures}. Retry the unfinished setup now or finish it later.`,
           stages: [
-            { label: 'Record', status: 'saved' },
+            { label: 'Item', status: 'saved' },
             { label: 'Protected details', status: !hasProtectedRecordInput(protectedInput) ? 'not_included' : progress.protectedSaved ? 'saved' : 'needs_retry' },
+            { label: 'Details', status: details.length === 0 ? 'not_included' : detailFailures === 0 ? 'saved' : 'needs_retry' },
             { label: 'Documents', status: files.length === 0 ? 'not_included' : failedFiles.length === 0 ? 'saved' : 'needs_retry' },
-            { label: 'Links', status: links.length === 0 ? 'not_included' : linkFailures === 0 ? 'saved' : 'needs_retry' },
+            { label: 'Related items', status: links.length === 0 ? 'not_included' : linkFailures === 0 ? 'saved' : 'needs_retry' },
           ],
         }
       }
@@ -541,7 +568,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setActivePage('records')
       setRecordBackStack([])
       setViewingRecord({ record: nextRecord, initialTab: links.length > 0 ? 'linkedItems' : 'details' })
-      setNotice(files.length || links.length || hasProtectedRecordInput(protectedInput) ? 'Record and setup details saved.' : 'Record added. Add a document when ready.')
+      setNotice(files.length || links.length || details.length || hasProtectedRecordInput(protectedInput) ? 'Item and setup details saved.' : 'Item added. Add a document when ready.')
       return { complete: true, recordId: nextRecord.id, message: null }
     } catch (requestError) {
       const createdRecordId = recordCreationProgressRef.current.get(workflowId)?.record.id ?? null
@@ -549,9 +576,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         complete: false,
         recordId: createdRecordId,
         message: createdRecordId
-          ? 'The record was created, but LifeLedger could not continue setup. Retry now or finish it later.'
-          : requestError instanceof Error ? requestError.message : 'LifeLedger could not create the record. Try again.',
-        stages: [{ label: 'Record', status: createdRecordId ? 'saved' : 'needs_retry' }],
+          ? 'The item was created, but LifeLedger could not continue setup. Retry now or finish it later.'
+          : requestError instanceof Error ? requestError.message : 'LifeLedger could not create the item. Try again.',
+        stages: [{ label: 'Item', status: createdRecordId ? 'saved' : 'needs_retry' }],
       }
     } finally {
       setIsSaving(false)
@@ -577,13 +604,13 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       await loadRecordData()
       setViewingRecord((current) => (current?.record.id === id ? { ...current, record: nextRecord } : current))
       if (!protectedSaved) {
-        setError('Record updated, but protected details were not saved. Protected record storage may not be configured.')
+        setError('Item updated, but protected details were not saved. Protected storage may not be configured.')
       } else {
-        setNotice('Record updated.')
+        setNotice('Item updated.')
       }
       return protectedSaved
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to update record.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update item.')
       return false
     } finally {
       setIsSaving(false)
@@ -731,7 +758,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   function openLinkedRecord(recordId: string) {
     const record = records.find((item) => item.id === recordId)
     if (!record) {
-      setError('Unable to open linked record. Refresh and try again.')
+      setError('Unable to open the related item. Refresh and try again.')
       return
     }
 
@@ -839,12 +866,12 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     try {
       await recordsApi.remove(pendingRecordDelete.id)
       await loadRecordData()
-      setNotice('Record deleted.')
+      setNotice('Item deleted.')
       setEditingRecord((current) => (current?.id === pendingRecordDelete.id ? null : current))
       setViewingRecord((current) => (current?.record.id === pendingRecordDelete.id ? null : current))
       setPendingRecordDelete(null)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to delete record.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to delete item.')
     } finally {
       setIsDeleting(false)
     }
@@ -858,9 +885,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       const archived = await recordsApi.archive(record.id)
       await loadRecordData()
       setViewingRecord({ record: archived, initialTab: 'details' })
-      setNotice('Record archived.')
+      setNotice('Item archived.')
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to archive record.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to archive item.')
     }
   }
 
@@ -872,9 +899,9 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       const restored = await recordsApi.restore(record.id)
       await loadRecordData()
       setViewingRecord({ record: restored, initialTab: 'details' })
-      setNotice('Record restored.')
+      setNotice('Item restored.')
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to restore record.')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to restore item.')
     }
   }
 
@@ -885,6 +912,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function openAddReminder() {
+    setResponsibilityRecordId(null)
     setAddDateContext(null)
     setEditingRecord(null)
     setIsRecordFormOpen(false)
@@ -912,6 +940,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function openRecordTypeSelector() {
+    setResponsibilityRecordId(null)
     setAddDateContext(null)
     setEditingRecord(null)
     setIsReminderFormOpen(false)
@@ -929,6 +958,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setSelectedRecordType(recordType)
     setEditingRecord(null)
     setIsRecordTypeSelectorOpen(false)
+    setIsAddTypeSelectorOpen(false)
     setIsRecordFormOpen(true)
   }
 
@@ -955,35 +985,98 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function closeAddReminder() {
+    setResponsibilityRecordId(null)
     setAddDateContext(null)
     setIsReminderFormOpen(false)
     setTemplateDraft(null)
   }
 
-  function openGenericReminderForm(input = createGenericReminderInput(getDateOverride(addDateContext))) {
+  function openGenericReminderForm(
+    input = createGenericReminderInput(getDateOverride(addDateContext)),
+    preserveResponsibilityContext = false,
+  ) {
+    if (!preserveResponsibilityContext) setResponsibilityRecordId(null)
     setTemplateDraft({ id: `${input.title || input.reminder_type}-${input.due_date}-${Date.now()}`, input })
     setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
 
-  function openBirthdayReminderForm(input = createBirthdayReminderInput(getBirthdayDateOverride(addDateContext))) {
+  function openBirthdayReminderForm(
+    input = createBirthdayReminderInput(getBirthdayDateOverride(addDateContext)),
+    preserveResponsibilityContext = false,
+  ) {
+    if (!preserveResponsibilityContext) setResponsibilityRecordId(null)
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
     setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
 
-  function openRenewalReminderForm(input = createRenewalReminderInput(getRenewalDateOverride(addDateContext))) {
+  function openRenewalReminderForm(
+    input = createRenewalReminderInput(getRenewalDateOverride(addDateContext)),
+    preserveResponsibilityContext = false,
+  ) {
+    if (!preserveResponsibilityContext) setResponsibilityRecordId(null)
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
     setAddDateContext(null)
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
 
-  function openMaintenanceReminderForm(input = createMaintenanceReminderInput(getMaintenanceDateOverride(addDateContext))) {
+  function openMaintenanceReminderForm(
+    input = createMaintenanceReminderInput(getMaintenanceDateOverride(addDateContext)),
+    preserveResponsibilityContext = false,
+  ) {
+    if (!preserveResponsibilityContext) setResponsibilityRecordId(null)
     setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
     setAddDateContext(null)
+    setIsAddTypeSelectorOpen(false)
+    setIsReminderFormOpen(true)
+  }
+
+  function openResponsibilityForRecord(record: LifeRecord, suggestion?: SuggestedResponsibilityDefinition) {
+    const reminderOffset = suggestion?.defaultReminderOffsets[0]
+    const commonOverrides: Partial<ReminderInput> = {
+      title: suggestion?.label ?? '',
+      ...(reminderOffset ? {
+        reminder_lead_value: reminderOffset.value,
+        reminder_lead_unit: reminderOffset.unit,
+      } : {}),
+    }
+    let input: ReminderInput
+
+    if (suggestion?.type === 'renewal') {
+      const relevantDate = record.renewal_date ?? record.expiration_date ?? getDateKey(new Date())
+      input = createRenewalReminderInput({
+        ...commonOverrides,
+        due_date: relevantDate,
+        renewal_details: {
+          ...emptyRenewalDetails(),
+          item_name: record.title,
+          provider: record.provider_or_brand,
+          renewal_date: record.renewal_date ?? relevantDate,
+          expiration_date: record.expiration_date,
+        },
+      })
+    } else if (suggestion?.type === 'maintenance') {
+      const relevantDate = getDateKey(new Date())
+      input = createMaintenanceReminderInput({
+        ...commonOverrides,
+        due_date: relevantDate,
+        maintenance_details: {
+          ...emptyMaintenanceDetails(),
+          item_name: record.title,
+          maintenance_area: getMaintenanceAreaForRecord(record.record_type),
+          next_due_date: relevantDate,
+        },
+      })
+    } else {
+      input = createGenericReminderInput(commonOverrides)
+    }
+
+    setResponsibilityRecordId(record.id)
+    setTemplateDraft({ id: `responsibility-${record.id}-${Date.now()}`, input })
     setIsAddTypeSelectorOpen(false)
     setIsReminderFormOpen(true)
   }
@@ -1000,24 +1093,24 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function handleUseTemplate(input: ReminderInput) {
+    const preserveResponsibilityContext = responsibilityRecordId !== null
+
     if (input.reminder_type === 'birthday') {
-      openBirthdayReminderForm(input)
+      openBirthdayReminderForm(input, preserveResponsibilityContext)
       return
     }
 
     if (input.reminder_type === 'renewal') {
-      openRenewalReminderForm(input)
+      openRenewalReminderForm(input, preserveResponsibilityContext)
       return
     }
 
     if (input.reminder_type === 'maintenance') {
-      openMaintenanceReminderForm(input)
+      openMaintenanceReminderForm(input, preserveResponsibilityContext)
       return
     }
 
-    setTemplateDraft({ id: `${input.title}-${Date.now()}`, input })
-    setIsAddTypeSelectorOpen(false)
-    setIsReminderFormOpen(true)
+    openGenericReminderForm(input, preserveResponsibilityContext)
   }
 
   function showPage(page: AppPage) {
@@ -1145,7 +1238,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           isLoading={isLoading}
           recordsCount={activeRecordsCount}
           userName={displayName}
-          onAddRecord={openAddReminder}
+          onAddRecord={openRecordTypeSelector}
           onAddReminder={openAddReminder}
           onBrowseTemplates={openTemplates}
           onViewReminders={() => showPage('reminders')}
@@ -1172,6 +1265,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       {activePage === 'search' ? (
         <SearchView
+          records={records}
           onViewRecord={(recordId) => void openSearchRecord(recordId)}
           onViewReminder={(reminderId) => void openSearchReminder(reminderId)}
           onViewDocument={(recordId, documentId) => void openSearchDocument(recordId, documentId)}
@@ -1221,7 +1315,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           isLoading={isRecordsLoading}
           records={records}
           showArchived={showArchivedRecords}
-          onAddRecord={openAddReminder}
+          onAddRecord={openRecordTypeSelector}
           onFilterChange={setRecordFilter}
           onShowArchivedChange={setShowArchivedRecords}
           onViewRecord={openRecordDetail}
@@ -1259,7 +1353,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         </button>
         <button type="button" className={getNavClass('records')} onClick={() => showPage('records')} aria-current={activePage === 'records' ? 'page' : undefined}>
           <FileText size={19} aria-hidden="true" />
-          Records
+          {productTerms.items}
         </button>
         <button type="button" className={getNavClass('settings')} onClick={() => showPage('settings')} aria-current={activePage === 'settings' ? 'page' : undefined}>
           <Settings size={19} aria-hidden="true" />
@@ -1283,7 +1377,8 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onChooseBirthday={() => openBirthdayReminderForm()}
         onChooseRenewal={() => openRenewalReminderForm()}
         onChooseMaintenance={() => openMaintenanceReminderForm()}
-        onChooseRecord={openRecordTypeSelector}
+        onChooseItem={openRecordForm}
+        onBrowseItemTypes={openRecordTypeSelector}
       />
 
       <RecordTypeSelector
@@ -1364,7 +1459,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           initialDocumentId={viewingRecord.documentId}
           initialTab={viewingRecord.initialTab}
           onArchive={handleArchiveRecord}
-          onAddReminder={openAddReminder}
+          onAddResponsibility={openResponsibilityForRecord}
           onBack={goBackRecordDetail}
           onClose={() => {
             setViewingRecord(null)
@@ -1400,10 +1495,10 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       />
       <ConfirmDialog
         body={getRecordDeleteConfirmationBody(pendingRecordDelete)}
-        confirmLabel="Delete record"
+        confirmLabel="Delete item"
         isBusy={isDeleting}
         isOpen={pendingRecordDelete !== null}
-        title="Delete record?"
+        title="Delete item?"
         onCancel={() => setPendingRecordDelete(null)}
         onConfirm={() => void confirmRecordDelete()}
       />
@@ -2415,20 +2510,20 @@ function getDeleteConfirmationBody(reminder: Reminder | null) {
   const name = reminder?.title.trim()
 
   if (name) {
-    return `${name} will be permanently deleted. Linked records and documents will remain, but their links to this reminder will be removed. This cannot be undone.`
+    return `${name} will be permanently deleted. Related items and documents will remain, but their relationships to this reminder will be removed. This cannot be undone.`
   }
 
-  return 'This reminder will be permanently deleted. Linked items will remain, but their links to it will be removed. This cannot be undone.'
+  return 'This reminder will be permanently deleted. Related items will remain, but their relationships to it will be removed. This cannot be undone.'
 }
 
 function getRecordDeleteConfirmationBody(record: LifeRecord | null) {
   const name = record?.title.trim()
 
   if (name) {
-    return `${name}, its protected details, and its stored documents will be permanently deleted. Linked reminders and records will remain, but their links to this record will be removed. This cannot be undone.`
+    return `${name}, its protected details, and its stored documents will be permanently deleted. Related reminders and items will remain, but their relationships to this item will be removed. This cannot be undone.`
   }
 
-  return 'This record, its protected details, and its stored documents will be permanently deleted. Linked items will remain, but their links to it will be removed. This cannot be undone.'
+  return 'This item, its protected details, and its stored documents will be permanently deleted. Related items will remain, but their relationships to it will be removed. This cannot be undone.'
 }
 
 function withProtectedStatus(record: LifeRecord, protectedStatus: ProtectedRecordStatus): LifeRecord {
@@ -2441,6 +2536,13 @@ function withProtectedStatus(record: LifeRecord, protectedStatus: ProtectedRecor
 
 function getDateOverride(date: string | null): Partial<ReminderInput> {
   return date ? { due_date: date } : {}
+}
+
+function getMaintenanceAreaForRecord(type: RecordType) {
+  if (type === 'vehicle') return 'vehicle' as const
+  if (type === 'pet') return 'pet' as const
+  if (type === 'home' || type === 'appliance') return 'home' as const
+  return 'other' as const
 }
 
 function getBirthdayDateOverride(date: string | null): Partial<ReminderInput> {
@@ -2521,7 +2623,7 @@ function getPageTitle(page: AppPage) {
     home: 'LifeLedger',
     search: 'Search',
     reminders: 'Reminders',
-    records: 'Records',
+    records: productTerms.items,
     settings: 'Settings',
     calendar: 'Calendar',
   }
