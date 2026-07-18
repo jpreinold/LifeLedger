@@ -36,6 +36,7 @@ import { DailyDigestDrawer } from './components/DailyDigestDrawer'
 import { Dashboard } from './components/Dashboard'
 import { EditReminderDrawer } from './components/EditReminderDrawer'
 import { HomeDashboard } from './components/HomeDashboard'
+import { GuidedWorkflowDrawer } from './components/GuidedWorkflowDrawer'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import { RecordDetailDrawer, type RecordDetailTab } from './components/RecordDetailDrawer'
 import { RecordForm, type RecordCreationResult } from './components/RecordForm'
@@ -58,6 +59,7 @@ import {
   emptyRenewalDetails,
 } from './lib/reminderInput'
 import { runRecordSetupAttempt } from './lib/recordCreationWorkflow'
+import type { GuidedWorkflowId } from './lib/guidedWorkflows'
 import { hasProtectedRecordInput } from './lib/recordTypes'
 import type { SuggestedResponsibilityDefinition } from './lib/entityRegistry'
 import { productTerms } from './lib/terminology'
@@ -190,6 +192,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
   const [isAddTypeSelectorOpen, setIsAddTypeSelectorOpen] = useState(false)
   const [isRecordTypeSelectorOpen, setIsRecordTypeSelectorOpen] = useState(false)
+  const [guidedWorkflow, setGuidedWorkflow] = useState<{ id: GuidedWorkflowId; item: LifeRecord | null } | null>(null)
   const [selectedRecordType, setSelectedRecordType] = useState<RecordType>('general')
   const [responsibilityRecordId, setResponsibilityRecordId] = useState<string | null>(null)
   const [addDateContext, setAddDateContext] = useState<string | null>(null)
@@ -939,6 +942,40 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setIsAddTypeSelectorOpen(false)
   }
 
+  function openGuidedWorkflow(workflowId: GuidedWorkflowId, item: LifeRecord | null = null) {
+    setResponsibilityRecordId(null)
+    setAddDateContext(null)
+    setEditingRecord(null)
+    setViewingRecord(null)
+    setRecordBackStack([])
+    setIsRecordFormOpen(false)
+    setIsRecordTypeSelectorOpen(false)
+    setIsTemplateModalOpen(false)
+    setIsReminderFormOpen(false)
+    setIsAddTypeSelectorOpen(false)
+    setGuidedWorkflow({ id: workflowId, item })
+  }
+
+  async function refreshGuidedWorkflowData() {
+    await Promise.all([loadRecordData(), loadReminderData()])
+  }
+
+  async function openGuidedWorkflowItem(record: LifeRecord) {
+    let currentRecord = record
+    try {
+      currentRecord = await recordsApi.get(record.id)
+      setRecords((current) => current.some((item) => item.id === currentRecord.id)
+        ? current.map((item) => item.id === currentRecord.id ? currentRecord : item)
+        : [...current, currentRecord])
+    } catch {
+      setRecords((current) => current.some((item) => item.id === record.id) ? current : [...current, record])
+    }
+    setGuidedWorkflow(null)
+    setActivePage('records')
+    setRecordBackStack([])
+    setViewingRecord({ record: currentRecord, initialTab: 'details' })
+  }
+
   function openRecordTypeSelector() {
     setResponsibilityRecordId(null)
     setAddDateContext(null)
@@ -1247,6 +1284,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onOpenDigest={openDailyDigest}
           onViewRecords={() => showPage('records')}
           onViewReminder={openReminderDetail}
+          onStartWorkflow={(workflowId) => openGuidedWorkflow(workflowId)}
         />
       ) : null}
 
@@ -1379,6 +1417,17 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
         onChooseMaintenance={() => openMaintenanceReminderForm()}
         onChooseItem={openRecordForm}
         onBrowseItemTypes={openRecordTypeSelector}
+        onChooseWorkflow={(workflowId) => openGuidedWorkflow(workflowId)}
+      />
+
+      <GuidedWorkflowDrawer
+        initialItem={guidedWorkflow?.item}
+        isOpen={guidedWorkflow !== null}
+        records={records}
+        workflowId={guidedWorkflow?.id ?? null}
+        onClose={() => setGuidedWorkflow(null)}
+        onDataChanged={refreshGuidedWorkflowData}
+        onOpenItem={(record) => void openGuidedWorkflowItem(record)}
       />
 
       <RecordTypeSelector
@@ -1460,6 +1509,7 @@ function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           initialTab={viewingRecord.initialTab}
           onArchive={handleArchiveRecord}
           onAddResponsibility={openResponsibilityForRecord}
+          onStartGuidedWorkflow={(record, workflowId) => openGuidedWorkflow(workflowId, record)}
           onBack={goBackRecordDetail}
           onClose={() => {
             setViewingRecord(null)

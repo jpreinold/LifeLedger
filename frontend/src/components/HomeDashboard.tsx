@@ -22,6 +22,7 @@ import {
   sortActionCenterReminders,
 } from '../lib/reminderDisplay'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
+import { guidedWorkflowOptions, type GuidedWorkflowId } from '../lib/guidedWorkflows'
 import type { DigestPreferences } from '../types/preferences'
 import type { Reminder, ReminderAlert, ReminderType } from '../types/reminder'
 import { getCategoryVisual } from './categoryVisuals'
@@ -43,6 +44,7 @@ interface HomeDashboardProps {
   onOpenDigest: () => void
   onViewRecords: () => void
   onViewReminder: (reminder: Reminder) => void
+  onStartWorkflow?: (workflowId: GuidedWorkflowId) => void
 }
 
 interface OverviewTileData {
@@ -73,6 +75,7 @@ export function HomeDashboard({
   onOpenDigest,
   onViewRecords,
   onViewReminder,
+  onStartWorkflow,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter(isActionableReminder)
   const genericReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'generic')
@@ -152,6 +155,29 @@ export function HomeDashboard({
             <Plus size={17} aria-hidden="true" />
             Add your first item
           </button>
+        </section>
+      ) : null}
+
+      {onStartWorkflow ? (
+        <section className="home-card home-guided-starts" aria-labelledby="guided-quick-start-heading">
+          <div className="home-card-header">
+            <div>
+              <h2 id="guided-quick-start-heading">Quick starts</h2>
+              <p>Track the item, important date, reminder, and optional document together.</p>
+            </div>
+          </div>
+          <div className="home-guided-start-grid">
+            {guidedWorkflowOptions.map((workflow) => {
+              const Icon = workflow.icon
+              return (
+                <button type="button" key={workflow.id} onClick={() => onStartWorkflow(workflow.id)}>
+                  <Icon size={18} aria-hidden="true" />
+                  <span>{workflow.intentLabel}</span>
+                  <ChevronRight size={16} aria-hidden="true" />
+                </button>
+              )
+            })}
+          </div>
         </section>
       ) : null}
 

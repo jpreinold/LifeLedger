@@ -48,9 +48,10 @@ export const remindersApi = {
 
   alerts: () => request<ReminderAlert[]>('/alerts'),
 
-  create: (input: ReminderInput) =>
+  create: (input: ReminderInput, idempotencyKey?: string) =>
     request<Reminder>('/reminders', {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify(input),
     }),
 

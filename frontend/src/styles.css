@@ -7763,3 +7763,352 @@ textarea:focus-visible {
     width: 100%;
   }
 }
+
+/* Guided tracking */
+.guided-workflow-dialog {
+  width: min(680px, 100vw);
+}
+
+.guided-workflow-body,
+.guided-step,
+.guided-step-content,
+.guided-fields,
+.guided-schedule,
+.guided-review,
+.guided-completion {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.guided-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guided-progress li {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 5px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.guided-progress li > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.guided-progress-short-label {
+  display: none;
+}
+
+.guided-progress li.active,
+.guided-progress li.complete {
+  color: var(--color-primary);
+}
+
+.guided-progress li.active > span,
+.guided-progress li.complete > span {
+  border-color: var(--color-primary);
+  color: white;
+  background: var(--color-primary);
+}
+
+.guided-step > h3 {
+  margin: 0;
+  outline: none;
+}
+
+.guided-step-content > label,
+.guided-field > label,
+.guided-schedule > label,
+.guided-schedule .form-row > label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.guided-step-content label small,
+.guided-field label small,
+.guided-document-step small {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.guided-item-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.guided-item-mode button {
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-md) - 2px);
+  color: var(--color-text-muted);
+  background: transparent;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.guided-item-mode button.active {
+  border-color: var(--color-border);
+  color: var(--color-primary);
+  background: var(--color-surface);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 8%);
+}
+
+.guided-existing-items {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.guided-existing-items > button {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.guided-existing-items > button.active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.guided-existing-items > button > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+
+.guided-existing-items small {
+  color: var(--color-text-muted);
+}
+
+.guided-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.guided-protected-existing,
+.guided-advice-note,
+.guided-review-relationship,
+.guided-review-skip {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  background: var(--color-surface-subtle);
+}
+
+.guided-protected-existing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.guided-conflict {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+}
+
+.guided-conflict p,
+.guided-schedule p,
+.guided-document-step p,
+.guided-completion p,
+.home-guided-starts p,
+.guided-responsibility-suggestions p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.guided-conflict > div,
+.guided-workflow-footer-actions,
+.guided-completion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.guided-conflict .small-outline-button.active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.guided-schedule,
+.guided-document-step,
+.guided-review-group {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.guided-schedule h4,
+.guided-document-step h4,
+.guided-review-group h4,
+.guided-completion h3 {
+  margin: 0;
+}
+
+.guided-document-step {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.guided-document-icon,
+.guided-completion-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.guided-document-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.guided-document-file > span {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+}
+
+.guided-review-group dl,
+.guided-review-group dl > div {
+  margin: 0;
+}
+
+.guided-review-group dl > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr);
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.guided-review-group dt {
+  color: var(--color-text-muted);
+}
+
+.guided-review-group dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.guided-workflow-footer-actions {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.guided-completion.complete .guided-completion-icon {
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.guided-completion.partial .guided-completion-icon {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.home-guided-starts .home-card-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.home-guided-start-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.home-guided-start-grid button {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-guided-start-grid button span {
+  min-width: 0;
+  flex: 1;
+  font-weight: 700;
+}
+
+.guided-responsibility-suggestions > p {
+  font-size: 0.84rem;
+}
+
+@media (max-width: 520px) {
+  .guided-progress {
+    gap: 3px;
+  }
+
+  .guided-progress small {
+    font-size: 0.65rem;
+  }
+
+  .guided-item-mode,
+  .home-guided-start-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .guided-workflow-footer-actions .primary-button,
+  .guided-completion-actions > button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 340px) {
+  .guided-progress-full-label {
+    display: none;
+  }
+
+  .guided-progress-short-label {
+    display: inline;
+  }
+}

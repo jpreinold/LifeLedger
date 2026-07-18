@@ -607,12 +607,16 @@ def add_record_field(
     if len(record.dynamic_fields) >= 30:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Records can have up to 30 custom fields.")
 
-    now = utc_now()
     field_id = str(uuid4())
+    field_key = normalize_dynamic_field_key(payload.key or payload.label, field_id)
+    if any(existing.key == field_key for existing in record.dynamic_fields):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A detail with this name already exists.")
+
+    now = utc_now()
     field_value = payload.value
     field = DynamicRecordField(
         field_id=field_id,
-        key=normalize_dynamic_field_key(payload.key or payload.label, field_id),
+        key=field_key,
         label=payload.label,
         field_type=payload.field_type,
         value=None if payload.is_sensitive else field_value,
@@ -1100,6 +1104,7 @@ def create_record_attachment_upload_intent(
     record_id: str,
     payload: RecordAttachmentUploadIntentRequest,
     response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: UserContext = Depends(get_current_user),
     record_repo: RecordRepository = Depends(get_record_repository),
     attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
@@ -1111,6 +1116,12 @@ def create_record_attachment_upload_intent(
     require_record(record_repo, current_user.user_id, record_id)
     require_document_storage_configured(document_storage)
 
+    normalized_key = normalize_idempotency_key(idempotency_key)
+    attachment_id = (
+        str(uuid5(NAMESPACE_URL, f"lifeledger:document:{current_user.user_id}:{record_id}:{normalized_key}"))
+        if normalized_key
+        else None
+    )
     try:
         attachment = new_record_attachment(
             user_id=current_user.user_id,
@@ -1120,21 +1131,38 @@ def create_record_attachment_upload_intent(
             size_bytes=payload.size_bytes,
             settings=app_settings,
             now=utc_now(),
+            attachment_id=attachment_id,
         )
     except AttachmentValidationError as exc:
         raise attachment_http_exception(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.safe_message) from exc
 
-    existing = attachment_repo.list_for_record(current_user.user_id, record_id)
-    if active_attachment_count(existing) >= app_settings.attachment_max_per_record:
-        raise attachment_http_exception(
-            status.HTTP_409_CONFLICT,
-            "Records can have up to 5 active attachments.",
+    existing_attachments = attachment_repo.list_for_record(current_user.user_id, record_id)
+    existing_attachment = (
+        attachment_repo.get_attachment(current_user.user_id, record_id, attachment.attachment_id)
+        if normalized_key
+        else None
+    )
+    created_new = existing_attachment is None
+    if existing_attachment is not None:
+        if (
+            existing_attachment.display_name != attachment.display_name
+            or existing_attachment.content_type != attachment.content_type
+            or existing_attachment.size_bytes != attachment.size_bytes
+        ):
+            raise attachment_http_exception(status.HTTP_409_CONFLICT, "This document retry does not match the original file.")
+        saved = attachment_repo.update_attachment(
+            existing_attachment.model_copy(update={"upload_expires_at": attachment.upload_expires_at})
         )
-
-    saved = attachment_repo.create_attachment(attachment)
-    document_entity_id = document_item_id(record_id, saved.attachment_id)
-    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_create")
-    sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_create")
+    else:
+        if active_attachment_count(existing_attachments) >= app_settings.attachment_max_per_record:
+            raise attachment_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Records can have up to 5 active attachments.",
+            )
+        saved = attachment_repo.create_attachment(attachment)
+        document_entity_id = document_item_id(record_id, saved.attachment_id)
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_create")
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_create")
     try:
         presigned_upload = document_storage.create_presigned_upload(
             saved,
@@ -1142,9 +1170,11 @@ def create_record_attachment_upload_intent(
             expires_in_seconds=UPLOAD_INTENT_EXPIRATION_SECONDS,
         )
     except (DocumentStorageConfigurationError, DocumentStorageOperationError) as exc:
-        attachment_repo.delete_attachment_metadata(current_user.user_id, record_id, saved.attachment_id)
-        delete_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_create_rollback")
-        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_create_rollback")
+        if created_new:
+            document_entity_id = document_item_id(record_id, saved.attachment_id)
+            attachment_repo.delete_attachment_metadata(current_user.user_id, record_id, saved.attachment_id)
+            delete_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.DOCUMENT, document_entity_id, "document_create_rollback")
+            sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, record_id, "document_create_rollback")
         raise attachment_http_exception(status.HTTP_503_SERVICE_UNAVAILABLE, exc.safe_message) from exc
 
     log_security_event(
@@ -1154,7 +1184,7 @@ def create_record_attachment_upload_intent(
         attachment_id=saved.attachment_id,
         content_type=saved.content_type,
         size=saved.size_bytes,
-        result="created",
+        result="created" if created_new else "reused",
     )
     return RecordAttachmentUploadIntentResponse(
         attachment_id=saved.attachment_id,
@@ -2017,14 +2047,26 @@ def disable_reminder_calendar_sync(
 @app.post("/reminders", response_model=ReminderResponse, status_code=status.HTTP_201_CREATED)
 def create_reminder(
     payload: ReminderCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> ReminderResponse:
+    normalized_key = normalize_idempotency_key(idempotency_key)
+    reminder_id = (
+        str(uuid5(NAMESPACE_URL, f"lifeledger:reminder:{current_user.user_id}:{normalized_key}"))
+        if normalized_key
+        else str(uuid4())
+    )
+    existing = repo.get_reminder(current_user.user_id, reminder_id)
+    if existing is not None:
+        sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, existing.id, "reminder_create_retry")
+        return to_response(existing)
+
     now = utc_now()
     reminder_fields = prepare_create_fields(payload)
     reminder = Reminder(
-        id=str(uuid4()),
+        id=reminder_id,
         user_id=current_user.user_id,
         **reminder_fields,
         completed=False,

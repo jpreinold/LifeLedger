@@ -343,6 +343,7 @@ def new_record_attachment(
     size_bytes: int,
     settings: Settings,
     now: datetime | None = None,
+    attachment_id: str | None = None,
 ) -> RecordAttachment:
     created_at = now or utc_now()
     normalized_content_type = content_type.strip().lower()
@@ -352,7 +353,7 @@ def new_record_attachment(
         size_bytes,
         settings.attachment_max_size_bytes,
     )
-    attachment_id = str(uuid4())
+    attachment_id = attachment_id or str(uuid4())
     owner_hash = owner_hash_for_user(user_id)
     return RecordAttachment(
         attachment_id=attachment_id,
