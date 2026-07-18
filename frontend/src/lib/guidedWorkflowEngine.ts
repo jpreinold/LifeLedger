@@ -274,13 +274,18 @@ function stage(
 
 function scheduleCompletionCopy(progress: GuidedWorkflowProgress) {
   if (!progress.reminder) return ''
+  const leadValue = progress.reminder.reminder_lead_value
+  const leadUnit = progress.reminder.reminder_lead_unit
+  const leadCopy = leadValue && leadUnit
+    ? `${leadValue} ${leadValue === 1 ? leadUnit.slice(0, -1) : leadUnit} before`
+    : 'before'
   const document = [...progress.documents.values()][0]
   const documentCopy = document
     ? document.status === 'available'
       ? 'The document is available.'
       : 'The document is being scanned and will appear when ready.'
     : ''
-  return [`LifeLedger will remind you before ${progress.reminder.due_date}.`, documentCopy].filter(Boolean).join(' ')
+  return [`LifeLedger will remind you ${leadCopy} ${progress.reminder.due_date}.`, documentCopy].filter(Boolean).join(' ')
 }
 
 function withProtectedStatus(record: LifeRecord, status: ProtectedRecordStatus): LifeRecord {

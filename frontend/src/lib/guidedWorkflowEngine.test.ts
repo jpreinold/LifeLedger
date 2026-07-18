@@ -43,6 +43,8 @@ const reminder = {
   id: 'reminder-1',
   title: 'Registration renewal',
   due_date: '2030-04-15',
+  reminder_lead_value: 1,
+  reminder_lead_unit: 'months',
 } as unknown as Reminder
 
 const attachment: RecordAttachment = {
@@ -176,6 +178,7 @@ describe('guided workflow recovery', () => {
     expect(first.failedOperations).toEqual(expect.arrayContaining(['details', 'protected', 'relationship', 'document']))
     expect(second.complete).toBe(true)
     expect(second.failedOperations).toEqual([])
+    expect(second.message).toContain('1 month before 2030-04-15')
     expect(createItem).toHaveBeenCalledTimes(1)
     expect(createReminder).toHaveBeenCalledTimes(1)
     expect(createDetail).toHaveBeenCalledTimes(2)
