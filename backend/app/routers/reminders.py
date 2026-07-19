@@ -222,11 +222,14 @@ def delete_reminder(
     )
     deleted_links = linked_repo.list_links_for_entity(current_user.user_id, LinkedEntityType.REMINDER, reminder_id)
     linked_repo.delete_links_for_entity(current_user.user_id, LinkedEntityType.REMINDER, reminder_id)
+    history_repo.delete_for_reminder(current_user.user_id, reminder_id)
     # Ownership was established above. A concurrent duplicate request may have
     # removed the row after that read, so deletion is idempotent from here and
     # both requests are allowed to finish the remaining user-scoped cleanup.
+    # Keep the primary row until all cleanup that can fail has completed. Once
+    # this call removes the row, only best-effort search projection cleanup is
+    # left, so a failed response cannot report a half-finished deletion.
     repo.delete_reminder(current_user.user_id, reminder_id)
-    history_repo.delete_for_reminder(current_user.user_id, reminder_id)
 
     sync_linked_search_neighbors_safe(
         search_service,

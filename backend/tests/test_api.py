@@ -12,6 +12,8 @@ from app.linked_items_repository import LocalLinkedItemRepository
 from app.preferences_repository import LocalPreferencesRepository
 from app.records_repository import LocalRecordRepository
 from app.repository import LocalReminderRepository
+from app.responsibility_history_repository import LocalResponsibilityHistoryRepository
+from app.route_support import get_responsibility_history_repository
 from app.schemas import BirthdayDetails, MaintenanceDetails, ReminderCategory, ReminderType, RenewalDetails, RepeatOption
 
 
@@ -830,6 +832,23 @@ def test_delete_reminder_finishes_cleanup_when_a_racing_request_removed_the_row(
 
     assert delete_response.status_code == 204
     assert client.get(f"/reminders/{created['id']}").status_code == 404
+
+
+def test_delete_reminder_keeps_primary_row_when_history_cleanup_fails(client, monkeypatch):
+    created = create_reminder(client)
+    repo = app.dependency_overrides[get_repository]()
+    history_repo = LocalResponsibilityHistoryRepository(repo.file_path.with_name("responsibility-history.json"))
+    app.dependency_overrides[get_responsibility_history_repository] = lambda: history_repo
+
+    def fail_history_cleanup(user_id, reminder_id):
+        raise RuntimeError("history cleanup failed")
+
+    monkeypatch.setattr(history_repo, "delete_for_reminder", fail_history_cleanup)
+
+    with pytest.raises(RuntimeError, match="history cleanup failed"):
+        client.delete(f"/reminders/{created['id']}")
+
+    assert repo.get_reminder("local-dev-user", created["id"]) is not None
 
 
 def test_local_json_repository_persists_across_instances(tmp_path):
