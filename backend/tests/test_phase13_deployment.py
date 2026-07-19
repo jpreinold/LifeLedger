@@ -1,11 +1,12 @@
 import json
+import io
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.main import app
 from deploy.validate_production_config import REQUIRED_TABLES, validate
-from deploy.post_deploy_verify import _verify_frontend_api
+from deploy.post_deploy_verify import _request_text, _verify_frontend_api
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,8 @@ def test_production_configuration_rejects_local_or_unencrypted_modes():
 
 def test_canonical_deploy_script_never_reads_ignored_samconfig():
     script = (BACKEND_ROOT / "deploy" / "deploy-production.ps1").read_text(encoding="utf-8")
+    verifier = (BACKEND_ROOT / "deploy" / "post_deploy_verify.py").read_text(encoding="utf-8")
+    requirements = (BACKEND_ROOT / "requirements.txt").read_text(encoding="utf-8")
 
     assert "samconfig.production.toml" in script
     assert '"samconfig.toml"' not in script
@@ -48,6 +51,9 @@ def test_canonical_deploy_script_never_reads_ignored_samconfig():
     assert '"$($property.Name)=$escapedValue"' in script
     assert "validate_production_config.py" in script
     assert "post_deploy_verify.py" in script
+    assert "boto3[crt]" in requirements
+    assert '"ResponsibilityHistoryTable"' in verifier
+    assert '"ResponsibilityHistoryTableName"' not in verifier
 
 
 def test_version_endpoint_exposes_safe_metadata_only(monkeypatch):
@@ -87,3 +93,27 @@ def test_post_deploy_verification_checks_frontend_api_bundle(monkeypatch):
         assert "expected API URL" in str(exc)
     else:
         raise AssertionError("Frontend API drift should fail deployment verification")
+
+
+def test_post_deploy_frontend_check_uses_stable_verifier_identity(monkeypatch):
+    captured = {}
+
+    class Response(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    def open_request(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response(b"ok")
+
+    monkeypatch.setattr("deploy.post_deploy_verify.urllib.request.urlopen", open_request)
+
+    assert _request_text("https://frontend.example/") == "ok"
+    assert captured["request"].get_header("User-agent") == "LifeLedgerDeploymentVerifier/1.0"
+    assert captured["timeout"] == 15

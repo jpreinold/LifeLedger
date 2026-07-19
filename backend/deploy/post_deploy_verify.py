@@ -56,7 +56,7 @@ def main() -> int:
             raise RuntimeError(f"KMS encryption is not active for {output}.")
 
     dynamodb = boto3.client("dynamodb", region_name=args.region)
-    for output in ("ResponsibilityHistoryTableName", "ReconciliationTableName", "AccountOperationsTableName"):
+    for output in ("ResponsibilityHistoryTable", "ReconciliationTableName", "AccountOperationsTableName"):
         if dynamodb.describe_table(TableName=outputs[output])["Table"]["TableStatus"] != "ACTIVE":
             raise RuntimeError(f"{output} is not active.")
 
@@ -148,7 +148,13 @@ def _verify_frontend_api(frontend_url, api_url):
 
 
 def _request_text(url):
-    request = urllib.request.Request(url, headers={"Accept": "text/html,application/javascript"})
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "text/html,application/javascript",
+            "User-Agent": "LifeLedgerDeploymentVerifier/1.0",
+        },
+    )
     with urllib.request.urlopen(request, timeout=15) as response:
         if response.status != 200:
             raise RuntimeError("Frontend deployment verification returned an unexpected status.")
