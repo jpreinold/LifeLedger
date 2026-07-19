@@ -1,6 +1,32 @@
 import type { Reminder, ReminderAlert, ReminderInput } from '../types/reminder'
 import type { CompleteResponsibilityInput, LifecycleReconciliationResult, RenewResponsibilityInput, ResponsibilityEvent, ResponsibilityHistoryPage } from '../types/responsibilityHistory'
-import { apiRequest as request } from './apiClient'
+import { ApiError, apiRequest as request } from './apiClient'
+
+async function removeReminder(id: string): Promise<void> {
+  try {
+    await request<void>(`/reminders/${id}`, {
+      method: 'DELETE',
+    })
+  } catch (deleteError) {
+    if (deleteError instanceof ApiError && deleteError.category === 'not_found') {
+      return
+    }
+
+    if (!(deleteError instanceof ApiError) || !deleteError.retryable) {
+      throw deleteError
+    }
+
+    try {
+      await request<Reminder>(`/reminders/${id}`)
+    } catch (verificationError) {
+      if (verificationError instanceof ApiError && verificationError.category === 'not_found') {
+        return
+      }
+    }
+
+    throw deleteError
+  }
+}
 
 export const remindersApi = {
   list: () => request<Reminder[]>('/reminders'),
@@ -93,8 +119,5 @@ export const remindersApi = {
       method: 'POST',
     }),
 
-  remove: (id: string) =>
-    request<void>(`/reminders/${id}`, {
-      method: 'DELETE',
-    }),
+  remove: removeReminder,
 }
