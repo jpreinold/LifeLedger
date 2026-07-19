@@ -7,13 +7,13 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  reporter: deployed && process.env.CI ? 'line' : process.env.CI ? 'github' : 'list',
   timeout: deployed ? 180_000 : 30_000,
   use: {
     baseURL: deployed ? process.env.E2E_BASE_URL : 'http://127.0.0.1:4173',
-    trace: 'retain-on-failure',
+    trace: deployed ? 'off' : 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    video: deployed ? 'off' : 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: deployed ? undefined : {

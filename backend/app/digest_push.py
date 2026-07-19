@@ -4,6 +4,8 @@ import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import Settings, get_settings
+from app.account_models import AccountState
+from app.account_operations_repository import AccountOperationsRepository
 from app.digest import build_daily_digest_summary
 from app.models import UserPreferences
 from app.preferences import default_digest_preferences
@@ -11,7 +13,7 @@ from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository
 from app.push_sender import InvalidPushSubscriptionError, PushPayload, PushSendError, PushSender, PyWebPushSender
 from app.repository import ReminderRepository
-from app.repository_factory import create_preferences_repository, create_push_subscription_repository, create_repository
+from app.repository_factory import create_account_operations_repository, create_preferences_repository, create_push_subscription_repository, create_repository
 
 DIGEST_PUSH_TITLE = "LifeLedger Digest"
 DIGEST_PUSH_URL = "/?openDigest=1"
@@ -31,6 +33,7 @@ class DigestPushRunResult:
     skipped_not_due: int = 0
     skipped_duplicate: int = 0
     skipped_empty_digest: int = 0
+    skipped_deleting: int = 0
     sent: int = 0
     failed: int = 0
     disabled_invalid: int = 0
@@ -47,6 +50,7 @@ def run_daily_digest_push(
     preferences_repository: PreferencesRepository | None = None,
     push_repository: PushSubscriptionRepository | None = None,
     sender: PushSender | None = None,
+    account_operations_repository: AccountOperationsRepository | None = None,
     schedule_window_minutes: int = DEFAULT_DIGEST_WINDOW_MINUTES,
 ) -> DigestPushRunResult:
     logger.info("Daily Digest push run started")
@@ -62,6 +66,9 @@ def run_daily_digest_push(
     preferences_repo = preferences_repository or create_preferences_repository(resolved_settings)
     subscriptions_repo = push_repository or create_push_subscription_repository(resolved_settings)
     push_sender = sender or PyWebPushSender(resolved_settings)
+    account_operations = account_operations_repository
+    if account_operations is None and resolved_settings.app_component == "digest":
+        account_operations = create_account_operations_repository(resolved_settings)
 
     checked_users = 0
     due_users = 0
@@ -69,6 +76,7 @@ def run_daily_digest_push(
     skipped_not_due = 0
     skipped_duplicate = 0
     skipped_empty_digest = 0
+    skipped_deleting = 0
     sent = 0
     failed = 0
     disabled_invalid = 0
@@ -76,6 +84,14 @@ def run_daily_digest_push(
 
     for user_id in subscriptions_repo.list_user_ids_with_active_subscriptions():
         checked_users += 1
+        if account_operations is not None and account_operations.get_lifecycle(user_id).state in {
+            AccountState.DELETION_REQUESTED,
+            AccountState.DELETING,
+            AccountState.DELETION_REQUIRES_ATTENTION,
+            AccountState.DELETED,
+        }:
+            skipped_deleting += 1
+            continue
         preferences = preferences_repo.get_preferences(user_id)
         if preferences is None:
             preferences = default_digest_preferences(user_id, now_utc)
@@ -169,6 +185,7 @@ def run_daily_digest_push(
         skipped_not_due=skipped_not_due,
         skipped_duplicate=skipped_duplicate,
         skipped_empty_digest=skipped_empty_digest,
+        skipped_deleting=skipped_deleting,
         sent=sent,
         failed=failed,
         disabled_invalid=disabled_invalid,

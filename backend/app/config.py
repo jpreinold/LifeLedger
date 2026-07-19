@@ -20,7 +20,7 @@ SUPPORTED_RECORD_ENCRYPTION_MODES = {
     RECORD_ENCRYPTION_KMS,
 }
 SUPPORTED_APP_ENVS = {"local", "test", "production"}
-SUPPORTED_APP_COMPONENTS = {"api", "digest", "attachment_finalizer"}
+SUPPORTED_APP_COMPONENTS = {"api", "digest", "attachment_finalizer", "reconciliation", "account_worker"}
 DOCUMENT_STORAGE_DISABLED = "disabled"
 DOCUMENT_STORAGE_LOCAL = "local"
 DOCUMENT_STORAGE_S3 = "s3"
@@ -40,6 +40,8 @@ LAMBDA_LOCAL_PUSH_SUBSCRIPTIONS_FILE = "/tmp/lifeledger-push-subscriptions.json"
 LAMBDA_LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE = "/tmp/lifeledger-google-calendar-connections.json"
 LAMBDA_LOCAL_GOOGLE_OAUTH_STATES_FILE = "/tmp/lifeledger-google-oauth-states.json"
 LAMBDA_LOCAL_RESPONSIBILITY_HISTORY_FILE = "/tmp/lifeledger-responsibility-history.json"
+LAMBDA_LOCAL_RECONCILIATION_FILE = "/tmp/lifeledger-reconciliation.json"
+LAMBDA_LOCAL_ACCOUNT_OPERATIONS_FILE = "/tmp/lifeledger-account-operations.json"
 DEFAULT_LOCAL_DEV_USER_ID = "local-dev-user"
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -60,6 +62,8 @@ DEFAULT_LINKED_ITEMS_TABLE_NAME = "lifeledger-linked-items-auth"
 DEFAULT_SEARCH_INDEX_TABLE_NAME = "lifeledger-search-index-auth"
 DEFAULT_SAVED_VIEWS_TABLE_NAME = "lifeledger-saved-views-auth"
 DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME = "lifeledger-responsibility-history-auth"
+DEFAULT_RECONCILIATION_TABLE_NAME = "lifeledger-reconciliation-auth"
+DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME = "lifeledger-account-operations-auth"
 DEFAULT_GOOGLE_CALENDAR_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
@@ -86,6 +90,8 @@ class Settings:
     search_index_table_name: str = DEFAULT_SEARCH_INDEX_TABLE_NAME
     saved_views_table_name: str = DEFAULT_SAVED_VIEWS_TABLE_NAME
     responsibility_history_table_name: str = DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME
+    reconciliation_table_name: str = DEFAULT_RECONCILIATION_TABLE_NAME
+    account_operations_table_name: str = DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME
     aws_region: str = "us-east-1"
     local_data_file: str = ""
     local_records_file: str = ""
@@ -98,6 +104,8 @@ class Settings:
     local_google_calendar_connections_file: str = ""
     local_google_oauth_states_file: str = ""
     local_responsibility_history_file: str = ""
+    local_reconciliation_file: str = ""
+    local_account_operations_file: str = ""
     cors_allowed_origins: list[str] | None = None
     vapid_public_key: str = ""
     vapid_private_key: str = ""
@@ -120,6 +128,11 @@ class Settings:
     documents_kms_key_arn: str = ""
     attachment_max_size_bytes: int = DEFAULT_ATTACHMENT_MAX_SIZE_BYTES
     attachment_max_per_record: int = DEFAULT_ATTACHMENT_MAX_PER_RECORD
+    account_exports_bucket: str = ""
+    account_operations_queue_url: str = ""
+    app_version: str = "0.1.0"
+    git_commit: str = "unknown"
+    build_timestamp: str = "unknown"
 
     @property
     def plaintext_secret_fallback_allowed(self) -> bool:
@@ -232,6 +245,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME,
         ).strip()
         or DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME,
+        reconciliation_table_name=source.get(
+            "RECONCILIATION_TABLE_NAME", DEFAULT_RECONCILIATION_TABLE_NAME
+        ).strip()
+        or DEFAULT_RECONCILIATION_TABLE_NAME,
+        account_operations_table_name=source.get(
+            "ACCOUNT_OPERATIONS_TABLE_NAME", DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME
+        ).strip()
+        or DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME,
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
         local_records_file=source.get("LOCAL_RECORDS_FILE", "").strip() or default_local_records_file(source),
@@ -253,6 +274,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or default_local_google_oauth_states_file(source),
         local_responsibility_history_file=source.get("LOCAL_RESPONSIBILITY_HISTORY_FILE", "").strip()
         or default_local_responsibility_history_file(source),
+        local_reconciliation_file=source.get("LOCAL_RECONCILIATION_FILE", "").strip()
+        or default_local_reconciliation_file(source),
+        local_account_operations_file=source.get("LOCAL_ACCOUNT_OPERATIONS_FILE", "").strip()
+        or default_local_account_operations_file(source),
         cors_allowed_origins=parse_csv_list(source.get("CORS_ALLOWED_ORIGINS", ""))
         or DEFAULT_CORS_ALLOWED_ORIGINS,
         vapid_public_key=source.get("VAPID_PUBLIC_KEY", "").strip(),
@@ -285,6 +310,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             source.get("ATTACHMENT_MAX_PER_RECORD", str(DEFAULT_ATTACHMENT_MAX_PER_RECORD)),
             DEFAULT_ATTACHMENT_MAX_PER_RECORD,
         ),
+        account_exports_bucket=source.get("ACCOUNT_EXPORTS_BUCKET", "").strip(),
+        account_operations_queue_url=source.get("ACCOUNT_OPERATIONS_QUEUE_URL", "").strip(),
+        app_version=source.get("APP_VERSION", "0.1.0").strip() or "0.1.0",
+        git_commit=source.get("GIT_COMMIT", "unknown").strip() or "unknown",
+        build_timestamp=source.get("BUILD_TIMESTAMP", "unknown").strip() or "unknown",
     )
     validate_settings(settings)
     return settings
@@ -318,7 +348,7 @@ def validate_settings(settings: Settings) -> None:
         if not settings.cors_allowed_origins or unsafe_origins:
             problems.append("CORS_ALLOWED_ORIGINS must contain only explicit HTTPS production origins")
 
-    if settings.app_component in {"api", "attachment_finalizer"}:
+    if settings.app_component in {"api", "attachment_finalizer", "account_worker", "reconciliation"}:
         if settings.document_storage_mode != DOCUMENT_STORAGE_S3:
             problems.append("DOCUMENT_STORAGE_MODE must be s3")
         if not settings.documents_quarantine_bucket:
@@ -327,6 +357,19 @@ def validate_settings(settings: Settings) -> None:
             problems.append("DOCUMENTS_CLEAN_BUCKET is required")
         if not settings.documents_kms_key_arn:
             problems.append("DOCUMENTS_KMS_KEY_ARN is required")
+
+    required_tables = {
+        "REMINDERS_TABLE_NAME": settings.reminders_table_name,
+        "RECORDS_TABLE_NAME": settings.records_table_name,
+        "RESPONSIBILITY_HISTORY_TABLE_NAME": settings.responsibility_history_table_name,
+        "RECONCILIATION_TABLE_NAME": settings.reconciliation_table_name,
+        "ACCOUNT_OPERATIONS_TABLE_NAME": settings.account_operations_table_name,
+    }
+    if any(not value for value in required_tables.values()):
+        problems.append("all required data table names must be configured")
+
+    if settings.app_component in {"api", "account_worker"} and not settings.account_exports_bucket:
+        problems.append("ACCOUNT_EXPORTS_BUCKET is required")
 
     if settings.local_records_encryption_key or settings.google_client_secret or settings.vapid_private_key:
         problems.append("local plaintext secret providers are not allowed")
@@ -439,6 +482,22 @@ def default_local_responsibility_history_file(env: Mapping[str, str] | None = No
         return LAMBDA_LOCAL_RESPONSIBILITY_HISTORY_FILE
     backend_root = Path(__file__).resolve().parents[1]
     return str(backend_root / "data" / "responsibility-history.json")
+
+
+def default_local_reconciliation_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_RECONCILIATION_FILE
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "reconciliation.json")
+
+
+def default_local_account_operations_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_ACCOUNT_OPERATIONS_FILE
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "account-operations.json")
 
 
 def parse_csv_list(value: str) -> list[str]:

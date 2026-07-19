@@ -37,6 +37,8 @@ Existing-item setup starts from the selected compatible active item, preserves u
 
 ## Product rules for future phases
 
+Phase 13 does not change this product model. Account export/deletion and reconciliation are operational capabilities around the existing user-owned entities, not new Items, Responsibilities, Documents, workflows, or user-facing history types. Reconciliation never appears as an ordinary-user dashboard and never manufactures lifecycle facts.
+
 - Future guided tracking flows must extend the shared configuration and engine, compose the existing APIs, and map every suggested detail to the entity registry.
 - Suggested details should reduce setup work; custom details remain the escape hatch for information the registry does not anticipate.
 - Relationships should be inferred from the action context whenever safe, with manual editing kept secondary.

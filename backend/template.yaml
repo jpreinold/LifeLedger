@@ -57,6 +57,12 @@ Parameters:
   ResponsibilityHistoryTableName:
     Type: String
     Default: lifeledger-responsibility-history-auth
+  ReconciliationTableName:
+    Type: String
+    Default: lifeledger-reconciliation-auth
+  AccountOperationsTableName:
+    Type: String
+    Default: lifeledger-account-operations-auth
   DocumentStorageMode:
     Type: String
     Default: s3
@@ -70,6 +76,18 @@ Parameters:
   DocumentsCleanBucketName:
     Type: String
     Default: ""
+  AccountExportsBucketName:
+    Type: String
+    Default: ""
+  AppVersion:
+    Type: String
+    Default: "0.1.0"
+  GitCommit:
+    Type: String
+    Default: "unknown"
+  BuildTimestamp:
+    Type: String
+    Default: "unknown"
   MalwareProtectionEnabled:
     Type: String
     Default: "true"
@@ -134,6 +152,7 @@ Conditions:
   HasPushSecretArn: !Not [!Equals [!Ref PushSecretArn, ""]]
   HasDocumentsUploadBucketName: !Not [!Equals [!Ref DocumentsUploadBucketName, ""]]
   HasDocumentsCleanBucketName: !Not [!Equals [!Ref DocumentsCleanBucketName, ""]]
+  HasAccountExportsBucketName: !Not [!Equals [!Ref AccountExportsBucketName, ""]]
   EnableMalwareProtection: !Equals [!Ref MalwareProtectionEnabled, "true"]
 
 Globals:
@@ -335,6 +354,61 @@ Resources:
               StringNotEquals:
                 s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt LifeLedgerDocumentsKey.Arn
 
+  AccountExportsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If [HasAccountExportsBucketName, !Ref AccountExportsBucketName, !Ref AWS::NoValue]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt LifeLedgerDocumentsKey.Arn
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireAccountExports
+            Status: Enabled
+            Prefix: exports/
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  AccountExportsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccountExportsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AccountExportsBucket.Arn
+              - !Sub "${AccountExportsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: DenyUnapprovedObjectEncryption
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${AccountExportsBucket.Arn}/exports/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+
   LifeLedgerUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -392,6 +466,7 @@ Resources:
           - Content-Type
           - Authorization
           - Idempotency-Key
+          - X-Correlation-ID
         AllowCredentials: true
       Auth:
         DefaultAuthorizer: CognitoJwtAuthorizer
@@ -402,6 +477,22 @@ Resources:
               issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${LifeLedgerUserPool}"
               audience:
                 - !Ref LifeLedgerUserPoolClient
+
+  AccountOperationsDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      KmsMasterKeyId: alias/aws/sqs
+
+  AccountOperationsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 360
+      MessageRetentionPeriod: 345600
+      KmsMasterKeyId: alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AccountOperationsDeadLetterQueue.Arn
+        maxReceiveCount: 5
 
   LifeLedgerApiFunction:
     Type: AWS::Serverless::Function
@@ -425,6 +516,8 @@ Resources:
           SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable
           SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable
           RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable
+          RECONCILIATION_TABLE_NAME: !Ref ReconciliationTable
+          ACCOUNT_OPERATIONS_TABLE_NAME: !Ref AccountOperationsTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
@@ -436,6 +529,8 @@ Resources:
           LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json
           LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json
           LOCAL_RESPONSIBILITY_HISTORY_FILE: /tmp/lifeledger-responsibility-history.json
+          LOCAL_RECONCILIATION_FILE: /tmp/lifeledger-reconciliation.json
+          LOCAL_ACCOUNT_OPERATIONS_FILE: /tmp/lifeledger-account-operations.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
@@ -453,6 +548,11 @@ Resources:
           DOCUMENTS_QUARANTINE_BUCKET: !Ref DocumentsQuarantineBucket
           DOCUMENTS_CLEAN_BUCKET: !Ref DocumentsCleanBucket
           DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn
+          ACCOUNT_EXPORTS_BUCKET: !Ref AccountExportsBucket
+          ACCOUNT_OPERATIONS_QUEUE_URL: !Ref AccountOperationsQueue
+          APP_VERSION: !Ref AppVersion
+          GIT_COMMIT: !Ref GitCommit
+          BUILD_TIMESTAMP: !Ref BuildTimestamp
           ATTACHMENT_MAX_SIZE_BYTES: !Ref AttachmentMaxSizeBytes
           ATTACHMENT_MAX_PER_RECORD: !Ref AttachmentMaxPerRecord
           ALLOW_PLAINTEXT_PRODUCTION_SECRETS: "false"
@@ -472,6 +572,10 @@ Resources:
             TableName: !Ref SavedViewsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ResponsibilityHistoryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReconciliationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AccountOperationsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
@@ -504,6 +608,12 @@ Resources:
                 - s3:DeleteObject
                 - s3:PutObjectTagging
               Resource: !Sub "${DocumentsCleanBucket.Arn}/clean/*"
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource: !Sub "${AccountExportsBucket.Arn}/exports/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -550,6 +660,8 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref GoogleOAuthSecretArn
           - !Ref AWS::NoValue
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AccountOperationsQueue.QueueName
         - !If
           - HasPushSecretArn
           - Statement:
@@ -564,6 +676,14 @@ Resources:
           Properties:
             ApiId: !Ref LifeLedgerHttpApi
             Path: /health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        Version:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LifeLedgerHttpApi
+            Path: /version
             Method: GET
             Auth:
               Authorizer: NONE
@@ -601,6 +721,7 @@ Resources:
           RECORDS_TABLE_NAME: !Ref RecordsTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
+          ACCOUNT_OPERATIONS_TABLE_NAME: !Ref AccountOperationsTable
           LOCAL_DATA_FILE: /tmp/lifeledger-reminders.json
           LOCAL_RECORDS_FILE: /tmp/lifeledger-records.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
@@ -616,6 +737,8 @@ Resources:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PushSubscriptionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AccountOperationsTable
         - Statement:
             - Effect: Allow
               Action:
@@ -655,6 +778,284 @@ Resources:
           Properties:
             Schedule: rate(15 minutes)
             Enabled: true
+
+  LifeLedgerAccountWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-account-worker"
+      CodeUri: .
+      Handler: account_worker.handler
+      Timeout: 300
+      MemorySize: 1024
+      EphemeralStorage:
+        Size: 2048
+      Environment:
+        Variables:
+          APP_ENV: !Ref AppEnv
+          APP_COMPONENT: account_worker
+          AUTH_MODE: !Ref AuthMode
+          COGNITO_USER_POOL_ID: !Ref LifeLedgerUserPool
+          COGNITO_USER_POOL_CLIENT_ID: !Ref LifeLedgerUserPoolClient
+          PERSISTENCE_MODE: !Ref PersistenceMode
+          REMINDERS_TABLE_NAME: !Ref RemindersTable
+          RECORDS_TABLE_NAME: !Ref RecordsTable
+          RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable
+          LINKED_ITEMS_TABLE_NAME: !Ref LinkedItemsTable
+          SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable
+          SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable
+          RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable
+          RECONCILIATION_TABLE_NAME: !Ref ReconciliationTable
+          ACCOUNT_OPERATIONS_TABLE_NAME: !Ref AccountOperationsTable
+          PREFERENCES_TABLE_NAME: !Ref PreferencesTable
+          PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
+          GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
+          GOOGLE_OAUTH_STATES_TABLE_NAME: !Ref GoogleOAuthStatesTable
+          DATA_ENCRYPTION_KMS_KEY_ARN: !GetAtt LifeLedgerDataEncryptionKey.Arn
+          RECORD_ENCRYPTION_MODE: !Ref RecordEncryptionMode
+          DOCUMENT_STORAGE_MODE: !Ref DocumentStorageMode
+          DOCUMENTS_QUARANTINE_BUCKET: !Ref DocumentsQuarantineBucket
+          DOCUMENTS_CLEAN_BUCKET: !Ref DocumentsCleanBucket
+          DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn
+          ACCOUNT_EXPORTS_BUCKET: !Ref AccountExportsBucket
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+          GOOGLE_OAUTH_REDIRECT_URI: !Ref GoogleOAuthRedirectUri
+          ALLOW_PLAINTEXT_PRODUCTION_SECRETS: "false"
+          APP_VERSION: !Ref AppVersion
+          GIT_COMMIT: !Ref GitCommit
+          BUILD_TIMESTAMP: !Ref BuildTimestamp
+      Policies: &AccountOperationsPolicies
+        - DynamoDBCrudPolicy: {TableName: !Ref RemindersTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref RecordsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref RecordAttachmentsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref LinkedItemsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref SearchIndexTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref SavedViewsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref ResponsibilityHistoryTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref ReconciliationTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref AccountOperationsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref PreferencesTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref PushSubscriptionsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref GoogleCalendarConnectionsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref GoogleOAuthStatesTable}
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource:
+                - !Sub "${DocumentsQuarantineBucket.Arn}/quarantine/*"
+                - !Sub "${DocumentsCleanBucket.Arn}/clean/*"
+                - !Sub "${AccountExportsBucket.Arn}/exports/*"
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource:
+                - !GetAtt DocumentsQuarantineBucket.Arn
+                - !GetAtt DocumentsCleanBucket.Arn
+                - !GetAtt AccountExportsBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - quarantine/*
+                    - clean/*
+                    - exports/*
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt LifeLedgerDataEncryptionKey.Arn
+                - !GetAtt LifeLedgerDocumentsKey.Arn
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminDeleteUser
+                - cognito-idp:ListUsers
+              Resource: !GetAtt LifeLedgerUserPool.Arn
+      Events:
+        AccountOperations:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AccountOperationsQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  LifeLedgerReconciliationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-reconciliation"
+      CodeUri: .
+      Handler: reconciliation_handler.handler
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          APP_ENV: !Ref AppEnv
+          APP_COMPONENT: reconciliation
+          AUTH_MODE: !Ref AuthMode
+          COGNITO_USER_POOL_ID: !Ref LifeLedgerUserPool
+          COGNITO_USER_POOL_CLIENT_ID: !Ref LifeLedgerUserPoolClient
+          PERSISTENCE_MODE: !Ref PersistenceMode
+          REMINDERS_TABLE_NAME: !Ref RemindersTable
+          RECORDS_TABLE_NAME: !Ref RecordsTable
+          RECORD_ATTACHMENTS_TABLE_NAME: !Ref RecordAttachmentsTable
+          LINKED_ITEMS_TABLE_NAME: !Ref LinkedItemsTable
+          SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable
+          SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable
+          RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable
+          RECONCILIATION_TABLE_NAME: !Ref ReconciliationTable
+          ACCOUNT_OPERATIONS_TABLE_NAME: !Ref AccountOperationsTable
+          PREFERENCES_TABLE_NAME: !Ref PreferencesTable
+          PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
+          GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
+          GOOGLE_OAUTH_STATES_TABLE_NAME: !Ref GoogleOAuthStatesTable
+          DATA_ENCRYPTION_KMS_KEY_ARN: !GetAtt LifeLedgerDataEncryptionKey.Arn
+          RECORD_ENCRYPTION_MODE: !Ref RecordEncryptionMode
+          DOCUMENT_STORAGE_MODE: !Ref DocumentStorageMode
+          DOCUMENTS_QUARANTINE_BUCKET: !Ref DocumentsQuarantineBucket
+          DOCUMENTS_CLEAN_BUCKET: !Ref DocumentsCleanBucket
+          DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn
+          ACCOUNT_EXPORTS_BUCKET: !Ref AccountExportsBucket
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+          GOOGLE_OAUTH_REDIRECT_URI: !Ref GoogleOAuthRedirectUri
+          ALLOW_PLAINTEXT_PRODUCTION_SECRETS: "false"
+          APP_VERSION: !Ref AppVersion
+          GIT_COMMIT: !Ref GitCommit
+          BUILD_TIMESTAMP: !Ref BuildTimestamp
+      Policies: *AccountOperationsPolicies
+      Events:
+        RetrySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+            Enabled: true
+            Input: '{"limit":25}'
+        ExportCleanupSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Enabled: true
+            Input: '{"limit":25,"mode":"export_cleanup"}'
+        DeepSweepSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(20 5 * * ? *)
+            Enabled: true
+            Input: '{"mode":"deep","limit":100}'
+
+  ReconciliationTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref ReconciliationTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: reconciliation_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: domain
+          AttributeType: S
+        - AttributeName: detected_at
+          AttributeType: S
+        - AttributeName: due_partition
+          AttributeType: S
+        - AttributeName: due_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: reconciliation_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: detected_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: user-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: detected_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: domain-index
+          KeySchema:
+            - AttributeName: domain
+              KeyType: HASH
+            - AttributeName: detected_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: due-index
+          KeySchema:
+            - AttributeName: due_partition
+              KeyType: HASH
+            - AttributeName: due_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  AccountOperationsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref AccountOperationsTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: operation_key
+          AttributeType: S
+        - AttributeName: expiry_partition
+          AttributeType: S
+        - AttributeName: expires_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: operation_key
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ExportExpiryIndex
+          KeySchema:
+            - AttributeName: expiry_partition
+              KeyType: HASH
+            - AttributeName: expires_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   RemindersTable:
     Type: AWS::DynamoDB::Table
@@ -969,9 +1370,18 @@ Resources:
       AttributeDefinitions:
         - AttributeName: state
           AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
       KeySchema:
         - AttributeName: state
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserOAuthStatesIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
 
   GuardDutyDocumentsMalwareProtectionRole:
     Type: AWS::IAM::Role
@@ -1185,6 +1595,132 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt AttachmentScanResultRule.Arn
 
+  ReconciliationFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scheduled reconciliation Lambda errors require operator review.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref LifeLedgerReconciliationFunction
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  RequiresAttentionAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Reconciliation work has required attention for at least two hourly passes.
+      Namespace: LifeLedger/Operations
+      MetricName: RequiresAttentionCount
+      Dimensions:
+        - Name: Environment
+          Value: !Ref AppEnv
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  OldUnresolvedReconciliationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The oldest unresolved issue has remained open for more than 24 hours.
+      Namespace: LifeLedger/Operations
+      MetricName: OldestUnresolvedAgeSeconds
+      Dimensions:
+        - Name: Environment
+          Value: !Ref AppEnv
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 86400
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  DocumentScanningBacklogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Five or more documents have remained in scanning beyond the safe threshold.
+      Namespace: LifeLedger/Operations
+      MetricName: DocumentStuckScanningCount
+      Dimensions:
+        - Name: Environment
+          Value: !Ref AppEnv
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  AccountDeletionIncompleteAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Account deletion remains incomplete across two reconciliation passes.
+      Namespace: LifeLedger/Operations
+      MetricName: AccountDeletionIncompleteCount
+      Dimensions:
+        - Name: Environment
+          Value: !Ref AppEnv
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  AccountOperationsDeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Account export or deletion messages reached the dead-letter queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AccountOperationsDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ProductionE2ERepeatedFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The explicitly triggered production acceptance path failed twice in two days.
+      Namespace: LifeLedger/Operations
+      MetricName: ProductionE2EFailure
+      Dimensions:
+        - Name: Environment
+          Value: !Ref AppEnv
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  OperationsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-operations"
+      DashboardBody: !Sub |
+        {"widgets":[{"type":"metric","width":24,"height":6,"properties":{"title":"LifeLedger reconciliation health","region":"${AWS::Region}","view":"timeSeries","stacked":false,"metrics":[["LifeLedger/Operations","PendingReconciliationCount","Environment","${AppEnv}"],[".","RetryingReconciliationCount",".","."],[".","RequiresAttentionCount",".","."],[".","DocumentStuckScanningCount",".","."],[".","AccountDeletionIncompleteCount",".","."]]}}]}
+
 Outputs:
   DataEncryptionKeyArn:
     Description: KMS key ARN for LifeLedger application-level and DynamoDB encryption.
@@ -1204,6 +1740,18 @@ Outputs:
   DocumentsCleanBucketName:
     Description: Private S3 bucket for scanned and validated record attachments.
     Value: !Ref DocumentsCleanBucket
+  AccountExportsBucketName:
+    Description: Private short-lived account export bucket.
+    Value: !Ref AccountExportsBucket
+  ReconciliationTableName:
+    Description: Durable operational reconciliation issue table.
+    Value: !Ref ReconciliationTable
+  AccountOperationsTableName:
+    Description: Resumable account export and deletion operation table.
+    Value: !Ref AccountOperationsTable
+  ReconciliationFunctionName:
+    Description: Scheduled reconciliation Lambda function.
+    Value: !Ref LifeLedgerReconciliationFunction
   RecordAttachmentsTableName:
     Description: DynamoDB record attachments metadata table name.
     Value: !Ref RecordAttachmentsTable

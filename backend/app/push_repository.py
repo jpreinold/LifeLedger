@@ -28,6 +28,12 @@ class PushSubscriptionRepository(Protocol):
     def disable_subscription(self, user_id: str, subscription_id: str, disabled_at: datetime) -> bool:
         ...
 
+    def delete_subscription(self, user_id: str, subscription_id: str) -> bool:
+        ...
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        ...
+
 
 class LocalPushSubscriptionRepository:
     def __init__(self, file_path: str | Path):
@@ -99,6 +105,25 @@ class LocalPushSubscriptionRepository:
 
             self.save_subscription(subscription.model_copy(update={"disabled_at": disabled_at, "updated_at": disabled_at}))
             return True
+
+    def delete_subscription(self, user_id: str, subscription_id: str) -> bool:
+        with self._lock:
+            subscriptions = self._read_all_unlocked()
+            remaining = [
+                item
+                for item in subscriptions
+                if not (item.user_id == user_id and item.subscription_id == subscription_id)
+            ]
+            if len(remaining) == len(subscriptions):
+                return False
+            self._write_all_unlocked(remaining)
+            return True
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        subscriptions = self.list_subscriptions(user_id, include_disabled=True)[:limit]
+        for subscription in subscriptions:
+            self.delete_subscription(user_id, subscription.subscription_id)
+        return len(subscriptions)
 
     def _read_all_unlocked(self) -> list[PushSubscription]:
         if not self.file_path.exists():
@@ -186,6 +211,16 @@ class DynamoPushSubscriptionRepository:
 
         self.save_subscription(subscription.model_copy(update={"disabled_at": disabled_at, "updated_at": disabled_at}))
         return True
+
+    def delete_subscription(self, user_id: str, subscription_id: str) -> bool:
+        self.table.delete_item(Key={"user_id": user_id, "subscription_id": subscription_id})
+        return True
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        subscriptions = self.list_subscriptions(user_id, include_disabled=True)[:limit]
+        for subscription in subscriptions:
+            self.delete_subscription(user_id, subscription.subscription_id)
+        return len(subscriptions)
 
     def _build_table(self, table_name: str, region_name: str) -> Any:
         import boto3

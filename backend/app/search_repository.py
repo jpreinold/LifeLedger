@@ -50,6 +50,9 @@ class SearchIndexRepository(Protocol):
     def list_sync_failures(self, user_id: str, limit: int = 100) -> list[ProjectionSyncFailure]:
         ...
 
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        ...
+
 
 class SavedSearchViewRepository(Protocol):
     def create_view(self, view: SavedSearchView) -> SavedSearchView:
@@ -65,6 +68,9 @@ class SavedSearchViewRepository(Protocol):
         ...
 
     def delete_view(self, user_id: str, saved_view_id: str) -> bool:
+        ...
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
         ...
 
 
@@ -185,6 +191,27 @@ class LocalSearchIndexRepository:
     def list_sync_failures(self, user_id: str, limit: int = 100) -> list[ProjectionSyncFailure]:
         with self._lock:
             return [item for item in self._read_failures_unlocked() if item.user_id == user_id][:limit]
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        with self._lock:
+            projections = self._read_all_unlocked()
+            failures = self._read_failures_unlocked()
+            projection_targets = [item for item in projections if item.user_id == user_id][:limit]
+            remaining_limit = max(0, limit - len(projection_targets))
+            failure_targets = [item for item in failures if item.user_id == user_id][:remaining_limit]
+            projection_ids = {item.search_item_id for item in projection_targets}
+            failure_keys = {(item.entity_type.value, item.entity_id) for item in failure_targets}
+            self._write_all_unlocked(
+                [item for item in projections if not (item.user_id == user_id and item.search_item_id in projection_ids)]
+            )
+            self._write_failures_unlocked(
+                [
+                    item
+                    for item in failures
+                    if not (item.user_id == user_id and (item.entity_type.value, item.entity_id) in failure_keys)
+                ]
+            )
+            return len(projection_targets) + len(failure_targets)
 
     def _read_failures_unlocked(self) -> list[ProjectionSyncFailure]:
         if not self.failure_file_path.exists():
@@ -327,6 +354,17 @@ class DynamoSearchIndexRepository:
             if item.get("entity_kind") == SEARCH_SYNC_FAILURE_KIND
         ]
 
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        response = self.table.query(
+            KeyConditionExpression="user_id = :user_id",
+            ExpressionAttributeValues={":user_id": user_id},
+            ProjectionExpression="user_id, search_key",
+            Limit=limit,
+        )
+        for item in response.get("Items", []):
+            self.table.delete_item(Key={"user_id": item["user_id"], "search_key": item["search_key"]})
+        return len(response.get("Items", []))
+
     def _query_prefix(self, user_id: str, prefix: str, limit: int) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         query_kwargs: dict[str, Any] = {
@@ -438,6 +476,12 @@ class LocalSavedSearchViewRepository:
             self._write_all_unlocked(next_views)
             return True
 
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        views = self.list_views(user_id)[:limit]
+        for view in views:
+            self.delete_view(user_id, view.saved_view_id)
+        return len(views)
+
     def _read_all_unlocked(self) -> list[SavedSearchView]:
         if not self.file_path.exists():
             return []
@@ -502,6 +546,12 @@ class DynamoSavedSearchViewRepository:
             ReturnValues="ALL_OLD",
         )
         return "Attributes" in response
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        views = self.list_views(user_id)[:limit]
+        for view in views:
+            self.delete_view(user_id, view.saved_view_id)
+        return len(views)
 
     def _build_table(self, table_name: str, region_name: str) -> Any:
         import boto3

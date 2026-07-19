@@ -42,7 +42,7 @@ Renewal records the renewal date, previous due/expiration date, and accepted nex
 
 The mapping updates an existing key or creates one stable dynamic field; it never creates a duplicate. A value is changed only when it is empty, still equals the accepted previous date, or already equals the next date. Conflicting or archived item state is not overwritten. The lifecycle event keeps the accepted mapping key so reconciliation does not depend on the reminder's already-advanced date. Reminder and item search projections are refreshed after the transaction; notes and protected details remain excluded.
 
-Item-date, search, and document operations cannot all share the reminder/history transaction. Failures are recorded as `pending` or `needs_attention` on the event, surfaced in the action result, and repaired by idempotent reconciliation. The same operation key replays the existing event rather than appending another.
+Item-date, search, and document operations cannot all share the reminder/history transaction. Existing event flags remain read-compatible, while Phase 13 also detects unresolved flags into the durable operational reconciliation store. Failures are repaired only from persisted operation evidence. The same operation key replays the existing event rather than appending another.
 
 ## Supporting document evidence
 
@@ -54,7 +54,7 @@ Only after attachment metadata exists does the service append `supporting_docume
 
 `POST /reminders/{id}/history/reconcile` repairs one responsibility. `POST /responsibility-history/reconcile` processes one user's responsibilities in bounded pages. Both support `dry_run=true`, are safe to repeat, and repair only persisted operation evidence: item dates, search projections, and document-reference status. They never infer a missing completion or renewal from timestamps, logs, or current state.
 
-Deleting a responsibility deletes its ledger entries after the existing confirmation. Archiving retains history. Deleting an item follows current relationship/document cleanup; responsibility history remains readable from any retained responsibility using safe title snapshots, while deleted evidence becomes unavailable. Account deletion is not currently implemented; a future account-deletion workflow must delete the history table rows alongside all other user data.
+Deleting a responsibility deletes its ledger entries after the existing confirmation. Archiving retains history. Deleting an item follows current relationship/document cleanup; responsibility history remains readable from any retained responsibility using safe title snapshots, while deleted evidence becomes unavailable. Phase 13 account deletion deletes history before reminders and verifies the history store is empty before identity removal. See [account-data-lifecycle.md](account-data-lifecycle.md).
 
 ## Frontend loading and bundle budget
 
@@ -79,10 +79,11 @@ $env:E2E_BASE_URL='https://frontend.example'
 $env:E2E_API_BASE_URL='https://api.example'
 $env:E2E_USERNAME='dedicated-test-account@example.com'
 $env:E2E_PASSWORD='set-outside-the-repository'
+$env:E2E_ACCOUNT_GROUP='lifeledger-e2e'
 npm run test:e2e:deployed
 ```
 
-The deployed harness signs in through the real UI, creates uniquely prefixed data, stores a protected detail, completes a responsibility, uploads a safe PDF through the actual scan pipeline, waits up to 120 seconds for a terminal scan state, requests exact-document access, checks history and protected-value exclusion, verifies an unauthenticated 401, and deletes the responsibility and item in `finally`. Cleanup failures fail the run and identify only safe object IDs. Credentials, tokens, protected values, signed URLs, videos, traces, and authentication state are not committed.
+The deployed harness also refuses an account outside the expected dedicated Cognito group and verifies search cleanup. Credentials, tokens, protected values, signed URLs, videos, traces, and authentication state are not committed. See [production-e2e.md](production-e2e.md) for the protected manual workflow and safety rules.
 
 ## Extending a future workflow
 

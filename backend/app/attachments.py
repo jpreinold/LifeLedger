@@ -100,6 +100,15 @@ class DisabledDocumentStorageService:
     def create_presigned_download(self, *_args, **_kwargs):
         raise DocumentStorageConfigurationError()
 
+    def read_clean_object(self, _key: str) -> bytes:
+        raise DocumentStorageConfigurationError()
+
+    def list_user_objects(self, _user_id: str, *, limit: int = 100) -> list[tuple[str, str]]:
+        return []
+
+    def delete_user_objects(self, _user_id: str, *, limit: int = 100) -> int:
+        return 0
+
 
 class S3DocumentStorageService:
     configured = True
@@ -235,6 +244,44 @@ class S3DocumentStorageService:
             )
         except Exception as exc:
             raise DocumentStorageOperationError() from exc
+
+    def read_clean_object(self, key: str) -> bytes:
+        try:
+            response = self._client().get_object(Bucket=self.clean_bucket, Key=key)
+            body = response.get("Body")
+            return body.read() if body is not None else b""
+        except Exception as exc:
+            raise DocumentStorageOperationError() from exc
+
+    def list_user_objects(self, user_id: str, *, limit: int = 100) -> list[tuple[str, str]]:
+        """Return a bounded owner-prefix inventory for deletion verification and orphan detection."""
+        bounded_limit = max(1, min(limit, 1_000))
+        owner_hash = owner_hash_for_user(user_id)
+        objects: list[tuple[str, str]] = []
+        try:
+            for object_class, bucket, prefix in (
+                ("quarantine", self.quarantine_bucket, f"quarantine/{owner_hash}/"),
+                ("clean", self.clean_bucket, f"clean/{owner_hash}/"),
+            ):
+                remaining = bounded_limit - len(objects)
+                if remaining <= 0:
+                    break
+                response = self._client().list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=remaining)
+                objects.extend(
+                    (object_class, item["Key"])
+                    for item in response.get("Contents", [])
+                    if item.get("Key")
+                )
+        except Exception as exc:
+            raise DocumentStorageOperationError() from exc
+        return objects[:bounded_limit]
+
+    def delete_user_objects(self, user_id: str, *, limit: int = 100) -> int:
+        objects = self.list_user_objects(user_id, limit=limit)
+        for object_class, key in objects:
+            bucket = self.quarantine_bucket if object_class == "quarantine" else self.clean_bucket
+            self._delete_object(bucket, key)
+        return len(objects)
 
     def _head_object(self, bucket: str, key: str) -> AttachmentObjectHead:
         try:

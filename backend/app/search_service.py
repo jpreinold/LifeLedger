@@ -16,6 +16,7 @@ from app.relationship_service import ItemResolver, document_item_id, parse_docum
 from app.repository import ReminderRepository
 from app.schemas import AttachmentStatus, DynamicFieldType, LinkedEntityType, RecordStatus, SearchResponse, SearchResultItem, SearchSort
 from app.search_repository import SavedSearchViewRepository, SearchIndexRepository
+from app.reconciliation import ReconciliationDomain, ReconciliationSeverity
 
 SEARCH_PROJECTION_VERSION = 2
 MAX_QUERY_LENGTH = 120
@@ -255,12 +256,13 @@ class ProjectionTokenCollector:
 
 
 class SearchProjectionService:
-    def __init__(self, index_repo: SearchIndexRepository, record_repo: RecordRepository, reminder_repo: ReminderRepository, attachment_repo: RecordAttachmentRepository, linked_repo):
+    def __init__(self, index_repo: SearchIndexRepository, record_repo: RecordRepository, reminder_repo: ReminderRepository, attachment_repo: RecordAttachmentRepository, linked_repo, reconciliation_service=None):
         self.index_repo = index_repo
         self.record_repo = record_repo
         self.reminder_repo = reminder_repo
         self.attachment_repo = attachment_repo
         self.linked_repo = linked_repo
+        self.reconciliation_service = reconciliation_service
 
     def build_record_projection(self, record: Record) -> SearchProjection:
         collector = ProjectionTokenCollector()
@@ -438,8 +440,10 @@ class SearchProjectionService:
                     last_failed_at=datetime.now(timezone.utc),
                 )
             )
+            self._detect_sync_failure(user_id, entity_type, entity_id)
             raise
         self.index_repo.clear_sync_failure(user_id, entity_type.value, entity_id)
+        self._resolve_sync_failure(user_id, entity_type, entity_id)
 
     def sync_entity_and_neighbors_observed(
         self,
@@ -492,8 +496,41 @@ class SearchProjectionService:
                     last_failed_at=datetime.now(timezone.utc),
                 )
             )
+            self._detect_sync_failure(user_id, entity_type, entity_id)
             raise
         self.index_repo.clear_sync_failure(user_id, entity_type.value, entity_id)
+        self._resolve_sync_failure(user_id, entity_type, entity_id)
+
+    def _detect_sync_failure(self, user_id: str, entity_type: LinkedEntityType, entity_id: str) -> None:
+        if self.reconciliation_service is None:
+            return
+        try:
+            self.reconciliation_service.detect(
+                user_id=user_id,
+                domain=ReconciliationDomain.SEARCH,
+                entity_type=entity_type.value,
+                entity_id=entity_id,
+                issue_type="projection_sync_failure",
+                severity=ReconciliationSeverity.HIGH,
+                retryable=True,
+            )
+        except Exception:
+            return
+
+    def _resolve_sync_failure(self, user_id: str, entity_type: LinkedEntityType, entity_id: str) -> None:
+        if self.reconciliation_service is None:
+            return
+        try:
+            self.reconciliation_service.resolve_matching(
+                user_id=user_id,
+                domain=ReconciliationDomain.SEARCH,
+                entity_type=entity_type.value,
+                entity_id=entity_id,
+                issue_type="projection_sync_failure",
+                resolution="Search projection was rebuilt and verified.",
+            )
+        except Exception:
+            return
 
     def sync_entity(self, user_id: str, entity_type: LinkedEntityType, entity_id: str) -> None:
         if entity_type == LinkedEntityType.RECORD:

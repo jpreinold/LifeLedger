@@ -228,13 +228,20 @@ python run_digest_push.py
 
 Production startup rejects local auth/persistence, disabled protected-record encryption, missing Cognito/KMS/document settings, unsafe CORS origins, and prohibited local secret providers before serving requests. backend/env.local.json keeps local development explicit and unchanged.
 
-Deploy with Cognito and DynamoDB:
+Validate and deploy production with the version-controlled, fail-closed configuration:
 
 ```powershell
 cd backend
-sam build
-sam deploy --guided
+python deploy\validate_production_config.py
+.\deploy\deploy-production.ps1
 ```
+
+The script confirms the CloudFormation change set by default. In an explicitly
+approved noninteractive release, use
+`.\deploy\deploy-production.ps1 -NoConfirmChangeset`; validation, build, and
+post-deployment verification still run. Parameter overrides come from the
+versioned JSON file and escape SAM's internal space delimiter so values such as
+Google Calendar scopes remain intact.
 
 Use these parameter values for deployed auth:
 
@@ -258,7 +265,9 @@ GoogleOAuthRedirectUri=<authorized-google-oauth-redirect-uri>
 GoogleCalendarScopes=https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly
 ```
 
-`sam deploy --guided` creates `samconfig.toml` for your local AWS account and deployment choices. That file is ignored by git. Use `samconfig.example.toml` as a fail-closed production reference that does not include credentials or local profile names. Replace its placeholder account IDs, secret ARNs, and public client values before use.
+The canonical script reads only `samconfig.production.toml` and `deploy/production.parameters.json`, injects version/commit/build metadata, validates and builds SAM, deploys, and runs `deploy/post_deploy_verify.py`. It never reads the ignored workstation `samconfig.toml`. Configuration contains parameter values and secret ARNs, never secret values. Local development remains explicitly separate in `env.local.json`.
+
+Post-deploy verification checks stack status, health/version/commit, unauthenticated protection, KMS/private-bucket settings, active history and reconciliation tables, enabled schedules, and required alarms. See [operations](../docs/operations.md), [account data lifecycle](../docs/account-data-lifecycle.md), and [production E2E](../docs/production-e2e.md).
 
 ## Search Projection Reconciliation
 

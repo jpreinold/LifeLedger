@@ -15,7 +15,7 @@ class RecordAttachmentRepository(Protocol):
     def list_for_record(self, user_id: str, record_id: str) -> list[RecordAttachment]:
         ...
 
-    def list_for_user(self, user_id: str) -> list[RecordAttachment]:
+    def list_for_user(self, user_id: str, limit: int | None = None) -> list[RecordAttachment]:
         ...
 
     def get_attachment(self, user_id: str, record_id: str, attachment_id: str) -> RecordAttachment | None:
@@ -58,9 +58,10 @@ class LocalRecordAttachmentRepository:
                 and attachment.record_attachment_key.startswith(prefix)
             ]
 
-    def list_for_user(self, user_id: str) -> list[RecordAttachment]:
+    def list_for_user(self, user_id: str, limit: int | None = None) -> list[RecordAttachment]:
         with self._lock:
-            return [attachment for attachment in self._read_all_unlocked() if attachment.user_id == user_id]
+            attachments = [attachment for attachment in self._read_all_unlocked() if attachment.user_id == user_id]
+        return attachments[:limit] if limit is not None else attachments
 
     def get_attachment(self, user_id: str, record_id: str, attachment_id: str) -> RecordAttachment | None:
         key = record_attachment_key(record_id, attachment_id)
@@ -168,16 +169,21 @@ class DynamoRecordAttachmentRepository:
 
         return [self._from_item(item) for item in items]
 
-    def list_for_user(self, user_id: str) -> list[RecordAttachment]:
+    def list_for_user(self, user_id: str, limit: int | None = None) -> list[RecordAttachment]:
         items: list[dict[str, Any]] = []
         query_kwargs: dict[str, Any] = {
             "KeyConditionExpression": "user_id = :user_id",
             "ExpressionAttributeValues": {":user_id": user_id},
         }
+        if limit is not None:
+            query_kwargs["Limit"] = limit
 
         while True:
             response = self.table.query(**query_kwargs)
             items.extend(response.get("Items", []))
+
+            if limit is not None and len(items) >= limit:
+                break
 
             last_key = response.get("LastEvaluatedKey")
             if not last_key:
@@ -185,7 +191,8 @@ class DynamoRecordAttachmentRepository:
 
             query_kwargs["ExclusiveStartKey"] = last_key
 
-        return [self._from_item(item) for item in items]
+        attachments = [self._from_item(item) for item in items]
+        return attachments[:limit] if limit is not None else attachments
 
     def get_attachment(self, user_id: str, record_id: str, attachment_id: str) -> RecordAttachment | None:
         response = self.table.get_item(

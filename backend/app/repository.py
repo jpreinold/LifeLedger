@@ -8,7 +8,12 @@ from app.models import Reminder
 
 
 class ReminderRepository(Protocol):
-    def list_reminders(self, user_id: str) -> list[Reminder]:
+    def list_reminders(self, user_id: str, limit: int | None = None) -> list[Reminder]:
+        ...
+
+    def list_reminders_page(
+        self, user_id: str, *, limit: int, cursor: str | None = None
+    ) -> tuple[list[Reminder], str | None]:
         ...
 
     def create_reminder(self, reminder: Reminder) -> Reminder:
@@ -33,9 +38,20 @@ class LocalReminderRepository:
         if not self.file_path.exists():
             self._write_all_unlocked([])
 
-    def list_reminders(self, user_id: str) -> list[Reminder]:
+    def list_reminders(self, user_id: str, limit: int | None = None) -> list[Reminder]:
         with self._lock:
-            return [reminder for reminder in self._read_all_unlocked() if reminder.user_id == user_id]
+            reminders = [reminder for reminder in self._read_all_unlocked() if reminder.user_id == user_id]
+        return reminders[:limit] if limit is not None else reminders
+
+    def list_reminders_page(
+        self, user_id: str, *, limit: int, cursor: str | None = None
+    ) -> tuple[list[Reminder], str | None]:
+        reminders = sorted(self.list_reminders(user_id), key=lambda item: item.id)
+        if cursor:
+            reminders = [item for item in reminders if item.id > cursor]
+        page = reminders[:limit]
+        next_cursor = page[-1].id if len(reminders) > limit and page else None
+        return page, next_cursor
 
     def create_reminder(self, reminder: Reminder) -> Reminder:
         with self._lock:

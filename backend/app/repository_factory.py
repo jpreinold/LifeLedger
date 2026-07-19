@@ -39,6 +39,16 @@ from app.responsibility_history_repository import (
     LocalResponsibilityHistoryRepository,
     ResponsibilityHistoryRepository,
 )
+from app.reconciliation_repository import (
+    DynamoReconciliationRepository,
+    LocalReconciliationRepository,
+    ReconciliationRepository,
+)
+from app.account_operations_repository import (
+    AccountOperationsRepository,
+    DynamoAccountOperationsRepository,
+    LocalAccountOperationsRepository,
+)
 
 
 def create_repository(
@@ -96,6 +106,38 @@ def create_responsibility_history_repository(
     return LocalResponsibilityHistoryRepository(
         local_file_path or resolved_settings.local_responsibility_history_file
     )
+
+
+def create_reconciliation_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> ReconciliationRepository:
+    resolved_settings = settings or get_settings()
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoReconciliationRepository(
+            table_name=resolved_settings.reconciliation_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+    return LocalReconciliationRepository(local_file_path or resolved_settings.local_reconciliation_file)
+
+
+def create_account_operations_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> AccountOperationsRepository:
+    resolved_settings = settings or get_settings()
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoAccountOperationsRepository(
+            table_name=resolved_settings.account_operations_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+    return LocalAccountOperationsRepository(local_file_path or resolved_settings.local_account_operations_file)
 
 
 def create_record_attachment_repository(
