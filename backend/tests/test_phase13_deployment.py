@@ -57,6 +57,7 @@ def test_canonical_deploy_script_never_reads_ignored_samconfig():
 
 
 def test_version_endpoint_exposes_safe_metadata_only(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("APP_VERSION", "13.0-test")
     monkeypatch.setenv("GIT_COMMIT", "abc123")
     monkeypatch.setenv("BUILD_TIMESTAMP", "2026-07-18T12:00:00Z")
