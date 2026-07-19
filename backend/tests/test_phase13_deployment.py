@@ -44,6 +44,8 @@ def test_canonical_deploy_script_never_reads_ignored_samconfig():
 
     assert "samconfig.production.toml" in script
     assert '"samconfig.toml"' not in script
+    assert '.Replace(" ", "\\ ")' in script
+    assert '"$($property.Name)=$escapedValue"' in script
     assert "validate_production_config.py" in script
     assert "post_deploy_verify.py" in script
 

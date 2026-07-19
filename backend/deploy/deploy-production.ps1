@@ -1,3 +1,7 @@
+param(
+    [switch]$NoConfirmChangeset
+)
+
 $ErrorActionPreference = "Stop"
 
 $backendRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -11,14 +15,17 @@ try {
     & $python deploy\validate_production_config.py --parameters $parameterFile
     if ($LASTEXITCODE -ne 0) { throw "Production configuration validation failed." }
 
-    $parameters = Get-Content -Raw $parameterFile | ConvertFrom-Json
-    $overrides = @()
-    foreach ($property in $parameters.PSObject.Properties) {
-        $overrides += "$($property.Name)=$($property.Value)"
-    }
     $commit = (git rev-parse HEAD).Trim()
     $version = (git describe --tags --always).Trim()
     $buildTimestamp = [DateTime]::UtcNow.ToString("o")
+    # SAM parses each Key=Value argument again using spaces as delimiters. Escape
+    # spaces inside values so parameters such as OAuth scopes remain intact.
+    $overrides = @()
+    $parameters = Get-Content -Raw $parameterFile | ConvertFrom-Json
+    foreach ($property in $parameters.PSObject.Properties) {
+        $escapedValue = ([string]$property.Value).Replace(" ", "\ ")
+        $overrides += "$($property.Name)=$escapedValue"
+    }
     $overrides += "GitCommit=$commit"
     $overrides += "AppVersion=$version"
     $overrides += "BuildTimestamp=$buildTimestamp"
@@ -27,7 +34,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "SAM validation failed." }
     sam build --template-file $templateFile
     if ($LASTEXITCODE -ne 0) { throw "SAM build failed." }
-    sam deploy --config-file $configFile --config-env production --parameter-overrides $overrides
+    $deployArguments = @(
+        "--config-file", $configFile,
+        "--config-env", "production",
+        "--parameter-overrides"
+    ) + $overrides
+    if ($NoConfirmChangeset) {
+        $deployArguments += "--no-confirm-changeset"
+    }
+    sam deploy @deployArguments
     if ($LASTEXITCODE -ne 0) { throw "SAM deployment failed." }
     & $python deploy\post_deploy_verify.py --stack-name lifeledger-api --expected-commit $commit
     if ($LASTEXITCODE -ne 0) { throw "Post-deployment verification failed." }

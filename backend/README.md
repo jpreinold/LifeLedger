@@ -236,6 +236,13 @@ python deploy\validate_production_config.py
 .\deploy\deploy-production.ps1
 ```
 
+The script confirms the CloudFormation change set by default. In an explicitly
+approved noninteractive release, use
+`.\deploy\deploy-production.ps1 -NoConfirmChangeset`; validation, build, and
+post-deployment verification still run. Parameter overrides come from the
+versioned JSON file and escape SAM's internal space delimiter so values such as
+Google Calendar scopes remain intact.
+
 Use these parameter values for deployed auth:
 
 ```text
