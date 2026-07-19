@@ -15,6 +15,7 @@ from app.responsibility_history_repository import (
     DynamoResponsibilityHistoryRepository,
     LifecycleWriteConflict,
     LocalResponsibilityHistoryRepository,
+    encode_cursor,
 )
 from app.schemas import ReminderCategory, RepeatOption, ResponsibilityEventSource, ResponsibilityEventType
 
@@ -350,6 +351,41 @@ def test_dynamo_lifecycle_write_uses_one_versioned_transaction(tmp_path):
     assert len(writes) == 2
     assert writes[0]["Put"]["ConditionExpression"] == "attribute_exists(user_id) AND (attribute_not_exists(#version) OR #version = :expected)"
     assert writes[1]["Put"]["ConditionExpression"] == "attribute_not_exists(user_id) AND attribute_not_exists(event_id)"
+
+
+def test_dynamo_history_query_only_declares_sort_alias_for_cursor_condition():
+    class FakeTable:
+        def __init__(self):
+            self.queries = []
+
+        def query(self, **kwargs):
+            self.queries.append(kwargs)
+            return {"Items": []}
+
+    table = FakeTable()
+    history_repo = DynamoResponsibilityHistoryRepository(
+        "history-table",
+        "reminder-table",
+        "us-east-1",
+        table=table,
+        client=object(),
+    )
+
+    history_repo.list_for_reminder("user-1", "reminder-1")
+    history_repo.list_for_reminder(
+        "user-1",
+        "reminder-1",
+        cursor=encode_cursor("2026-07-19T15:00:00.000000+00:00#event-1"),
+    )
+
+    initial_query, cursor_query = table.queries
+    assert initial_query["KeyConditionExpression"] == "#partition = :partition"
+    assert initial_query["ExpressionAttributeNames"] == {"#partition": "reminder_partition"}
+    assert cursor_query["KeyConditionExpression"] == "#partition = :partition AND #sort < :cursor"
+    assert cursor_query["ExpressionAttributeNames"] == {
+        "#partition": "reminder_partition",
+        "#sort": "event_sort",
+    }
 
 
 def test_failed_dynamo_transaction_reports_conflict_without_local_mutation(tmp_path):
