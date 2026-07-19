@@ -69,6 +69,7 @@ class ResponsibilityLifecycleService:
         item_id: str | None,
         idempotency_key: str | None,
         now: datetime,
+        source: ResponsibilityEventSource | None = None,
     ) -> LifecycleOperationResult:
         item = self._require_item(reminder.user_id, item_id) if item_id else None
         occurrence_id = reminder.current_occurrence_id or new_occurrence_id(reminder.id, reminder.due_date, "created")
@@ -85,7 +86,7 @@ class ResponsibilityLifecycleService:
             occurrence_id=occurrence_id,
             item=item,
             next_due_date=created.due_date,
-            source=ResponsibilityEventSource.GUIDED_WORKFLOW if created.workflow_id else ResponsibilityEventSource.USER,
+            source=source or (ResponsibilityEventSource.GUIDED_WORKFLOW if created.workflow_id else ResponsibilityEventSource.USER),
         )
         saved = self.history_repo.commit_reminder_event(self.reminder_repo, None, created, event)
         return self._finalize(saved, event, sync_item_date=False)

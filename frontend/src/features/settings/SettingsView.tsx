@@ -13,6 +13,7 @@ import {
 } from '../../types/preferences'
 import { GoogleCalendarSection } from './GoogleCalendarSection'
 import { PushNotificationsSection } from './PushNotificationsSection'
+import { AISettingsSection } from './AISettingsSection'
 
 export function SettingsView({
   calendarStatus,
@@ -181,6 +182,8 @@ export function SettingsView({
           onCalendarStatusRefresh={onCalendarStatusRefresh}
           onCalendarStatusUpdate={onCalendarStatusUpdate}
         />
+
+        <AISettingsSection />
 
         <PushNotificationsSection
           digestPreferences={digestPreferences}

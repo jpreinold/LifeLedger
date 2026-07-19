@@ -13,6 +13,7 @@ from app.repository_factory import (
     create_repository,
     create_search_index_repository,
     create_responsibility_history_repository,
+    create_assistant_repository,
 )
 from app.attachments import create_document_storage_service, reconcile_attachment_scan_status
 from app.reconciliation_detector import ReconciliationDetector
@@ -180,6 +181,7 @@ def handler(event, _context):
             linked_repo,
             search_repo,
             document_storage,
+            create_assistant_repository(settings),
         )
         user_ids = event.get("user_ids") or _discover_user_ids(settings, max(1, min(limit, 100)))
         for user_id in list(dict.fromkeys(user_ids))[:limit]:
@@ -222,6 +224,7 @@ def _discover_user_ids(settings, limit):
         settings.reminders_table_name,
         settings.record_attachments_table_name,
         settings.preferences_table_name,
+        settings.assistant_data_table_name,
     ]
     per_table = max(1, limit // len(table_names))
     user_ids = []

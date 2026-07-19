@@ -120,6 +120,20 @@ def test_health_stays_public_in_cognito_mode(client, monkeypatch):
         ("post", "/integrations/google-calendar/callback", {"code": "code", "state": "state"}),
         ("put", "/integrations/google-calendar/calendar", {"calendar_id": "primary"}),
         ("delete", "/integrations/google-calendar/disconnect", None),
+        ("get", "/captures", None),
+        ("post", "/captures", {"original_text": "Remind me tomorrow to call Mom."}),
+        ("get", "/captures/example-id", None),
+        ("post", "/captures/example-id/interpret", None),
+        ("post", "/captures/example-id/retry", None),
+        ("post", "/captures/example-id/dismiss", None),
+        ("get", "/proposals/example-id", None),
+        ("patch", "/proposals/example-id", {"action_id": "action-id", "changes": {"title": "Updated"}}),
+        ("post", "/proposals/example-id/clarifications", {"answers": {"question": "answer"}}),
+        ("post", "/proposals/example-id/approve", None),
+        ("post", "/proposals/example-id/reject", None),
+        ("get", "/ai-usage", None),
+        ("get", "/ai-settings", None),
+        ("put", "/ai-settings", {"ai_enabled": False}),
         ("get", "/reminders", None),
         ("put", "/preferences/digest", {"digest_enabled": False}),
         ("post", "/reminders", make_payload()),
@@ -180,6 +194,8 @@ def test_cognito_mode_rejects_unauthenticated_reminder_routes(client, monkeypatc
 
     request = getattr(client, method)
     kwargs = {"json": json_body} if json_body is not None else {}
+    if method == "post" and path == "/captures":
+        kwargs["headers"] = {"Idempotency-Key": "auth-test-capture"}
     response = request(path, **kwargs)
 
     assert response.status_code == 401

@@ -1,5 +1,6 @@
 from app.route_support import *  # noqa: F403
 from app.routers.account import router as account_router
+from app.routers.captures import router as captures_router
 from app.routers.documents import router as documents_router
 from app.routers.health import router as health_router
 from app.routers.integrations import router as integrations_router
@@ -51,6 +52,9 @@ async def no_store_attachment_responses(request: Request, call_next):
         or "/activity" in request.url.path
         or "/responsibility-events/" in request.url.path
         or request.url.path.startswith("/account")
+        or request.url.path.startswith("/captures")
+        or request.url.path.startswith("/proposals")
+        or request.url.path.startswith("/ai-")
     ):
         for header, value in no_store_headers().items():
             response.headers[header] = value
@@ -99,6 +103,7 @@ for context_router in (
     push_router,
     reminders_router,
     lifecycle_router,
+    captures_router,
 ):
     app.include_router(context_router)
 

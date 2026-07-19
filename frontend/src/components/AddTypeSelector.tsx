@@ -1,4 +1,4 @@
-import { Bell, Cake, ChevronRight, Grid2X2Plus, RefreshCcw, Wrench } from 'lucide-react'
+import { Bell, Cake, ChevronRight, Grid2X2Plus, Inbox, RefreshCcw, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 import { getEntityDefinitions, primaryEntityTypes } from '../lib/entityRegistry'
@@ -17,6 +17,7 @@ interface AddTypeSelectorProps {
   onChooseItem: (type: RecordType) => void
   onBrowseItemTypes: () => void
   onChooseWorkflow?: (workflowId: GuidedWorkflowId) => void
+  onChooseCapture?: () => void
 }
 
 interface AddOption {
@@ -38,6 +39,7 @@ export function AddTypeSelector({
   onChooseItem,
   onBrowseItemTypes,
   onChooseWorkflow,
+  onChooseCapture,
 }: AddTypeSelectorProps) {
   const { closeWithAction, isDrawerOpen, requestClose } = useDrawerCloseTransition({ isOpen, onClose })
   const itemOptions: AddOption[] = getEntityDefinitions(primaryEntityTypes).map((definition) => ({
@@ -102,6 +104,17 @@ export function AddTypeSelector({
       subtitle="Choose a real-world item, or add something that needs your attention."
       title="What would you like to keep track of?"
     >
+      {onChooseCapture ? <div className="add-option-group" aria-labelledby="capture-add-heading">
+        <h3 id="capture-add-heading">Quick capture</h3>
+        <AddTypeOption option={{
+          title: 'Tell LifeLedger',
+          description: 'Describe what happened or what matters, then review the proposed changes.',
+          icon: Inbox,
+          tone: 'blue',
+          ariaLabel: 'Open Capture Inbox',
+          onClick: () => closeWithAction(onChooseCapture),
+        }} />
+      </div> : null}
       {onChooseWorkflow ? (
         <div className="add-option-group guided-add-options" aria-labelledby="common-tracking-heading">
           <h3 id="common-tracking-heading">Common things to track</h3>

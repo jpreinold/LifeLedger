@@ -38,6 +38,10 @@ from app.attachments_repository import RecordAttachmentRepository
 from app.auth import UserContext, get_current_user
 from app.account_models import AccountState
 from app.account_runtime import get_account_operations_repository, get_reconciliation_service
+from app.action_execution_service import ActionExecutionService
+from app.action_policy_service import ActionPolicyService
+from app.ai_provider import create_ai_provider
+from app.ai_usage_service import AIUsageService
 from app.birthdays import (
     enrich_birthday_details,
     get_birthday_age_label,
@@ -45,6 +49,11 @@ from app.birthdays import (
     get_next_birthday_due_date,
 )
 from app.config import Settings, get_settings
+from app.capture_models import *  # noqa: F403
+from app.capture_repository import AssistantRepository
+from app.capture_service import CaptureApplicationService
+from app.deterministic_interpreter import DeterministicInterpreter
+from app.entity_resolution_service import EntityResolutionService
 from app.encryption_service import (
     EncryptedPayload,
     EncryptionConfigurationError,
@@ -64,6 +73,7 @@ from app.google_calendar_service import (
     build_google_calendar_event,
 )
 from app.linked_items_repository import LinkedItemRepository
+from app.item_service import ItemApplicationService
 from app.search_repository import SavedSearchViewRepository, SearchIndexRepository
 from app.maintenance import (
     advance_maintenance_details,
@@ -89,6 +99,7 @@ from app.repository_factory import (
     create_google_calendar_connection_repository,
     create_google_oauth_state_repository,
     create_encryption_service,
+    create_assistant_repository,
     create_linked_item_repository,
     create_preferences_repository,
     create_push_subscription_repository,
@@ -108,6 +119,7 @@ from app.responsibility_history_repository import (
     encode_cursor,
 )
 from app.responsibility_lifecycle_service import ResponsibilityLifecycleService, current_occurrence_id
+from app.responsibility_service import RelationshipApplicationService, ResponsibilityApplicationService
 from app.relationship_service import (
     ItemResolver,
     assert_supported_record_link,
@@ -197,6 +209,7 @@ from app.search_service import (
     validate_search_request,
 )
 from app.security_audit import log_security_event, user_hash
+from app.secret_provider import get_secret_provider
 
 from app.push_sender import (
     InvalidPushSubscriptionError,
@@ -231,6 +244,7 @@ PROTECTED_RECORD_FIELDS_BY_TYPE: dict[RecordType, set[str]] = {
     RecordType.HOME: set(),
     RecordType.SUBSCRIPTION: {"account_reference"},
     RecordType.WARRANTY: {"serial_number"},
+    RecordType.PERSON: set(),
 }
 
 repository = create_repository()
@@ -244,6 +258,7 @@ linked_item_repository = create_linked_item_repository()
 search_index_repository = create_search_index_repository()
 saved_search_view_repository = create_saved_search_view_repository()
 responsibility_history_repository = create_responsibility_history_repository()
+assistant_repository = create_assistant_repository()
 
 def get_app_settings() -> Settings:
     return get_settings()
@@ -286,6 +301,9 @@ def get_google_calendar_connection_repository() -> GoogleCalendarConnectionRepos
 def get_google_oauth_state_repository() -> GoogleOAuthStateRepository:
     return google_oauth_state_repository
 
+def get_assistant_repository() -> AssistantRepository:
+    return assistant_repository
+
 def get_search_projection_service(
     search_repo: SearchIndexRepository = Depends(get_search_index_repository),
     record_repo: RecordRepository = Depends(get_record_repository),
@@ -317,6 +335,84 @@ def get_responsibility_lifecycle_service(
         linked_repo,
         attachment_repo,
         search_service,
+    )
+
+def get_item_application_service(
+    record_repo: RecordRepository = Depends(get_record_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
+) -> ItemApplicationService:
+    return ItemApplicationService(record_repo, search_service)
+
+def get_relationship_application_service(
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    attachment_repo: RecordAttachmentRepository = Depends(get_record_attachment_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
+) -> RelationshipApplicationService:
+    return RelationshipApplicationService(
+        linked_repo, record_repo, reminder_repo, attachment_repo, search_service
+    )
+
+def get_responsibility_application_service(
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    lifecycle: ResponsibilityLifecycleService = Depends(get_responsibility_lifecycle_service),
+    relationships: RelationshipApplicationService = Depends(get_relationship_application_service),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+) -> ResponsibilityApplicationService:
+    return ResponsibilityApplicationService(reminder_repo, lifecycle, relationships, linked_repo)
+
+def get_entity_resolution_service(
+    record_repo: RecordRepository = Depends(get_record_repository),
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    assistant_repo: AssistantRepository = Depends(get_assistant_repository),
+    search_repo: SearchIndexRepository = Depends(get_search_index_repository),
+) -> EntityResolutionService:
+    return EntityResolutionService(
+        record_repo, reminder_repo, linked_repo, assistant_repo, SearchQueryService(search_repo)
+    )
+
+def get_action_policy_service() -> ActionPolicyService:
+    return ActionPolicyService()
+
+def get_ai_usage_service(
+    assistant_repo: AssistantRepository = Depends(get_assistant_repository),
+    app_settings: Settings = Depends(get_app_settings),
+) -> AIUsageService:
+    return AIUsageService(assistant_repo, app_settings)
+
+def get_action_execution_service(
+    assistant_repo: AssistantRepository = Depends(get_assistant_repository),
+    items: ItemApplicationService = Depends(get_item_application_service),
+    responsibilities: ResponsibilityApplicationService = Depends(get_responsibility_application_service),
+    relationships: RelationshipApplicationService = Depends(get_relationship_application_service),
+    policy: ActionPolicyService = Depends(get_action_policy_service),
+) -> ActionExecutionService:
+    return ActionExecutionService(
+        assistant_repo, items, responsibilities, relationships, policy, get_reconciliation_service()
+    )
+
+def get_capture_application_service(
+    assistant_repo: AssistantRepository = Depends(get_assistant_repository),
+    entities: EntityResolutionService = Depends(get_entity_resolution_service),
+    usage: AIUsageService = Depends(get_ai_usage_service),
+    policy: ActionPolicyService = Depends(get_action_policy_service),
+    items: ItemApplicationService = Depends(get_item_application_service),
+    responsibilities: ResponsibilityApplicationService = Depends(get_responsibility_application_service),
+    execution: ActionExecutionService = Depends(get_action_execution_service),
+    app_settings: Settings = Depends(get_app_settings),
+) -> CaptureApplicationService:
+    return CaptureApplicationService(
+        assistant_repo,
+        DeterministicInterpreter(entities),
+        entities,
+        create_ai_provider(app_settings, get_secret_provider(app_settings)),
+        usage,
+        policy,
+        items,
+        responsibilities,
+        execution,
     )
 
 def get_search_query_service(

@@ -49,6 +49,7 @@ from app.account_operations_repository import (
     DynamoAccountOperationsRepository,
     LocalAccountOperationsRepository,
 )
+from app.capture_repository import AssistantRepository, DynamoAssistantRepository, LocalAssistantRepository
 
 
 def create_repository(
@@ -138,6 +139,22 @@ def create_account_operations_repository(
             table=dynamo_table,
         )
     return LocalAccountOperationsRepository(local_file_path or resolved_settings.local_account_operations_file)
+
+
+def create_assistant_repository(
+    settings: Settings | None = None,
+    *,
+    local_file_path: str | Path | None = None,
+    dynamo_table: Any | None = None,
+) -> AssistantRepository:
+    resolved_settings = settings or get_settings()
+    if resolved_settings.persistence_mode == DYNAMODB_PERSISTENCE:
+        return DynamoAssistantRepository(
+            table_name=resolved_settings.assistant_data_table_name,
+            region_name=resolved_settings.aws_region,
+            table=dynamo_table,
+        )
+    return LocalAssistantRepository(local_file_path or resolved_settings.local_assistant_data_file)
 
 
 def create_record_attachment_repository(

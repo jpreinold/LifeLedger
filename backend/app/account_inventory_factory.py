@@ -4,6 +4,7 @@ from typing import Any
 
 from app.account_data_inventory import AccountDataInventory, AccountDataStore
 from app.attachments_repository import RecordAttachmentRepository
+from app.capture_repository import AssistantRepository
 from app.encryption_service import EncryptedPayload, EncryptionService, record_encryption_context
 from app.google_calendar_repository import GoogleCalendarConnectionRepository, GoogleOAuthStateRepository
 from app.linked_items_repository import LinkedItemRepository
@@ -36,6 +37,7 @@ def create_account_data_inventory(
     integration_cleanup=None,
     account_operations=None,
     account_artifacts=None,
+    assistant: AssistantRepository | None = None,
 ) -> AccountDataInventory:
     def export_records(user_id: str, include_protected: bool) -> list[dict[str, Any]]:
         result = []
@@ -149,6 +151,36 @@ def create_account_data_inventory(
         return [value.model_dump(mode="json") for value in values]
 
     stores = []
+    if assistant is not None:
+        assistant_kinds = (
+            ("captures", "capture", 5),
+            ("action_proposals", "proposal", 6),
+            ("clarifications", "clarification", 7),
+            ("ai_usage", "usage", 8),
+            ("ai_settings", "settings", 9),
+        )
+        for store_name, kind, order in assistant_kinds:
+            stores.append(
+                _store(
+                    store_name,
+                    "user_id",
+                    order,
+                    lambda user_id, _protected, entity_kind=kind: assistant.list_entity_rows(
+                        user_id, entity_kind, limit=None
+                    ),
+                    lambda user_id, limit, entity_kind=kind: assistant.delete_entity_rows(
+                        user_id, entity_kind, limit=limit
+                    ),
+                    lambda user_id, limit, entity_kind=kind: assistant.count_entity_rows(
+                        user_id, entity_kind, limit=limit
+                    ),
+                    retention=(
+                        "Resolved temporary state may use bounded TTL; unresolved captures are retained."
+                        if kind in {"proposal", "clarification"}
+                        else None
+                    ),
+                )
+            )
     if account_operations is not None and account_artifacts is not None:
         def delete_export_artifacts(user_id: str, limit: int) -> int:
             return account_artifacts.delete_for_user(user_id, limit=limit)

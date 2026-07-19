@@ -1,3 +1,4 @@
+import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -42,6 +43,7 @@ LAMBDA_LOCAL_GOOGLE_OAUTH_STATES_FILE = "/tmp/lifeledger-google-oauth-states.jso
 LAMBDA_LOCAL_RESPONSIBILITY_HISTORY_FILE = "/tmp/lifeledger-responsibility-history.json"
 LAMBDA_LOCAL_RECONCILIATION_FILE = "/tmp/lifeledger-reconciliation.json"
 LAMBDA_LOCAL_ACCOUNT_OPERATIONS_FILE = "/tmp/lifeledger-account-operations.json"
+LAMBDA_LOCAL_ASSISTANT_DATA_FILE = "/tmp/lifeledger-assistant-data.json"
 DEFAULT_LOCAL_DEV_USER_ID = "local-dev-user"
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -64,6 +66,14 @@ DEFAULT_SAVED_VIEWS_TABLE_NAME = "lifeledger-saved-views-auth"
 DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME = "lifeledger-responsibility-history-auth"
 DEFAULT_RECONCILIATION_TABLE_NAME = "lifeledger-reconciliation-auth"
 DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME = "lifeledger-account-operations-auth"
+DEFAULT_ASSISTANT_DATA_TABLE_NAME = "lifeledger-assistant-data-auth"
+AI_PROVIDER_DISABLED = "disabled"
+AI_PROVIDER_OPENAI = "openai"
+SUPPORTED_AI_PROVIDERS = {AI_PROVIDER_DISABLED, AI_PROVIDER_OPENAI}
+DEFAULT_AI_MODEL_PRICING_JSON = (
+    '{"gpt-5.6-luna":{"input":1.0,"output":6.0},'
+    '"gpt-5.6-terra":{"input":2.5,"output":15.0}}'
+)
 DEFAULT_GOOGLE_CALENDAR_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
@@ -92,6 +102,7 @@ class Settings:
     responsibility_history_table_name: str = DEFAULT_RESPONSIBILITY_HISTORY_TABLE_NAME
     reconciliation_table_name: str = DEFAULT_RECONCILIATION_TABLE_NAME
     account_operations_table_name: str = DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME
+    assistant_data_table_name: str = DEFAULT_ASSISTANT_DATA_TABLE_NAME
     aws_region: str = "us-east-1"
     local_data_file: str = ""
     local_records_file: str = ""
@@ -106,6 +117,7 @@ class Settings:
     local_responsibility_history_file: str = ""
     local_reconciliation_file: str = ""
     local_account_operations_file: str = ""
+    local_assistant_data_file: str = ""
     cors_allowed_origins: list[str] | None = None
     vapid_public_key: str = ""
     vapid_private_key: str = ""
@@ -130,6 +142,19 @@ class Settings:
     attachment_max_per_record: int = DEFAULT_ATTACHMENT_MAX_PER_RECORD
     account_exports_bucket: str = ""
     account_operations_queue_url: str = ""
+    ai_provider: str = AI_PROVIDER_DISABLED
+    ai_default_model: str = "gpt-5.6-luna"
+    ai_escalation_model: str = "gpt-5.6-terra"
+    ai_emergency_disabled: bool = False
+    ai_api_secret_arn: str = ""
+    openai_api_key: str = ""
+    ai_request_timeout_seconds: int = 20
+    ai_input_token_limit: int = 2_000
+    ai_output_token_limit: int = 1_200
+    ai_max_clarification_calls: int = 1
+    ai_default_monthly_budget_usd: float = 5.0
+    ai_default_daily_request_limit: int = 50
+    ai_model_pricing_json: str = DEFAULT_AI_MODEL_PRICING_JSON
     app_version: str = "0.1.0"
     git_commit: str = "unknown"
     build_timestamp: str = "unknown"
@@ -201,6 +226,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         supported = ", ".join(sorted(SUPPORTED_DOCUMENT_STORAGE_MODES))
         raise ValueError(f"Unsupported DOCUMENT_STORAGE_MODE '{document_storage_mode}'. Expected one of: {supported}.")
 
+    ai_provider = (source.get("AI_PROVIDER", AI_PROVIDER_DISABLED).strip() or AI_PROVIDER_DISABLED).lower()
+    if ai_provider not in SUPPORTED_AI_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_AI_PROVIDERS))
+        raise ValueError(f"Unsupported AI_PROVIDER '{ai_provider}'. Expected one of: {supported}.")
+
     settings = Settings(
         app_env=app_env,
         app_component=app_component,
@@ -253,6 +283,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             "ACCOUNT_OPERATIONS_TABLE_NAME", DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME
         ).strip()
         or DEFAULT_ACCOUNT_OPERATIONS_TABLE_NAME,
+        assistant_data_table_name=source.get(
+            "ASSISTANT_DATA_TABLE_NAME", DEFAULT_ASSISTANT_DATA_TABLE_NAME
+        ).strip()
+        or DEFAULT_ASSISTANT_DATA_TABLE_NAME,
         aws_region=source.get("AWS_REGION", "us-east-1").strip() or "us-east-1",
         local_data_file=source.get("LOCAL_DATA_FILE", "").strip() or default_local_data_file(source),
         local_records_file=source.get("LOCAL_RECORDS_FILE", "").strip() or default_local_records_file(source),
@@ -278,6 +312,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or default_local_reconciliation_file(source),
         local_account_operations_file=source.get("LOCAL_ACCOUNT_OPERATIONS_FILE", "").strip()
         or default_local_account_operations_file(source),
+        local_assistant_data_file=source.get("LOCAL_ASSISTANT_DATA_FILE", "").strip()
+        or default_local_assistant_data_file(source),
         cors_allowed_origins=parse_csv_list(source.get("CORS_ALLOWED_ORIGINS", ""))
         or DEFAULT_CORS_ALLOWED_ORIGINS,
         vapid_public_key=source.get("VAPID_PUBLIC_KEY", "").strip(),
@@ -312,6 +348,20 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         account_exports_bucket=source.get("ACCOUNT_EXPORTS_BUCKET", "").strip(),
         account_operations_queue_url=source.get("ACCOUNT_OPERATIONS_QUEUE_URL", "").strip(),
+        ai_provider=ai_provider,
+        ai_default_model=source.get("AI_DEFAULT_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna",
+        ai_escalation_model=source.get("AI_ESCALATION_MODEL", "gpt-5.6-terra").strip(),
+        ai_emergency_disabled=parse_bool(source.get("AI_EMERGENCY_DISABLED", "false")),
+        ai_api_secret_arn=source.get("AI_API_SECRET_ARN", "").strip(),
+        openai_api_key=source.get("OPENAI_API_KEY", "").strip(),
+        ai_request_timeout_seconds=parse_int(source.get("AI_REQUEST_TIMEOUT_SECONDS", "20"), 20),
+        ai_input_token_limit=parse_int(source.get("AI_INPUT_TOKEN_LIMIT", "2000"), 2_000),
+        ai_output_token_limit=parse_int(source.get("AI_OUTPUT_TOKEN_LIMIT", "1200"), 1_200),
+        ai_max_clarification_calls=parse_int(source.get("AI_MAX_CLARIFICATION_CALLS", "1"), 1),
+        ai_default_monthly_budget_usd=float(source.get("AI_DEFAULT_MONTHLY_BUDGET_USD", "5")),
+        ai_default_daily_request_limit=parse_int(source.get("AI_DEFAULT_DAILY_REQUEST_LIMIT", "50"), 50),
+        ai_model_pricing_json=source.get("AI_MODEL_PRICING_JSON", DEFAULT_AI_MODEL_PRICING_JSON).strip()
+        or DEFAULT_AI_MODEL_PRICING_JSON,
         app_version=source.get("APP_VERSION", "0.1.0").strip() or "0.1.0",
         git_commit=source.get("GIT_COMMIT", "unknown").strip() or "unknown",
         build_timestamp=source.get("BUILD_TIMESTAMP", "unknown").strip() or "unknown",
@@ -322,6 +372,32 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
 def validate_settings(settings: Settings) -> None:
     """Fail closed before any production component begins its work."""
+    if not 1 <= settings.ai_request_timeout_seconds <= 60:
+        raise ValueError("AI_REQUEST_TIMEOUT_SECONDS must be between 1 and 60.")
+    if not 1 <= settings.ai_input_token_limit <= 10_000:
+        raise ValueError("AI_INPUT_TOKEN_LIMIT must be between 1 and 10000.")
+    if not 1 <= settings.ai_output_token_limit <= 5_000:
+        raise ValueError("AI_OUTPUT_TOKEN_LIMIT must be between 1 and 5000.")
+    if settings.ai_max_clarification_calls not in {0, 1}:
+        raise ValueError("AI_MAX_CLARIFICATION_CALLS must be 0 or 1.")
+    if not 0 <= settings.ai_default_monthly_budget_usd <= 100:
+        raise ValueError("AI_DEFAULT_MONTHLY_BUDGET_USD must be between 0 and 100.")
+    if not 1 <= settings.ai_default_daily_request_limit <= 500:
+        raise ValueError("AI_DEFAULT_DAILY_REQUEST_LIMIT must be between 1 and 500.")
+    try:
+        pricing = json.loads(settings.ai_model_pricing_json)
+        if not isinstance(pricing, dict) or any(
+            not isinstance(rates, dict)
+            or float(rates.get("input", -1)) < 0
+            or float(rates.get("output", -1)) < 0
+            for rates in pricing.values()
+        ):
+            raise ValueError
+    except Exception as exc:
+        raise ValueError("AI_MODEL_PRICING_JSON must contain non-negative input/output rates.") from exc
+    configured_models = {settings.ai_default_model, settings.ai_escalation_model} - {""}
+    if settings.ai_provider == AI_PROVIDER_OPENAI and not configured_models <= set(pricing):
+        raise ValueError("AI_MODEL_PRICING_JSON must include every configured OpenAI model.")
     if settings.app_env != "production":
         return
 
@@ -364,6 +440,7 @@ def validate_settings(settings: Settings) -> None:
         "RESPONSIBILITY_HISTORY_TABLE_NAME": settings.responsibility_history_table_name,
         "RECONCILIATION_TABLE_NAME": settings.reconciliation_table_name,
         "ACCOUNT_OPERATIONS_TABLE_NAME": settings.account_operations_table_name,
+        "ASSISTANT_DATA_TABLE_NAME": settings.assistant_data_table_name,
     }
     if any(not value for value in required_tables.values()):
         problems.append("all required data table names must be configured")
@@ -371,7 +448,10 @@ def validate_settings(settings: Settings) -> None:
     if settings.app_component in {"api", "account_worker"} and not settings.account_exports_bucket:
         problems.append("ACCOUNT_EXPORTS_BUCKET is required")
 
-    if settings.local_records_encryption_key or settings.google_client_secret or settings.vapid_private_key:
+    if settings.ai_provider == AI_PROVIDER_OPENAI and not settings.ai_api_secret_arn:
+        problems.append("AI_API_SECRET_ARN is required when AI_PROVIDER is openai")
+
+    if settings.local_records_encryption_key or settings.google_client_secret or settings.vapid_private_key or settings.openai_api_key:
         problems.append("local plaintext secret providers are not allowed")
 
     if problems:
@@ -498,6 +578,14 @@ def default_local_account_operations_file(env: Mapping[str, str] | None = None) 
         return LAMBDA_LOCAL_ACCOUNT_OPERATIONS_FILE
     backend_root = Path(__file__).resolve().parents[1]
     return str(backend_root / "data" / "account-operations.json")
+
+
+def default_local_assistant_data_file(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+    if source.get("AWS_SAM_LOCAL") == "true" or source.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return LAMBDA_LOCAL_ASSISTANT_DATA_FILE
+    backend_root = Path(__file__).resolve().parents[1]
+    return str(backend_root / "data" / "assistant-data.json")
 
 
 def parse_csv_list(value: str) -> list[str]:

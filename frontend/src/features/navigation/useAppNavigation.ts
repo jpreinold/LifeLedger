@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 
 
-export type AppPage = 'home' | 'search' | 'reminders' | 'records' | 'settings' | 'calendar'
+export type AppPage = 'home' | 'search' | 'reminders' | 'records' | 'settings' | 'calendar' | 'inbox'
 
-const pages = new Set<AppPage>(['home', 'search', 'reminders', 'records', 'settings', 'calendar'])
+const pages = new Set<AppPage>(['home', 'search', 'reminders', 'records', 'settings', 'calendar', 'inbox'])
 
 export function useAppNavigation() {
   const [activePage, setPageState] = useState<AppPage>(() => pageFromUrl())

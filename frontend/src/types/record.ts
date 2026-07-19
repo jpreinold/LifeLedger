@@ -9,6 +9,7 @@ export const recordTypes = [
   'home',
   'subscription',
   'warranty',
+  'person',
 ] as const
 
 export const recordStatuses = ['active', 'archived'] as const

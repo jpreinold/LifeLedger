@@ -40,3 +40,12 @@ Alarms are deliberately aggregated to avoid storms: any scheduled Lambda error, 
 ## Privacy-safe operational events
 
 Structured events are emitted for export, deletion, reconciliation, production E2E, and deployment verification. Permitted fields are operation/correlation IDs, domain, opaque entity ID, step, status, retryability, attempts, duration, environment, and version. Raw payloads and private content are prohibited.
+## Phase 14 AI capture operations
+
+Production OpenAI access is disabled unless `AI_PROVIDER=openai` and `AI_API_SECRET_ARN` names a Secrets Manager JSON object containing `api_key`. `AI_EMERGENCY_DISABLED=true` stops calls without losing Captures. User budgets default to $5/month and 50 requests/day; input/output caps are server settings. Rotate the secret in Secrets Manager without frontend changes and never print its value.
+
+Privacy-safe dimensions may include Capture/proposal IDs, correlation ID, interpreter/model, action type, token counts, estimated cost, latency, and result category. Never log original text, prompts containing it, raw responses, clarification answers, notes, protected data, signed URLs, tokens, or credentials.
+
+Deep reconciliation checks stuck interpreting Captures, stuck/partial executing proposals, expired executable proposals, completed proposals missing results, and duplicate provider-request charges. Ambiguity, rejected/prohibited actions, new confirmation, protected operations, and budget-denied calls are never automatic retries.
+
+Free evaluation commands are in `docs/ai-evaluation.md`. Live evaluation is paid, explicit, and excluded from standard CI. Remaining Phase 13 live acceptance is tracked in `docs/deferred-production-acceptance.md`.

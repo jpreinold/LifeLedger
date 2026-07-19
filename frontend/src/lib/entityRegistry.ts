@@ -7,6 +7,7 @@ import {
   PawPrint,
   RefreshCcw,
   ShieldCheck,
+  UserRound,
   Wrench,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -213,6 +214,43 @@ function defineEntity(input: EntityDefinitionInput): EntityCapabilityDefinition 
 }
 
 export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefinition> = {
+  person: defineEntity({
+    type: 'person',
+    singularLabel: 'Person',
+    pluralLabel: 'People',
+    shortDescription: 'Remember a person, their birthday, and the responsibilities and documents connected to them.',
+    icon: UserRound,
+    category: 'People',
+    defaultStatus: 'active',
+    suggestedDetails: [
+      detail('preferred_name', 'Preferred name', 'short_text', 100, { placeholder: 'Name they prefer' }),
+      detail('relationship_context', 'Relationship', 'select', 110, { selectOptions: ['Friend', 'Family', 'Coworker', 'Neighbor', 'Other'] }),
+      detail('birthday', 'Birthday', 'short_text', 120, { placeholder: 'MM-DD or YYYY-MM-DD', helperText: 'A year is optional. LifeLedger never invents one.' }),
+      detail('aliases', 'Aliases', 'short_text', 130, { placeholder: 'Other names, separated by commas' }),
+      detail('notes', 'Notes', 'long_text', 200, { recordField: 'notes', placeholder: 'A short, useful note' }),
+    ],
+    supportedSections: standardSections,
+    suggestedResponsibilities: [responsibility('birthday', 'Birthday reminder', 'Remember this person’s birthday every year.', 'Birthday', 7, 'days')],
+    suggestedDocumentKinds: ['Supporting document', 'Shared reference'],
+    supportsOwnership: false,
+    supportsProviders: false,
+    supportsProtectedDetails: false,
+    supportsDates: true,
+    supportsRelationships: true,
+    searchPresentation: { resultLabel: 'Person', keywords: ['person', 'people', 'friend', 'family', 'birthday'] },
+    emptyStateCopy: {
+      ...standardEmptyCopy,
+      responsibilities: 'Add a birthday or another responsibility connected to this person.',
+      documents: 'Keep only useful documents connected to this person.',
+    },
+    createActionLabel: 'Add person',
+    titleLabel: 'Display name',
+    defaultTitle: 'Person',
+    tone: 'family',
+    legacyDuplicateCategories: ['Person', 'People'],
+    coreFields: ['title'],
+    additionalFields: ['notes', 'tags'],
+  }),
   general: defineEntity({
     type: 'general',
     singularLabel: 'Other item',
@@ -575,6 +613,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
 }
 
 export const entityTypeOrder: RecordType[] = [
+  'person',
   'vehicle',
   'pet',
   'home',

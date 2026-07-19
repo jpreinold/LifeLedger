@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 
+from app.capture_models import ActionProposal, ActionResultStatus, ActionType, Capture, CaptureStatus, ProposalStatus
 from app.reconciliation import ReconciliationDomain, ReconciliationSeverity
 from app.reconciliation_service import ReconciliationService
 from app.relationship_service import ItemResolver, document_item_id
@@ -28,6 +29,7 @@ class ReconciliationDetector:
         relationships,
         search,
         document_storage=None,
+        assistant=None,
     ):
         self.service = service
         self.records = records
@@ -37,6 +39,7 @@ class ReconciliationDetector:
         self.relationships = relationships
         self.search = search
         self.document_storage = document_storage
+        self.assistant = assistant
 
     def detect_user(self, user_id: str, *, limit: int = 100, now: datetime | None = None) -> int:
         if limit < 1 or limit > 500:
@@ -351,7 +354,110 @@ class ReconciliationDetector:
                         True,
                         current,
                     )
+        if self.assistant is not None:
+            detected += self._detect_capture_state(user_id, limit=limit, now=current)
         return detected
+
+    def _detect_capture_state(self, user_id: str, *, limit: int, now: datetime) -> int:
+        detected = 0
+        captures = [
+            Capture.model_validate(item)
+            for item in self.assistant.list_entity_rows(user_id, "capture", limit=limit)
+        ]
+        proposals = [
+            ActionProposal.model_validate(item)
+            for item in self.assistant.list_entity_rows(user_id, "proposal", limit=limit)
+        ]
+        for capture in captures:
+            if capture.status == CaptureStatus.INTERPRETING and now - _utc(capture.updated_at) > timedelta(minutes=10):
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "capture", capture.capture_id,
+                    "stuck_interpreting", ReconciliationSeverity.MEDIUM, False, now,
+                )
+        executable = {
+            ProposalStatus.READY_FOR_REVIEW,
+            ProposalStatus.APPROVED,
+            ProposalStatus.EXECUTING,
+            ProposalStatus.PARTIALLY_COMPLETED,
+            ProposalStatus.FAILED,
+        }
+        for proposal in proposals:
+            if proposal.status == ProposalStatus.EXECUTING and now - _utc(proposal.updated_at) > timedelta(minutes=10):
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "proposal", proposal.proposal_id,
+                    "stuck_executing", ReconciliationSeverity.HIGH, True, now,
+                )
+            if proposal.status == ProposalStatus.PARTIALLY_COMPLETED:
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "proposal", proposal.proposal_id,
+                    "partial_action_execution", ReconciliationSeverity.HIGH, True, now,
+                )
+            completed_results = [
+                item for item in proposal.action_results if item.status == ActionResultStatus.COMPLETED
+            ]
+            if (
+                proposal.status in {ProposalStatus.APPROVED, ProposalStatus.EXECUTING}
+                and len(proposal.action_results) < len(proposal.proposed_actions)
+                and now - _utc(proposal.updated_at) > timedelta(minutes=10)
+            ):
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "proposal", proposal.proposal_id,
+                    "approved_proposal_missing_action_result", ReconciliationSeverity.HIGH, True, now,
+                )
+            if (
+                proposal.proposed_actions
+                and len(completed_results) == len(proposal.proposed_actions)
+                and proposal.status != ProposalStatus.COMPLETED
+            ):
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "proposal", proposal.proposal_id,
+                    "proposal_status_stale_after_results", ReconciliationSeverity.HIGH, True, now,
+                )
+            for result in completed_results:
+                if result.resulting_entity_id and not self._capture_result_exists(user_id, result):
+                    detected += self._detect(
+                        user_id, ReconciliationDomain.CAPTURE, "action_result", result.action_id,
+                        "missing_linked_result_after_action", ReconciliationSeverity.HIGH, False, now,
+                    )
+            if proposal.expires_at <= now and proposal.status in executable:
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "proposal", proposal.proposal_id,
+                    "expired_proposal_executable", ReconciliationSeverity.MEDIUM, False, now,
+                )
+            if proposal.status == ProposalStatus.COMPLETED and len(proposal.action_results) < len(proposal.proposed_actions):
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "proposal", proposal.proposal_id,
+                    "completed_proposal_missing_result", ReconciliationSeverity.HIGH, False, now,
+                )
+        usage = self.assistant.list_entity_rows(user_id, "usage", limit=limit)
+        request_ids: set[str] = set()
+        for item in usage:
+            request_id = str(item.get("provider_request_id") or "")
+            if request_id and request_id in request_ids:
+                detected += self._detect(
+                    user_id, ReconciliationDomain.CAPTURE, "ai_usage", request_id,
+                    "provider_request_charged_twice", ReconciliationSeverity.HIGH, False, now,
+                )
+            request_ids.add(request_id)
+        return detected
+
+    def _capture_result_exists(self, user_id: str, result) -> bool:
+        if result.action_type in {
+            ActionType.CREATE_ITEM,
+            ActionType.UPDATE_ITEM_DETAIL,
+            ActionType.ADD_SAFE_NOTE,
+        }:
+            return self.records.get_record(user_id, result.resulting_entity_id) is not None
+        if result.action_type in {
+            ActionType.CREATE_RESPONSIBILITY,
+            ActionType.COMPLETE_RESPONSIBILITY,
+            ActionType.RENEW_RESPONSIBILITY,
+            ActionType.SNOOZE_RESPONSIBILITY,
+        }:
+            return self.reminders.get_reminder(user_id, result.resulting_entity_id) is not None
+        if result.action_type == ActionType.CREATE_RELATIONSHIP:
+            return self.relationships.get_link(user_id, result.resulting_entity_id) is not None
+        return True
 
     def _check_projection(self, user_id, entity_type, entity_id, projection, *, archived, has_links, now):
         if projection is None:

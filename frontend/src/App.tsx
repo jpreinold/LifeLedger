@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   FileText,
   Home,
+  Inbox,
   ListChecks,
   Plus,
   RefreshCcw,
@@ -65,9 +66,11 @@ import type { Reminder, ReminderAlert, ReminderInput } from './types/reminder'
 import type { DynamicRecordFieldInput, LifeRecord, ProtectedRecordInput, ProtectedRecordStatus, RecordInput, RecordType } from './types/record'
 import type { LinkCreateRequest } from './types/linkedItem'
 import type { RecordFilter } from './lib/recordTypes'
+import type { CaptureDetail } from './types/capture'
 
 const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
 const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
+const CaptureInbox = lazy(() => import('./features/capture/CaptureInbox').then((module) => ({ default: module.CaptureInbox })))
 const GuidedWorkflowDrawer = lazy(() => import('./components/GuidedWorkflowDrawer').then((module) => ({ default: module.GuidedWorkflowDrawer })))
 const LifecycleActionDrawer = lazy(() => import('./components/LifecycleActionDrawer').then((module) => ({ default: module.LifecycleActionDrawer })))
 const RecordDetailDrawer = lazy(() => import('./components/RecordDetailDrawer').then((module) => ({ default: module.RecordDetailDrawer })))
@@ -190,6 +193,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false)
   const [isDigestOpen, setIsDigestOpen] = useState(false)
   const [isAccountDeleting, setIsAccountDeleting] = useState(false)
+  const [initialCaptureDetail, setInitialCaptureDetail] = useState<CaptureDetail | null>(null)
   const didHandleDigestUrl = useRef(false)
   const openDailyDigestRef = useRef<() => void>(() => undefined)
 
@@ -1241,6 +1245,15 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           <div className="header-actions header-main-actions">
             <button
               type="button"
+              className={`icon-button header-inbox-button ${activePage === 'inbox' ? 'active' : ''}`.trim()}
+              onClick={() => showPage('inbox')}
+              aria-current={activePage === 'inbox' ? 'page' : undefined}
+              aria-label={activePage === 'inbox' ? 'Capture Inbox open' : 'Open Capture Inbox'}
+            >
+              <Inbox size={19} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
               className={`icon-button header-search-button ${activePage === 'search' ? 'active' : ''}`.trim()}
               onClick={() => showPage('search')}
               aria-current={activePage === 'search' ? 'page' : undefined}
@@ -1303,6 +1316,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onViewRecords={() => showPage('records')}
           onViewReminder={openReminderDetail}
           onStartWorkflow={(workflowId) => openGuidedWorkflow(workflowId)}
+          onCapture={(detail) => { setInitialCaptureDetail(detail); showPage('inbox') }}
         />
       ) : null}
 
@@ -1325,6 +1339,18 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onViewRecord={(recordId) => void openSearchRecord(recordId)}
           onViewReminder={(reminderId) => void openSearchReminder(reminderId)}
           onViewDocument={(recordId, documentId) => void openSearchDocument(recordId, documentId)}
+        />
+      ) : null}
+
+      {activePage === 'inbox' ? (
+        <CaptureInbox
+          initialDetail={initialCaptureDetail}
+          onDataChanged={() => { void loadReminderData(); void loadRecordData() }}
+          onManualOrganize={openAddReminder}
+          onOpenResult={(actionType, entityId) => {
+            if (['create_item', 'update_item_detail', 'add_safe_note'].includes(actionType)) void openSearchRecord(entityId)
+            if (['create_responsibility', 'complete_responsibility', 'renew_responsibility', 'snooze_responsibility'].includes(actionType)) void openSearchReminder(entityId)
+          }}
         />
       ) : null}
 
@@ -1428,6 +1454,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
       <AddTypeSelector
         isOpen={isAddTypeSelectorOpen}
+        onChooseCapture={() => showPage('inbox')}
         onClose={closeAddTypeSelector}
         onChooseReminder={openGenericReminderForm}
         onChooseBirthday={() => openBirthdayReminderForm()}
@@ -1768,6 +1795,7 @@ function getPageTitle(page: AppPage) {
     records: productTerms.items,
     settings: 'Settings',
     calendar: 'Calendar',
+    inbox: 'Capture Inbox',
   }
 
   return titles[page]
