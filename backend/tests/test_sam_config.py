@@ -100,14 +100,12 @@ def test_sam_template_defaults_to_secure_production_modes():
     assert "SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable" in template
     assert "SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable" in template
     assert "RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable" in template
-    assert "LOCAL_RESPONSIBILITY_HISTORY_FILE: /tmp/lifeledger-responsibility-history.json" in template
     assert "ResponsibilityHistoryTableName:" in template
     assert "ResponsibilityHistoryTable:" in template
     assert "ReminderHistoryIndex" in template
     assert "ItemActivityIndex" in template
     assert "HistoryIdempotencyIndex" in template
     assert "LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json" in template
-    assert "LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json" in template
     assert "SourceLinksIndex" in template
     assert "TargetLinksIndex" in template
     assert "AttributeName: source_link_key" in template
@@ -151,7 +149,6 @@ def test_sam_template_defaults_to_secure_production_modes():
     assert "SEARCH_INDEX_TABLE_NAME: !Ref SearchIndexTable" in template
     assert "SAVED_VIEWS_TABLE_NAME: !Ref SavedViewsTable" in template
     assert "LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json" in template
-    assert "LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json" in template
 
     digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "LifeLedgerAccountWorkerFunction:")
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
@@ -203,6 +200,29 @@ def test_sam_kms_permissions_split_app_and_dynamodb_access():
     assert "kms:EncryptionContext:app" not in digest_section
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
     assert "LifeLedgerDocumentsKey" not in digest_section
+
+
+def test_api_function_uses_runtime_defaults_for_local_file_paths():
+    template = template_text()
+    api_section = template_section(template, "LifeLedgerApiFunction:", "LifeLedgerDigestPushFunction:")
+
+    # Lambda already exposes AWS_LAMBDA_FUNCTION_NAME, which makes app.config
+    # select the same /tmp defaults. Repeating them here wastes the fixed 4 KB
+    # Lambda environment budget needed for production integrations.
+    assert "LOCAL_DATA_FILE:" not in api_section
+    assert "LOCAL_RECORDS_FILE:" not in api_section
+    assert "LOCAL_RECORD_ATTACHMENTS_FILE:" not in api_section
+    assert "LOCAL_LINKED_ITEMS_FILE:" not in api_section
+    assert "LOCAL_SEARCH_INDEX_FILE:" not in api_section
+    assert "LOCAL_SAVED_VIEWS_FILE:" not in api_section
+    assert "LOCAL_RESPONSIBILITY_HISTORY_FILE:" not in api_section
+    assert "LOCAL_RECONCILIATION_FILE:" not in api_section
+    assert "LOCAL_ACCOUNT_OPERATIONS_FILE:" not in api_section
+    assert "LOCAL_ASSISTANT_DATA_FILE:" not in api_section
+    assert "LOCAL_PREFERENCES_FILE:" not in api_section
+    assert "LOCAL_PUSH_SUBSCRIPTIONS_FILE:" not in api_section
+    assert "LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE:" not in api_section
+    assert "LOCAL_GOOGLE_OAUTH_STATES_FILE:" not in api_section
 
 
 def test_sam_local_env_file_uses_local_persistence():
