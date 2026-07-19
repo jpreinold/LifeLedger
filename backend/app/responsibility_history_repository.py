@@ -471,14 +471,16 @@ class DynamoResponsibilityHistoryRepository:
         safe_limit = max(1, min(limit, 50))
         marker = decode_cursor(cursor)
         values: dict[str, Any] = {":partition": partition_value}
+        names = {"#partition": partition_name}
         condition = "#partition = :partition"
         if marker:
             condition += " AND #sort < :cursor"
             values[":cursor"] = marker
+            names["#sort"] = sort_name
         response = self.table.query(
             IndexName=index_name,
             KeyConditionExpression=condition,
-            ExpressionAttributeNames={"#partition": partition_name, "#sort": sort_name},
+            ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
             ScanIndexForward=False,
             Limit=safe_limit + 1,
