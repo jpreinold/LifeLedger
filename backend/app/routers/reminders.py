@@ -222,9 +222,10 @@ def delete_reminder(
     )
     deleted_links = linked_repo.list_links_for_entity(current_user.user_id, LinkedEntityType.REMINDER, reminder_id)
     linked_repo.delete_links_for_entity(current_user.user_id, LinkedEntityType.REMINDER, reminder_id)
-    deleted = repo.delete_reminder(current_user.user_id, reminder_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")
+    # Ownership was established above. A concurrent duplicate request may have
+    # removed the row after that read, so deletion is idempotent from here and
+    # both requests are allowed to finish the remaining user-scoped cleanup.
+    repo.delete_reminder(current_user.user_id, reminder_id)
     history_repo.delete_for_reminder(current_user.user_id, reminder_id)
 
     sync_linked_search_neighbors_safe(

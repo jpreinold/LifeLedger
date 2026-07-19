@@ -815,6 +815,23 @@ def test_delete_reminder(client):
     assert get_response.status_code == 404
 
 
+def test_delete_reminder_finishes_cleanup_when_a_racing_request_removed_the_row(client, monkeypatch):
+    created = create_reminder(client)
+    repo = app.dependency_overrides[get_repository]()
+    original_delete = repo.delete_reminder
+
+    def delete_then_report_missing(user_id, reminder_id):
+        assert original_delete(user_id, reminder_id) is True
+        return False
+
+    monkeypatch.setattr(repo, "delete_reminder", delete_then_report_missing)
+
+    delete_response = client.delete(f"/reminders/{created['id']}")
+
+    assert delete_response.status_code == 204
+    assert client.get(f"/reminders/{created['id']}").status_code == 404
+
+
 def test_local_json_repository_persists_across_instances(tmp_path):
     data_file = tmp_path / "reminders.json"
     first_repo = LocalReminderRepository(data_file)
