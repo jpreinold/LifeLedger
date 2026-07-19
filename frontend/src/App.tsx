@@ -169,6 +169,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [viewingRecord, setViewingRecord] = useState<ViewingRecordState | null>(null)
   const [recordBackStack, setRecordBackStack] = useState<ViewingRecordState[]>([])
   const recordCreationProgressRef = useRef(new Map<string, RecordCreationProgress>())
+  const reminderDeleteInFlightRef = useRef(false)
   const [pendingDelete, setPendingDelete] = useState<Reminder | null>(null)
   const [pendingReminderActionId, setPendingReminderActionId] = useState<string | null>(null)
   const [lifecycleAction, setLifecycleAction] = useState<{ action: 'complete' | 'renew'; reminder: Reminder } | null>(null)
@@ -646,24 +647,27 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   async function confirmDelete() {
-    if (!pendingDelete) {
+    if (!pendingDelete || reminderDeleteInFlightRef.current) {
       return
     }
 
+    const target = pendingDelete
+    reminderDeleteInFlightRef.current = true
     setIsDeleting(true)
     setError(null)
     setNotice(null)
 
     try {
-      await remindersApi.remove(pendingDelete.id)
+      await remindersApi.remove(target.id)
       await loadReminderData()
       setNotice('Reminder deleted.')
-      setEditingReminder((current) => (current?.id === pendingDelete.id ? null : current))
-      setViewingReminder((current) => (current?.reminder.id === pendingDelete.id ? null : current))
+      setEditingReminder((current) => (current?.id === target.id ? null : current))
+      setViewingReminder((current) => (current?.reminder.id === target.id ? null : current))
       setPendingDelete(null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to delete reminder.')
     } finally {
+      reminderDeleteInFlightRef.current = false
       setIsDeleting(false)
     }
   }
