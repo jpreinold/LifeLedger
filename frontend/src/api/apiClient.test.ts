@@ -41,6 +41,20 @@ describe('apiRequest', () => {
     expect(error.message).not.toContain('Traceback')
   })
 
+  it('normalizes typed account errors without exposing backend payloads', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ detail: { code: 'deletion_in_progress', message: 'New changes are unavailable while account deletion is in progress.' }, private_debug: 'never show' }),
+      { status: 409, headers: { 'Content-Type': 'application/json' } },
+    ))
+
+    await expect(apiRequest('/records', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+      category: 'conflict',
+      code: 'deletion_in_progress',
+      message: 'New changes are unavailable while account deletion is in progress.',
+      retryable: false,
+    })
+  })
+
   it('normalizes network failures and passes authorization, no-store, and abort signals', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('network down'))
     await expect(apiRequest('/search')).rejects.toMatchObject({ category: 'network', status: null, retryable: true })

@@ -1,0 +1,19 @@
+version = 0.1
+
+[production.global.parameters]
+region = "us-east-1"
+
+[production.build.parameters]
+cached = true
+parallel = true
+
+[production.validate.parameters]
+lint = true
+
+[production.deploy.parameters]
+stack_name = "lifeledger-api"
+resolve_s3 = true
+s3_prefix = "lifeledger-api"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+fail_on_empty_changeset = false

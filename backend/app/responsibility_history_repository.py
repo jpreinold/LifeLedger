@@ -79,6 +79,12 @@ class ResponsibilityHistoryRepository(Protocol):
     def delete_for_item(self, user_id: str, item_id: str) -> int:
         ...
 
+    def list_for_user(self, user_id: str, limit: int | None = 100) -> list[ResponsibilityEvent]:
+        ...
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        ...
+
 
 class LocalResponsibilityHistoryRepository:
     def __init__(self, file_path: str | Path):
@@ -94,6 +100,19 @@ class LocalResponsibilityHistoryRepository:
                 (event for event in self._read_all_unlocked() if event.user_id == user_id and event.event_id == event_id),
                 None,
             )
+
+    def list_for_user(self, user_id: str, limit: int | None = 100) -> list[ResponsibilityEvent]:
+        with self._lock:
+            items = [item for item in self._read_all_unlocked() if item.user_id == user_id]
+            return items if limit is None else items[:limit]
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        with self._lock:
+            events = self._read_all_unlocked()
+            targets = {item.event_id for item in events if item.user_id == user_id}
+            targets = set(list(targets)[:limit])
+            self._write_all_unlocked([item for item in events if item.event_id not in targets])
+            return len(targets)
 
     def get_by_idempotency(self, user_id: str, idempotency_key: str) -> ResponsibilityEvent | None:
         with self._lock:
@@ -265,6 +284,35 @@ class DynamoResponsibilityHistoryRepository:
             ConsistentRead=True,
         ).get("Item")
         return self._from_item(item) if item else None
+
+    def list_for_user(self, user_id: str, limit: int | None = 100) -> list[ResponsibilityEvent]:
+        items: list[dict[str, Any]] = []
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "user_id = :user_id",
+            "ExpressionAttributeValues": {":user_id": user_id},
+        }
+        if limit is not None:
+            query_kwargs["Limit"] = limit
+
+        while True:
+            response = self.table.query(**query_kwargs)
+            items.extend(response.get("Items", []))
+            if limit is not None and len(items) >= limit:
+                items = items[:limit]
+                break
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+            if limit is not None:
+                query_kwargs["Limit"] = max(1, limit - len(items))
+        return [self._from_item(item) for item in items]
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        events = self.list_for_user(user_id, limit=limit)
+        for event in events:
+            self.table.delete_item(Key={"user_id": user_id, "event_id": event.event_id})
+        return len(events)
 
     def get_by_idempotency(self, user_id: str, idempotency_key: str) -> ResponsibilityEvent | None:
         response = self.table.query(

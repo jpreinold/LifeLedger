@@ -26,6 +26,9 @@ class GoogleCalendarConnectionRepository(Protocol):
     def disconnect_connection(self, user_id: str, disconnected_at: datetime) -> GoogleCalendarConnection | None:
         ...
 
+    def delete_connection(self, user_id: str) -> bool:
+        ...
+
 
 class GoogleOAuthStateRepository(Protocol):
     def save_state(self, state: GoogleOAuthState) -> GoogleOAuthState:
@@ -35,6 +38,12 @@ class GoogleOAuthStateRepository(Protocol):
         ...
 
     def consume_state(self, state: str, consumed_at: datetime) -> GoogleOAuthState | None:
+        ...
+
+    def list_for_user(self, user_id: str, limit: int = 100) -> list[GoogleOAuthState]:
+        ...
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
         ...
 
 
@@ -94,6 +103,15 @@ class LocalGoogleCalendarConnectionRepository:
                 }
             )
             return self.save_connection(disconnected)
+
+    def delete_connection(self, user_id: str) -> bool:
+        with self._lock:
+            connections = self._read_all_unlocked()
+            remaining = [item for item in connections if item.user_id != user_id]
+            if len(remaining) == len(connections):
+                return False
+            self._write_all_unlocked(remaining)
+            return True
 
     def _read_all_unlocked(self) -> list[GoogleCalendarConnection]:
         return [self._from_item(item) for item in self._read_raw_all_unlocked()]
@@ -156,6 +174,18 @@ class LocalGoogleOAuthStateRepository:
             consumed = saved_state.model_copy(update={"consumed_at": consumed_at})
             self.save_state(consumed)
             return consumed
+
+    def list_for_user(self, user_id: str, limit: int = 100) -> list[GoogleOAuthState]:
+        with self._lock:
+            return [item for item in self._read_all_unlocked() if item.user_id == user_id][:limit]
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        with self._lock:
+            states = self._read_all_unlocked()
+            targets = {item.state for item in states if item.user_id == user_id}
+            targets = set(list(targets)[:limit])
+            self._write_all_unlocked([item for item in states if item.state not in targets])
+            return len(targets)
 
     def _read_all_unlocked(self) -> list[GoogleOAuthState]:
         if not self.file_path.exists():
@@ -220,6 +250,10 @@ class DynamoGoogleCalendarConnectionRepository:
         )
         return self.save_connection(disconnected)
 
+    def delete_connection(self, user_id: str) -> bool:
+        self.table.delete_item(Key={"user_id": user_id})
+        return True
+
     def _build_table(self, table_name: str, region_name: str) -> Any:
         import boto3
 
@@ -278,6 +312,21 @@ class DynamoGoogleOAuthStateRepository:
         if item is None:
             return None
         return self._from_item(item)
+
+    def list_for_user(self, user_id: str, limit: int = 100) -> list[GoogleOAuthState]:
+        response = self.table.query(
+            IndexName="UserOAuthStatesIndex",
+            KeyConditionExpression="user_id = :user_id",
+            ExpressionAttributeValues={":user_id": user_id},
+            Limit=limit,
+        )
+        return [self._from_item(item) for item in response.get("Items", [])]
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        states = self.list_for_user(user_id, limit=limit)
+        for state in states:
+            self.table.delete_item(Key={"state": state.state})
+        return len(states)
 
     def _build_table(self, table_name: str, region_name: str) -> Any:
         import boto3

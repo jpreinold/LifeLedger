@@ -4,6 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import UserContext, get_current_user
+from app.account_models import AccountLifecycle, AccountState
+from app.account_operations_repository import LocalAccountOperationsRepository
 from app.config import get_settings, load_settings
 from app.digest_push import is_digest_due, run_daily_digest_push, was_pushed_today
 from app.main import app, get_app_settings, get_preferences_repository, get_push_sender, get_push_subscription_repository, get_repository
@@ -398,6 +400,35 @@ def test_scheduled_digest_push_sends_user_scoped_summaries(local_repositories):
     assert result.sent == 2
     assert bodies["https://push.example/a"] == "1 needs attention \u2022 0 due today \u2022 0 coming up"
     assert bodies["https://push.example/b"] == "0 needs attention \u2022 0 due today \u2022 1 coming up"
+
+
+def test_scheduled_digest_skips_account_while_deletion_is_active(local_repositories, tmp_path):
+    reminder_repo, preferences_repo, push_repo = local_repositories
+    now = datetime(2026, 7, 8, 13, 5, tzinfo=timezone.utc)
+    preferences_repo.save_preferences(
+        default_digest_preferences("user-a", now).model_copy(update={"digest_time": "13:00", "timezone": "UTC"})
+    )
+    reminder_repo.create_reminder(create_reminder("user-a", date(2026, 7, 8), "Private reminder"))
+    push_repo.save_subscription(create_subscription("user-a", "https://push.example/a", now))
+    account_operations = LocalAccountOperationsRepository(tmp_path / "account-operations.json")
+    account_operations.save_lifecycle(
+        AccountLifecycle(user_id="user-a", state=AccountState.DELETING, updated_at=now)
+    )
+    sender = RecordingPushSender()
+
+    result = run_daily_digest_push(
+        now=now,
+        settings=push_settings(),
+        reminder_repository=reminder_repo,
+        preferences_repository=preferences_repo,
+        push_repository=push_repo,
+        sender=sender,
+        account_operations_repository=account_operations,
+    )
+
+    assert result.skipped_deleting == 1
+    assert result.sent == 0
+    assert sender.sent == []
 
 
 def test_scheduled_digest_push_defaults_and_saves_missing_preferences(local_repositories):

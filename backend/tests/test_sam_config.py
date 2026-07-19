@@ -153,7 +153,7 @@ def test_sam_template_defaults_to_secure_production_modes():
     assert "LOCAL_SEARCH_INDEX_FILE: /tmp/lifeledger-search-index.json" in template
     assert "LOCAL_SAVED_VIEWS_FILE: /tmp/lifeledger-saved-views.json" in template
 
-    digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "RemindersTable:")
+    digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "LifeLedgerAccountWorkerFunction:")
     assert "DATA_ENCRYPTION_KMS_KEY_ARN" not in digest_section
     assert "kms:EncryptionContext:app" not in digest_section
     assert "DOCUMENTS_QUARANTINE_BUCKET" not in digest_section
@@ -166,7 +166,7 @@ def test_sam_template_defaults_to_secure_production_modes():
 def test_sam_kms_permissions_split_app_and_dynamodb_access():
     template = template_text()
     api_section = template_section(template, "LifeLedgerApiFunction:", "LifeLedgerDigestPushFunction:")
-    digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "RemindersTable:")
+    digest_section = template_section(template, "LifeLedgerDigestPushFunction:", "LifeLedgerAccountWorkerFunction:")
     finalizer_section = template_section(
         template, "LifeLedgerAttachmentScanFinalizerFunction:", "AttachmentScanResultRule:"
     )

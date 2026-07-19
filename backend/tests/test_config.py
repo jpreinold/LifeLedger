@@ -46,6 +46,7 @@ def secure_production_env() -> dict[str, str]:
         "DOCUMENTS_QUARANTINE_BUCKET": "quarantine",
         "DOCUMENTS_CLEAN_BUCKET": "clean",
         "DOCUMENTS_KMS_KEY_ARN": "arn:aws:kms:us-east-1:123456789012:key/documents",
+        "ACCOUNT_EXPORTS_BUCKET": "lifeledger-account-exports",
         "CORS_ALLOWED_ORIGINS": "https://lifeledger.example.com",
     }
 

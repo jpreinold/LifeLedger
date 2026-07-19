@@ -8286,3 +8286,172 @@ textarea:focus-visible {
     display: inline;
   }
 }
+/* Phase 13 account-data operations */
+.account-data-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.account-action-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color, #d9e0e7);
+  border-radius: 14px;
+  background: var(--surface-subtle, #f8fafb);
+}
+
+.account-action-panel h4,
+.account-action-panel p {
+  margin: 0;
+}
+
+.account-protected-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  cursor: pointer;
+}
+
+.account-protected-option input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.15rem;
+}
+
+.account-protected-option span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.account-protected-option small,
+.account-flow-status,
+.account-support-note {
+  color: var(--muted-text, #5d6874);
+}
+
+.account-sensitive-warning,
+.account-flow-error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.75rem;
+  border-radius: 10px;
+}
+
+.account-sensitive-warning {
+  color: #714b00;
+  background: #fff5d6;
+}
+
+.account-flow-error {
+  color: #8b1e1e;
+  background: #fff0f0;
+}
+
+.account-flow-error span {
+  grid-column: 1 / -1;
+}
+
+.account-action-row,
+.account-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.danger-secondary-button,
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 700;
+}
+
+.danger-secondary-button {
+  border: 1px solid #b63a3a;
+  color: #992c2c;
+  background: transparent;
+}
+
+.danger-button {
+  border: 1px solid #9d2929;
+  color: white;
+  background: #a92f2f;
+}
+
+.danger-button:disabled,
+.danger-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.account-confirm-backdrop {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  background: rgb(20 28 36 / 58%);
+}
+
+.account-confirm-dialog {
+  position: relative;
+  display: grid;
+  gap: 0.85rem;
+  width: min(100%, 32rem);
+  max-height: min(90dvh, 42rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 25%);
+}
+
+.account-confirm-dialog h3,
+.account-confirm-dialog p {
+  margin: 0;
+}
+
+.account-confirm-dialog input {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid #9aa6b2;
+  border-radius: 9px;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+}
+
+.account-confirm-close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+}
+
+.account-confirm-actions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 430px) {
+  .account-action-panel {
+    padding: 0.85rem;
+  }
+
+  .account-action-row > *,
+  .account-confirm-actions > * {
+    width: 100%;
+  }
+
+  .account-confirm-actions {
+    flex-direction: column-reverse;
+  }
+}

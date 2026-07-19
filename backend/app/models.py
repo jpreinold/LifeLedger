@@ -243,6 +243,7 @@ class GoogleCalendarConnection(BaseModel):
     token_encryption_version: int | None = None
     token_key_arn: str | None = None
     token_updated_at: datetime | None = None
+    deletion_cleanup_cursor: str | None = None
 
 
 class GoogleOAuthState(BaseModel):

@@ -1,0 +1,100 @@
+name: Production E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected GitHub environment containing the dedicated E2E account configuration
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-e2e-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      E2E_MODE: deployed
+      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+      E2E_API_BASE_URL: ${{ secrets.E2E_API_BASE_URL }}
+      E2E_USERNAME: ${{ secrets.E2E_USERNAME }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      E2E_ACCOUNT_GROUP: ${{ secrets.E2E_ACCOUNT_GROUP }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mask dedicated account inputs
+        shell: bash
+        run: |
+          echo "::add-mask::$E2E_USERNAME"
+          echo "::add-mask::$E2E_PASSWORD"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Authenticated deployed acceptance
+        id: e2e
+        continue-on-error: true
+        run: npm run test:e2e:deployed
+      - name: Write privacy-safe run summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          RESULT: ${{ steps.e2e.outcome }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          mkdir -p test-results
+          printf '{"event":"production_e2e_result","status":"%s","environment":"%s","run_id":"%s"}\n' \
+            "$RESULT" "$TARGET_ENVIRONMENT" "$GITHUB_RUN_ID" > test-results/production-e2e-summary.json
+      - name: Configure AWS for operational result metric
+        if: ${{ always() && env.AWS_ROLE_TO_ASSUME != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Publish privacy-safe E2E result
+        if: ${{ always() && env.AWS_ROLE_TO_ASSUME != '' }}
+        shell: bash
+        env:
+          RESULT: ${{ steps.e2e.outcome }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          if [ "$RESULT" = "success" ]; then FAILURE=0; SUCCESS=1; else FAILURE=1; SUCCESS=0; fi
+          aws cloudwatch put-metric-data --namespace LifeLedger/Operations --metric-data \
+            "MetricName=ProductionE2EFailure,Dimensions=[{Name=Environment,Value=$TARGET_ENVIRONMENT}],Value=$FAILURE,Unit=Count" \
+            "MetricName=ProductionE2ESuccess,Dimensions=[{Name=Environment,Value=$TARGET_ENVIRONMENT}],Value=$SUCCESS,Unit=Count"
+          if [ "$RESULT" = "success" ]; then
+            aws cloudwatch put-metric-data --namespace LifeLedger/Operations --metric-data \
+              "MetricName=ProductionE2ELastSuccessTimestamp,Dimensions=[{Name=Environment,Value=$TARGET_ENVIRONMENT}],Value=$(date +%s),Unit=Seconds"
+          fi
+      - name: Upload sanitized failure artifacts
+        if: ${{ failure() || steps.e2e.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-e2e-${{ inputs.environment }}-${{ github.run_id }}
+          path: |
+            frontend/test-results/production-e2e-summary.json
+            frontend/test-results/**/*.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail when acceptance or cleanup failed
+        if: ${{ steps.e2e.outcome == 'failure' }}
+        run: exit 1

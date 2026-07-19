@@ -38,8 +38,8 @@ jobs:
         run: python -m pytest -q
       - name: Import and package validation
         run: |
-          python -m compileall -q app lambda_handler.py digest_push_handler.py attachment_scan_finalizer.py backfill_search.py
-          python -c "import app.main, lambda_handler, digest_push_handler, attachment_scan_finalizer"
+          python -m compileall -q app lambda_handler.py digest_push_handler.py attachment_scan_finalizer.py backfill_search.py account_worker.py reconciliation_handler.py reconcile.py deploy
+          python -c "import app.main, lambda_handler, digest_push_handler, attachment_scan_finalizer, account_worker, reconciliation_handler"
       - uses: aws-actions/setup-sam@v2
       - name: Validate SAM template
         run: sam validate --lint --template-file template.yaml

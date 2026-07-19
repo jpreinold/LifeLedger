@@ -14,6 +14,9 @@ class PreferencesRepository(Protocol):
     def save_preferences(self, preferences: UserPreferences) -> UserPreferences:
         ...
 
+    def delete_preferences(self, user_id: str) -> bool:
+        ...
+
 
 class LocalPreferencesRepository:
     def __init__(self, file_path: str | Path):
@@ -40,6 +43,15 @@ class LocalPreferencesRepository:
             items.append(preferences)
             self._write_all_unlocked(items)
             return preferences
+
+    def delete_preferences(self, user_id: str) -> bool:
+        with self._lock:
+            items = self._read_all_unlocked()
+            remaining = [item for item in items if item.user_id != user_id]
+            if len(remaining) == len(items):
+                return False
+            self._write_all_unlocked(remaining)
+            return True
 
     def _read_all_unlocked(self) -> list[UserPreferences]:
         if not self.file_path.exists():
@@ -72,6 +84,10 @@ class DynamoPreferencesRepository:
     def save_preferences(self, preferences: UserPreferences) -> UserPreferences:
         self.table.put_item(Item=self._to_item(preferences))
         return preferences
+
+    def delete_preferences(self, user_id: str) -> bool:
+        self.table.delete_item(Key={"user_id": user_id})
+        return True
 
     def _build_table(self, table_name: str, region_name: str) -> Any:
         import boto3

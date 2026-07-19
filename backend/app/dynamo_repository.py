@@ -10,16 +10,20 @@ class DynamoReminderRepository:
         self.region_name = region_name
         self.table = table or self._build_table(table_name, region_name)
 
-    def list_reminders(self, user_id: str) -> list[Reminder]:
+    def list_reminders(self, user_id: str, limit: int | None = None) -> list[Reminder]:
         items: list[dict[str, Any]] = []
         query_kwargs: dict[str, Any] = {
             "KeyConditionExpression": "user_id = :user_id",
             "ExpressionAttributeValues": {":user_id": user_id},
         }
+        if limit is not None:
+            query_kwargs["Limit"] = limit
 
         while True:
             response = self.table.query(**query_kwargs)
             items.extend(response.get("Items", []))
+            if limit is not None and len(items) >= limit:
+                break
 
             last_key = response.get("LastEvaluatedKey")
             if not last_key:
@@ -27,7 +31,23 @@ class DynamoReminderRepository:
 
             query_kwargs["ExclusiveStartKey"] = last_key
 
-        return [self._from_item(item) for item in items]
+        reminders = [self._from_item(item) for item in items]
+        return reminders[:limit] if limit is not None else reminders
+
+    def list_reminders_page(
+        self, user_id: str, *, limit: int, cursor: str | None = None
+    ) -> tuple[list[Reminder], str | None]:
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "user_id = :user_id",
+            "ExpressionAttributeValues": {":user_id": user_id},
+            "Limit": limit,
+        }
+        if cursor:
+            query_kwargs["ExclusiveStartKey"] = {"user_id": user_id, "id": cursor}
+        response = self.table.query(**query_kwargs)
+        reminders = [self._from_item(item) for item in response.get("Items", [])]
+        last_key = response.get("LastEvaluatedKey")
+        return reminders, last_key.get("id") if last_key else None
 
     def create_reminder(self, reminder: Reminder) -> Reminder:
         self.table.put_item(Item=self._to_item(reminder))
@@ -67,16 +87,22 @@ class DynamoRecordRepository:
         self.region_name = region_name
         self.table = table or self._build_table(table_name, region_name)
 
-    def list_records(self, user_id: str, include_archived: bool = False) -> list[Record]:
+    def list_records(
+        self, user_id: str, include_archived: bool = False, limit: int | None = None
+    ) -> list[Record]:
         items: list[dict[str, Any]] = []
         query_kwargs: dict[str, Any] = {
             "KeyConditionExpression": "user_id = :user_id",
             "ExpressionAttributeValues": {":user_id": user_id},
         }
+        if limit is not None:
+            query_kwargs["Limit"] = limit
 
         while True:
             response = self.table.query(**query_kwargs)
             items.extend(response.get("Items", []))
+            if limit is not None and len(items) >= limit:
+                break
 
             last_key = response.get("LastEvaluatedKey")
             if not last_key:
@@ -86,9 +112,10 @@ class DynamoRecordRepository:
 
         records = [self._from_item(item) for item in items]
         if include_archived:
-            return records
+            return records[:limit] if limit is not None else records
 
-        return [record for record in records if record.status != RecordStatus.ARCHIVED]
+        active = [record for record in records if record.status != RecordStatus.ARCHIVED]
+        return active[:limit] if limit is not None else active
 
     def get_record(self, user_id: str, record_id: str) -> Record | None:
         response = self.table.get_item(Key={"user_id": user_id, "id": record_id})

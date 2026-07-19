@@ -9,7 +9,9 @@ from app.schemas import RecordStatus
 
 
 class RecordRepository(Protocol):
-    def list_records(self, user_id: str, include_archived: bool = False) -> list[Record]:
+    def list_records(
+        self, user_id: str, include_archived: bool = False, limit: int | None = None
+    ) -> list[Record]:
         ...
 
     def get_record(self, user_id: str, record_id: str) -> Record | None:
@@ -40,13 +42,16 @@ class LocalRecordRepository:
         if not self.file_path.exists():
             self._write_all_unlocked([])
 
-    def list_records(self, user_id: str, include_archived: bool = False) -> list[Record]:
+    def list_records(
+        self, user_id: str, include_archived: bool = False, limit: int | None = None
+    ) -> list[Record]:
         with self._lock:
-            return [
+            records = [
                 record
                 for record in self._read_all_unlocked()
                 if record.user_id == user_id and (include_archived or record.status != RecordStatus.ARCHIVED)
             ]
+        return records[:limit] if limit is not None else records
 
     def get_record(self, user_id: str, record_id: str) -> Record | None:
         with self._lock:

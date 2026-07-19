@@ -110,6 +110,12 @@ class LinkedItemRepository(Protocol):
     ) -> int:
         ...
 
+    def list_for_user(self, user_id: str, limit: int | None = 100) -> list[LinkedItem]:
+        ...
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        ...
+
 
 class LocalLinkedItemRepository:
     def __init__(self, file_path: str | Path):
@@ -135,6 +141,19 @@ class LocalLinkedItemRepository:
             links.append(link)
             self._write_all_unlocked(links)
             return link
+
+    def list_for_user(self, user_id: str, limit: int | None = 100) -> list[LinkedItem]:
+        with self._lock:
+            items = [item for item in self._read_all_unlocked() if item.user_id == user_id]
+            return items if limit is None else items[:limit]
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        with self._lock:
+            links = self._read_all_unlocked()
+            targets = {item.link_id for item in links if item.user_id == user_id}
+            targets = set(list(targets)[:limit])
+            self._write_all_unlocked([item for item in links if item.link_id not in targets])
+            return len(targets)
 
     def get_link(self, user_id: str, link_id: str) -> LinkedItem | None:
         with self._lock:
@@ -268,6 +287,40 @@ class DynamoLinkedItemRepository:
                 raise DuplicateLinkedItemError() from exc
             raise
         return link
+
+    def list_for_user(self, user_id: str, limit: int | None = 100) -> list[LinkedItem]:
+        items: list[dict[str, Any]] = []
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "user_id = :user_id",
+            "ExpressionAttributeValues": {":user_id": user_id},
+        }
+        if limit is not None:
+            query_kwargs["Limit"] = limit
+
+        while True:
+            response = self.table.query(**query_kwargs)
+            items.extend(item for item in response.get("Items", []) if not is_pair_marker(item))
+            if limit is not None and len(items) >= limit:
+                items = items[:limit]
+                break
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+            if limit is not None:
+                query_kwargs["Limit"] = max(1, limit - len(items))
+        return [self._from_item(item) for item in items]
+
+    def delete_for_user(self, user_id: str, limit: int = 100) -> int:
+        response = self.table.query(
+            KeyConditionExpression="user_id = :user_id",
+            ExpressionAttributeValues={":user_id": user_id},
+            ProjectionExpression="user_id, link_id",
+            Limit=limit,
+        )
+        for item in response.get("Items", []):
+            self.table.delete_item(Key={"user_id": item["user_id"], "link_id": item["link_id"]})
+        return len(response.get("Items", []))
 
     def get_link(self, user_id: str, link_id: str) -> LinkedItem | None:
         response = self.table.get_item(Key={"user_id": user_id, "link_id": link_id})

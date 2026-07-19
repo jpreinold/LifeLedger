@@ -13,6 +13,7 @@ from app.secret_provider import SecretConfigurationError, get_secret_provider
 
 GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 GOOGLE_CALENDAR_API_BASE_URL = "https://www.googleapis.com/calendar/v3"
 DEFAULT_TIMEOUT_SECONDS = 10
 WRITABLE_CALENDAR_ACCESS_ROLES = {"owner", "writer", "writerWithoutPrivateAccess"}
@@ -176,6 +177,21 @@ class GoogleCalendarService:
             f"{GOOGLE_CALENDAR_API_BASE_URL}/calendars/{calendar_id}/events/{encoded_event_id}",
             connection.access_token,
         )
+
+    def revoke_token(self, token: str) -> None:
+        if not token:
+            return
+        try:
+            with httpx.Client(timeout=DEFAULT_TIMEOUT_SECONDS) as client:
+                response = client.post(
+                    GOOGLE_REVOKE_URL,
+                    data={"token": token},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+        except httpx.HTTPError as exc:
+            raise GoogleCalendarApiError("Unable to revoke Google Calendar access.") from exc
+        if response.status_code not in {200, 400}:
+            raise GoogleCalendarApiError("Unable to revoke Google Calendar access.")
 
     def _require_configured(self) -> None:
         if not self.settings.google_calendar_configured:

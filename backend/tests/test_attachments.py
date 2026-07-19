@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.attachments import AttachmentObjectHead, DisabledDocumentStorageService, S3DocumentStorageService
+from app.attachments import AttachmentObjectHead, DisabledDocumentStorageService, S3DocumentStorageService, owner_hash_for_user
 from app.attachments_repository import LocalRecordAttachmentRepository
 from app.auth import UserContext, get_current_user
 from app.config import load_settings
@@ -238,6 +238,46 @@ class CapturingS3Client:
     def copy_object(self, **kwargs):
         self.copy_kwargs = kwargs
         return {}
+
+
+class UserObjectS3Client:
+    def __init__(self, owner_hash):
+        self.owner_hash = owner_hash
+        self.deleted = []
+
+    def list_objects_v2(self, *, Bucket, Prefix, MaxKeys):
+        object_class = "quarantine" if Bucket == "quarantine-bucket" else "clean"
+        return {
+            "Contents": [
+                {"Key": f"{object_class}/{self.owner_hash}/record-1/attachment-1/object"},
+            ][:MaxKeys]
+            if Prefix == f"{object_class}/{self.owner_hash}/"
+            else []
+        }
+
+    def delete_object(self, *, Bucket, Key):
+        self.deleted.append((Bucket, Key))
+
+
+def test_s3_storage_lists_and_deletes_every_user_owned_object_class_with_bounded_prefixes():
+    settings = load_settings(
+        {
+            "DOCUMENT_STORAGE_MODE": "s3",
+            "DOCUMENTS_QUARANTINE_BUCKET": "quarantine-bucket",
+            "DOCUMENTS_CLEAN_BUCKET": "clean-bucket",
+            "DOCUMENTS_KMS_KEY_ARN": DOCUMENTS_KMS_KEY_ARN,
+        }
+    )
+    owner_hash = owner_hash_for_user("user-a")
+    client = UserObjectS3Client(owner_hash)
+    storage = S3DocumentStorageService(settings, s3_client=client)
+
+    objects = storage.list_user_objects("user-a", limit=10)
+    deleted = storage.delete_user_objects("user-a", limit=10)
+
+    assert {item[0] for item in objects} == {"quarantine", "clean"}
+    assert deleted == 2
+    assert {item[0] for item in client.deleted} == {"quarantine-bucket", "clean-bucket"}
 
 
 def prepare_completed_attachment(client, record_repo, attachment_repo, storage, *, user_id="user-a"):

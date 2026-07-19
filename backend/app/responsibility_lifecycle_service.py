@@ -501,7 +501,7 @@ class ResponsibilityLifecycleService:
                 else:
                     reconciliation_status = LifecycleReconciliationStatus.NEEDS_ATTENTION
             except Exception:
-                logger.exception(
+                logger.error(
                     "responsibility_item_date_sync_failed",
                     extra={
                         "reminder_id": reminder.id,
@@ -547,7 +547,7 @@ class ResponsibilityLifecycleService:
                 document_reference_status=document_status,
             )
         except Exception:
-            logger.exception(
+            logger.error(
                 "responsibility_history_status_update_failed",
                 extra={"reminder_id": reminder.id, "event_id": event.event_id, "correlation_id": event.correlation_id},
             )

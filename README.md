@@ -87,6 +87,14 @@ Phase 12 adds an append-only, user-visible ledger for responsibility creation, c
 
 DynamoDB commits the reminder change and ledger append in one version-checked transaction. Local JSON persistence provides rollback-equivalent behavior. Item-date, search, and external document-scan follow-up uses visible reconciliation status and an idempotent repair route; optional document failure never rolls back a successful responsibility action. Existing reminders remain valid and receive no fabricated prior events. See [docs/responsibility-history.md](docs/responsibility-history.md) for storage, recurrence, evidence, retention, reconciliation, bundle budget, and Playwright acceptance instructions.
 
+## Operational reliability and account data
+
+Phase 13 adds a durable, privacy-safe reconciliation issue store; bounded scheduled detection and idempotent repair; CloudWatch metrics and alarms; and AWS-authenticated maintenance commands. Settings now provides an asynchronous, expiring ZIP export and an orchestrated account deletion flow. Export excludes protected plaintext by default. Deletion blocks new writes, removes registered DynamoDB/S3/integration state, verifies every centralized inventory store, and deletes Cognito identity last. It never reports completion while cleanup remains.
+
+Production deployment uses checked-in non-secret parameters and a fail-closed canonical script instead of an ignored workstation SAM configuration. The authenticated production Playwright workflow is manual, dedicated-account-only, and verifies real scanning plus cleanup when its protected environment secrets are available.
+
+See [docs/operations.md](docs/operations.md), [docs/account-data-lifecycle.md](docs/account-data-lifecycle.md), [docs/architecture-boundaries.md](docs/architecture-boundaries.md), and [docs/production-e2e.md](docs/production-e2e.md).
+
 ## Reminder Management
 
 Reminders can be created, edited, completed, and deleted from the React app. Editing uses the authenticated `PUT /reminders/{id}` route and only sends user-editable reminder fields.
