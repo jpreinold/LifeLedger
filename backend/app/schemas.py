@@ -63,6 +63,7 @@ class ResponsibilityWorkflowId(str, Enum):
     VEHICLE_REGISTRATION = "vehicle_registration"
     PET_VACCINATION = "pet_vaccination"
     SUBSCRIPTION_RENEWAL = "subscription_renewal"
+    PERSON_BIRTHDAY = "person_birthday"
 
 
 class ResponsibilityEventType(str, Enum):
@@ -81,6 +82,7 @@ class ResponsibilityEventSource(str, Enum):
     USER = "user"
     GUIDED_WORKFLOW = "guided_workflow"
     RECONCILIATION = "reconciliation"
+    ASSISTANT_CAPTURE = "assistant_capture"
 
 
 class LifecycleReconciliationStatus(str, Enum):
@@ -126,6 +128,7 @@ class RecordType(str, Enum):
     HOME = "home"
     SUBSCRIPTION = "subscription"
     WARRANTY = "warranty"
+    PERSON = "person"
 
 
 class RecordStatus(str, Enum):

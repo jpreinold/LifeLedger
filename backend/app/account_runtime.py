@@ -12,6 +12,7 @@ from app.config import COGNITO_AUTH_MODE, DYNAMODB_PERSISTENCE, Settings, get_se
 from app.reconciliation_service import ReconciliationService
 from app.repository_factory import (
     create_account_operations_repository,
+    create_assistant_repository,
     create_encryption_service,
     create_google_calendar_connection_repository,
     create_google_oauth_state_repository,
@@ -70,6 +71,7 @@ def get_account_inventory():
         ),
         account_operations=get_account_operations_repository(),
         account_artifacts=get_account_artifact_store(),
+        assistant=create_assistant_repository(settings),
     )
 
 

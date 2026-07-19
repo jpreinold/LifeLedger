@@ -14,6 +14,7 @@ from app.repository_factory import (
     create_repository,
     create_responsibility_history_repository,
     create_search_index_repository,
+    create_assistant_repository,
 )
 from app.schemas import LinkedEntityType
 from app.search_service import SearchProjectionService
@@ -132,6 +133,7 @@ def _maintenance_services(reconciliation):
         links,
         search,
         create_document_storage_service(settings),
+        create_assistant_repository(settings),
     )
     return detector, search_service
 

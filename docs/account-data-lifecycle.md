@@ -21,6 +21,7 @@ Phase 13 uses one executable account-data inventory for export, deletion, and de
 | Export jobs, deletion jobs and account lifecycle state | `user_id` + operation key | No | Kept only while work is resumable, then removed |
 | Export artifacts | user-hashed S3 prefix plus random operation key, bounded prefix listing | The artifact itself | Delete on expiry and during deletion, including artifacts orphaned before job-row update |
 | Cognito identity | Cognito `sub` resolved to the pool username | Never | Deleted only after every data cleanup and verification step |
+| Captures, proposals/results, clarifications, safe AI usage, AI settings | `user_id`, bounded assistant-table pages | Yes, as portable user-owned JSON | Delete and verify each kind; temporary resolved proposal state may use TTL |
 
 There is no server-side recent-view store or separate workflow-draft store. Guided workflow correlation state remains in active browser memory. Idempotency is stored on its owning entities and operations rather than in a separate user table.
 
@@ -59,3 +60,8 @@ Verification returns store names and counts only. It never includes titles, note
 ## Retention statement
 
 LifeLedger does not claim instant physical erasure or formal regulatory compliance. During a failed or active request it retains the minimum operation and safe reconciliation state needed to resume. After verified completion it deletes those user-scoped rows. A seven-day receipt contains only the random deletion operation ID, completion timestamp, and safe terminal status so duplicate queue delivery remains idempotent; it has no user ID. Cloud provider backups and logs follow configured infrastructure retention and are not used to reconstruct a deleted account. No title, note, protected value, document name/content, token, IP address, or user ID is retained in the terminal receipt.
+## Phase 14 assistant data
+
+The centralized inventory registers Captures, action proposals (including safe action results), clarification questions/answers, safe AI usage rows, and AI settings. Exports include those user-owned portable JSON rows. Hidden prompts, provider secrets, API keys, internal safety instructions, and hidden reasoning are neither stored nor exported.
+
+Deletion removes each assistant kind in bounded, idempotent user-scoped batches and verifies every count reaches zero before identity cleanup. Related reconciliation issues remain covered by the existing reconciliation inventory. Proposal/clarification TTL is defense-in-depth for expired temporary state; it never replaces account deletion, and unresolved Captures do not expire silently.

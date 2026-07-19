@@ -48,6 +48,20 @@ class SecretProvider:
         log_security_event("secrets_configuration_missing", secret="push", result="missing")
         raise SecretConfigurationError()
 
+    def openai_api_key(self) -> str:
+        if self.settings.ai_api_secret_arn:
+            return self._required_secret_value(
+                self.settings.ai_api_secret_arn,
+                "api_key",
+                "openai",
+            )
+
+        if self.settings.plaintext_secret_fallback_allowed and self.settings.openai_api_key:
+            return self.settings.openai_api_key
+
+        log_security_event("secrets_configuration_missing", secret="openai", result="missing")
+        raise SecretConfigurationError()
+
     def _required_secret_value(self, secret_arn: str, key: str, safe_name: str) -> str:
         secret = self._secret_json(secret_arn, safe_name)
         value = secret.get(key)
@@ -86,7 +100,7 @@ class SecretProvider:
         return self.client
 
 
-_providers: dict[tuple[str, str, str, str, str, bool], SecretProvider] = {}
+_providers: dict[tuple[str, str, str, str, str, str, str, bool], SecretProvider] = {}
 
 
 def get_secret_provider(settings: Settings | None = None) -> SecretProvider:
@@ -95,8 +109,10 @@ def get_secret_provider(settings: Settings | None = None) -> SecretProvider:
         resolved_settings.aws_region,
         resolved_settings.google_oauth_secret_arn,
         resolved_settings.push_secret_arn,
+        resolved_settings.ai_api_secret_arn,
         resolved_settings.google_client_secret,
         resolved_settings.vapid_private_key,
+        resolved_settings.openai_api_key,
         resolved_settings.plaintext_secret_fallback_allowed,
     )
     provider = _providers.get(cache_key)

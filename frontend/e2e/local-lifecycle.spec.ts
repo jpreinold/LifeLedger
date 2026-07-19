@@ -81,6 +81,50 @@ test('completes one cycle and loads friendly durable history on demand', async (
   await expect(page.getByText('responsibility_created')).toHaveCount(0)
 })
 
+test('captures and reviews a deterministic proposal at 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 })
+  const capture = {
+    capture_id: 'capture-1', source: 'lifeledger_web', input_type: 'text',
+    original_text: 'Remind me tomorrow at 4 to call Mom.', captured_at: now,
+    client_timestamp: now, timezone: 'UTC', locale: 'en-US', status: 'ready_for_review',
+    interpreter: 'deterministic', active_proposal_id: 'proposal-1', clarification_session_id: null,
+    interpretation_summary: 'Create one reminder for your request.', relevant_action: 'Create a reminder to call Mom.',
+    failure_category: null, safe_failure_message: null, attempt_count: 1,
+  }
+  const detail = {
+    capture,
+    proposal: {
+      proposal_id: 'proposal-1', capture_id: 'capture-1', status: 'ready_for_review',
+      proposed_actions: [{ action_id: 'action-1', action_type: 'create_responsibility', fields: { title: 'Call Mom', due_date: '2026-07-20', reminder_time: '16:00' }, explanation: 'Create a reminder to call Mom.', risk_level: 'medium', confirmation_requirement: 'always' }],
+      action_results: [], ambiguity_reasons: [], conflict_warnings: [], missing_information: [],
+      user_facing_summary: 'Create one reminder for your request.', interpreter: 'deterministic', expires_at: '2026-07-25T12:00:00.000Z',
+    },
+    clarification: null,
+  }
+
+  await page.route('http://localhost:8000/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/captures' && request.method() === 'POST') return route.fulfill({ json: capture })
+    if (path === '/captures/capture-1/interpret' && request.method() === 'POST') return route.fulfill({ json: detail })
+    if (path === '/captures' && request.method() === 'GET') return route.fulfill({ json: { items: [capture], next_cursor: null } })
+    if (path === '/reminders' || path === '/alerts' || path === '/records') return route.fulfill({ json: [] })
+    if (path === '/preferences/digest') return route.fulfill({ json: { digest_enabled: true, digest_time: '09:00', digest_lookahead_days: 30, timezone: 'UTC', digest_last_seen_at: null, updated_at: now } })
+    if (path === '/integrations/google-calendar/status') return route.fulfill({ json: { configured: false, connected: false, status: 'disconnected', google_account_email: null, calendar_id: null, calendar_label: null, last_error: null } })
+    return route.fulfill({ status: 404, json: { detail: `Unhandled local E2E path: ${path}` } })
+  })
+
+  await page.goto('/')
+  await page.getByLabel('Capture text').fill(capture.original_text)
+  await page.getByRole('button', { name: 'Save to Inbox' }).click()
+  await expect(page.locator('#capture-inbox-heading')).toBeVisible()
+  await expect(page.getByRole('heading', { name: capture.original_text })).toBeFocused()
+  await expect(page.getByText('Create a reminder to call Mom.').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Confirm changes' })).toBeVisible()
+  expect(page.url()).not.toContain('Mom')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+})
+
 function reminderResponse() {
   return {
     id: 'reminder-1', title: 'Local ledger acceptance', category: 'Health', due_date: '2026-09-18', repeat: 'None',

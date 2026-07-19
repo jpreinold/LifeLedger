@@ -22,6 +22,7 @@ class ReconciliationDomain(StrEnum):
     RELATIONSHIP = "relationship"
     ACCOUNT_DELETION = "account_deletion"
     WORKFLOW = "workflow"
+    CAPTURE = "capture"
 
 
 class ReconciliationSeverity(StrEnum):

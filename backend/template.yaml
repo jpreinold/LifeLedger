@@ -63,6 +63,62 @@ Parameters:
   AccountOperationsTableName:
     Type: String
     Default: lifeledger-account-operations-auth
+  AssistantDataTableName:
+    Type: String
+    Default: lifeledger-assistant-data-auth
+  AIProvider:
+    Type: String
+    Default: disabled
+    AllowedValues:
+      - disabled
+      - openai
+  AIDefaultModel:
+    Type: String
+    Default: gpt-5.6-luna
+  AIEscalationModel:
+    Type: String
+    Default: gpt-5.6-terra
+  AIApiSecretArn:
+    Type: String
+    Default: ""
+  AIEmergencyDisabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+  AIRequestTimeoutSeconds:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    MaxValue: 60
+  AIInputTokenLimit:
+    Type: Number
+    Default: 2000
+    MinValue: 1
+    MaxValue: 10000
+  AIOutputTokenLimit:
+    Type: Number
+    Default: 1200
+    MinValue: 1
+    MaxValue: 5000
+  AIMaxClarificationCalls:
+    Type: Number
+    Default: 1
+    AllowedValues: [0, 1]
+  AIDefaultMonthlyBudgetUsd:
+    Type: Number
+    Default: 5
+    MinValue: 0
+    MaxValue: 100
+  AIDefaultDailyRequestLimit:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    MaxValue: 500
+  AIModelPricingJson:
+    Type: String
+    Default: '{"gpt-5.6-luna":{"input":1.0,"output":6.0},"gpt-5.6-terra":{"input":2.5,"output":15.0}}'
   DocumentStorageMode:
     Type: String
     Default: s3
@@ -146,10 +202,15 @@ Rules:
         AssertDescription: Production requires encrypted S3 document storage.
       - Assert: !Equals [!Ref MalwareProtectionEnabled, "true"]
         AssertDescription: Production requires document malware protection.
+      - Assert: !Or
+          - !Equals [!Ref AIProvider, disabled]
+          - !Not [!Equals [!Ref AIApiSecretArn, ""]]
+        AssertDescription: OpenAI interpretation requires a Secrets Manager API key ARN.
 
 Conditions:
   HasGoogleOAuthSecretArn: !Not [!Equals [!Ref GoogleOAuthSecretArn, ""]]
   HasPushSecretArn: !Not [!Equals [!Ref PushSecretArn, ""]]
+  HasAIApiSecretArn: !Not [!Equals [!Ref AIApiSecretArn, ""]]
   HasDocumentsUploadBucketName: !Not [!Equals [!Ref DocumentsUploadBucketName, ""]]
   HasDocumentsCleanBucketName: !Not [!Equals [!Ref DocumentsCleanBucketName, ""]]
   HasAccountExportsBucketName: !Not [!Equals [!Ref AccountExportsBucketName, ""]]
@@ -518,6 +579,7 @@ Resources:
           RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable
           RECONCILIATION_TABLE_NAME: !Ref ReconciliationTable
           ACCOUNT_OPERATIONS_TABLE_NAME: !Ref AccountOperationsTable
+          ASSISTANT_DATA_TABLE_NAME: !Ref AssistantDataTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
@@ -531,6 +593,7 @@ Resources:
           LOCAL_RESPONSIBILITY_HISTORY_FILE: /tmp/lifeledger-responsibility-history.json
           LOCAL_RECONCILIATION_FILE: /tmp/lifeledger-reconciliation.json
           LOCAL_ACCOUNT_OPERATIONS_FILE: /tmp/lifeledger-account-operations.json
+          LOCAL_ASSISTANT_DATA_FILE: /tmp/lifeledger-assistant-data.json
           LOCAL_PREFERENCES_FILE: /tmp/lifeledger-preferences.json
           LOCAL_PUSH_SUBSCRIPTIONS_FILE: /tmp/lifeledger-push-subscriptions.json
           LOCAL_GOOGLE_CALENDAR_CONNECTIONS_FILE: /tmp/lifeledger-google-calendar-connections.json
@@ -550,6 +613,18 @@ Resources:
           DOCUMENTS_KMS_KEY_ARN: !GetAtt LifeLedgerDocumentsKey.Arn
           ACCOUNT_EXPORTS_BUCKET: !Ref AccountExportsBucket
           ACCOUNT_OPERATIONS_QUEUE_URL: !Ref AccountOperationsQueue
+          AI_PROVIDER: !Ref AIProvider
+          AI_DEFAULT_MODEL: !Ref AIDefaultModel
+          AI_ESCALATION_MODEL: !Ref AIEscalationModel
+          AI_API_SECRET_ARN: !Ref AIApiSecretArn
+          AI_EMERGENCY_DISABLED: !Ref AIEmergencyDisabled
+          AI_REQUEST_TIMEOUT_SECONDS: !Ref AIRequestTimeoutSeconds
+          AI_INPUT_TOKEN_LIMIT: !Ref AIInputTokenLimit
+          AI_OUTPUT_TOKEN_LIMIT: !Ref AIOutputTokenLimit
+          AI_MAX_CLARIFICATION_CALLS: !Ref AIMaxClarificationCalls
+          AI_DEFAULT_MONTHLY_BUDGET_USD: !Ref AIDefaultMonthlyBudgetUsd
+          AI_DEFAULT_DAILY_REQUEST_LIMIT: !Ref AIDefaultDailyRequestLimit
+          AI_MODEL_PRICING_JSON: !Ref AIModelPricingJson
           APP_VERSION: !Ref AppVersion
           GIT_COMMIT: !Ref GitCommit
           BUILD_TIMESTAMP: !Ref BuildTimestamp
@@ -576,6 +651,8 @@ Resources:
             TableName: !Ref ReconciliationTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AccountOperationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AssistantDataTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PreferencesTable
         - DynamoDBCrudPolicy:
@@ -669,6 +746,14 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref PushSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasAIApiSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AIApiSecretArn
           - !Ref AWS::NoValue
       Events:
         Health:
@@ -806,6 +891,7 @@ Resources:
           RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable
           RECONCILIATION_TABLE_NAME: !Ref ReconciliationTable
           ACCOUNT_OPERATIONS_TABLE_NAME: !Ref AccountOperationsTable
+          ASSISTANT_DATA_TABLE_NAME: !Ref AssistantDataTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
@@ -834,6 +920,7 @@ Resources:
         - DynamoDBCrudPolicy: {TableName: !Ref ResponsibilityHistoryTable}
         - DynamoDBCrudPolicy: {TableName: !Ref ReconciliationTable}
         - DynamoDBCrudPolicy: {TableName: !Ref AccountOperationsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref AssistantDataTable}
         - DynamoDBCrudPolicy: {TableName: !Ref PreferencesTable}
         - DynamoDBCrudPolicy: {TableName: !Ref PushSubscriptionsTable}
         - DynamoDBCrudPolicy: {TableName: !Ref GoogleCalendarConnectionsTable}
@@ -910,6 +997,7 @@ Resources:
           RESPONSIBILITY_HISTORY_TABLE_NAME: !Ref ResponsibilityHistoryTable
           RECONCILIATION_TABLE_NAME: !Ref ReconciliationTable
           ACCOUNT_OPERATIONS_TABLE_NAME: !Ref AccountOperationsTable
+          ASSISTANT_DATA_TABLE_NAME: !Ref AssistantDataTable
           PREFERENCES_TABLE_NAME: !Ref PreferencesTable
           PUSH_SUBSCRIPTIONS_TABLE_NAME: !Ref PushSubscriptionsTable
           GOOGLE_CALENDAR_CONNECTIONS_TABLE_NAME: !Ref GoogleCalendarConnectionsTable
@@ -948,6 +1036,90 @@ Resources:
             Schedule: cron(20 5 * * ? *)
             Enabled: true
             Input: '{"mode":"deep","limit":100}'
+
+  AssistantDataTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref AssistantDataTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt LifeLedgerDataEncryptionKey.Arn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: entity_key
+          AttributeType: S
+        - AttributeName: type_partition
+          AttributeType: S
+        - AttributeName: sort_key
+          AttributeType: S
+        - AttributeName: parent_partition
+          AttributeType: S
+        - AttributeName: status_partition
+          AttributeType: S
+        - AttributeName: expiration_partition
+          AttributeType: S
+        - AttributeName: expires_at_sort
+          AttributeType: S
+        - AttributeName: billing_partition
+          AttributeType: S
+        - AttributeName: billing_sort
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: entity_key
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: UserEntityTypeIndex
+          KeySchema:
+            - AttributeName: type_partition
+              KeyType: HASH
+            - AttributeName: sort_key
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ParentIndex
+          KeySchema:
+            - AttributeName: parent_partition
+              KeyType: HASH
+            - AttributeName: sort_key
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: status_partition
+              KeyType: HASH
+            - AttributeName: sort_key
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ExpirationIndex
+          KeySchema:
+            - AttributeName: expiration_partition
+              KeyType: HASH
+            - AttributeName: expires_at_sort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: BillingPeriodIndex
+          KeySchema:
+            - AttributeName: billing_partition
+              KeyType: HASH
+            - AttributeName: billing_sort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   ReconciliationTable:
     Type: AWS::DynamoDB::Table
@@ -1749,6 +1921,9 @@ Outputs:
   AccountOperationsTableName:
     Description: Resumable account export and deletion operation table.
     Value: !Ref AccountOperationsTable
+  AssistantDataTableName:
+    Description: Durable user-scoped captures, proposals, clarifications, settings, and usage.
+    Value: !Ref AssistantDataTable
   ReconciliationFunctionName:
     Description: Scheduled reconciliation Lambda function.
     Value: !Ref LifeLedgerReconciliationFunction

@@ -25,6 +25,8 @@ import { getSmartReminderLabel } from '../lib/smartReminderLabels'
 import { guidedWorkflowOptions, type GuidedWorkflowId } from '../lib/guidedWorkflows'
 import type { DigestPreferences } from '../types/preferences'
 import type { Reminder, ReminderAlert, ReminderType } from '../types/reminder'
+import type { CaptureDetail } from '../types/capture'
+import { QuickCapture } from '../features/capture/QuickCapture'
 import { getCategoryVisual } from './categoryVisuals'
 
 interface HomeDashboardProps {
@@ -45,6 +47,7 @@ interface HomeDashboardProps {
   onViewRecords: () => void
   onViewReminder: (reminder: Reminder) => void
   onStartWorkflow?: (workflowId: GuidedWorkflowId) => void
+  onCapture: (detail: CaptureDetail) => void
 }
 
 interface OverviewTileData {
@@ -76,6 +79,7 @@ export function HomeDashboard({
   onViewRecords,
   onViewReminder,
   onStartWorkflow,
+  onCapture,
 }: HomeDashboardProps) {
   const activeReminders = reminders.filter(isActionableReminder)
   const genericReminders = activeReminders.filter((reminder) => reminder.reminder_type === 'generic')
@@ -144,6 +148,8 @@ export function HomeDashboard({
           <ChevronRight size={21} aria-hidden="true" />
         </button>
       </section>
+
+      <QuickCapture compact onCaptured={onCapture} />
 
       {recordsCount === 0 ? (
         <section className="home-first-item-card" aria-labelledby="first-item-heading">

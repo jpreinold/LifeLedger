@@ -31,3 +31,9 @@ Only the safe main page is routeable through `?page=`. Refresh and browser back 
 - Keep operations bounded and cursor-based; do not add production table scans.
 - Preserve repository ownership scoping and service-layer orchestration.
 - Measure entry and lazy chunks before collapsing a frontend feature boundary.
+
+## Phase 14 assistant boundary
+
+Capture adds one deliberate chain: authenticated route → `CaptureApplicationService` → deterministic/provider interpretation → strict proposal → entity/policy validation → clarification/confirmation → `ActionExecutionService` → existing item, responsibility lifecycle, relationship, history, and search services. AI providers have no repository and cannot approve or execute. The execution service never exposes raw record/reminder routes to a model.
+
+`features/capture` owns the frontend Inbox and quick-capture surface behind a lazy page boundary. Capture text and answers remain component/network state, use no-store responses, and never enter route query text or browser persistence. `route_support.py` composes the service graph; `routers/captures.py` contains the authenticated HTTP mapping.
