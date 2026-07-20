@@ -18,12 +18,13 @@ try {
     $commit = (git rev-parse HEAD).Trim()
     $version = (git describe --tags --always).Trim()
     $buildTimestamp = [DateTime]::UtcNow.ToString("o")
-    # SAM parses each Key=Value argument again using spaces as delimiters. Escape
-    # spaces inside values so parameters such as OAuth scopes remain intact.
+    # SAM reparses each Key=Value argument with a quote-aware parser.
     $overrides = @()
     $parameters = Get-Content -Raw $parameterFile | ConvertFrom-Json
     foreach ($property in $parameters.PSObject.Properties) {
-        $escapedValue = ([string]$property.Value).Replace(" ", "\ ")
+        # SAM parses each Key=Value argument with its own quote-aware parser.
+        # Preserve JSON quotes as literal characters before escaping spaces.
+        $escapedValue = ([string]$property.Value).Replace('"', '\"').Replace(" ", "\ ")
         $overrides += "$($property.Name)=$escapedValue"
     }
     $overrides += "GitCommit=$commit"
