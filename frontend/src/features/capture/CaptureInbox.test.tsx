@@ -123,7 +123,8 @@ describe('Phase 14 Capture Inbox', () => {
     }
     vi.mocked(capturesApi.clarify).mockResolvedValue(detail)
     render(<CaptureInbox initialDetail={clarification} />)
-    await userEvent.type(screen.getByLabelText('Clarification answer'), 'August 1')
+    expect(screen.getByText('Your answer')).toBeVisible()
+    await userEvent.type(screen.getByLabelText('Your answer'), 'August 1')
     await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
     await waitFor(() => expect(capturesApi.clarify).toHaveBeenCalledWith('proposal-internal-id', { 'question-id': 'August 1' }))
     expect(window.location.href).not.toContain('August')

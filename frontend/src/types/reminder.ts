@@ -35,7 +35,7 @@ export const reminderLifecycleEventTypes = [
   'restored',
 ] as const
 export const reminderTypes = ['generic', 'birthday', 'renewal', 'maintenance'] as const
-export const responsibilityWorkflowIds = ['passport_expiration', 'vehicle_registration', 'pet_vaccination', 'subscription_renewal'] as const
+export const responsibilityWorkflowIds = ['passport_expiration', 'vehicle_registration', 'pet_vaccination', 'subscription_renewal', 'person_birthday'] as const
 
 export const reminderAlertReasons = ['Overdue', 'Due today', 'Reminder window'] as const
 
@@ -62,6 +62,7 @@ export type MaintenanceArea = (typeof maintenanceAreas)[number]
 export type MaintenanceIntervalUnit = (typeof maintenanceIntervalUnits)[number]
 
 export interface BirthdayDetails {
+  subject_type?: 'person' | 'pet'
   person_name: string
   birth_month: number
   birth_day: number
@@ -72,6 +73,7 @@ export interface BirthdayDetails {
 }
 
 export interface BirthdayDetailsInput {
+  subject_type?: 'person' | 'pet'
   person_name: string
   birth_month: number | null
   birth_day: number | null
@@ -140,7 +142,7 @@ export interface ReminderLinkedRecordSummary {
   id: string
   title: string
   subtitle: string | null
-  record_type: 'general' | 'passport' | 'driver_license' | 'vehicle' | 'insurance' | 'appliance' | 'pet' | 'home' | 'subscription' | 'warranty'
+  record_type: 'general' | 'passport' | 'driver_license' | 'vehicle' | 'insurance' | 'appliance' | 'pet' | 'home' | 'subscription' | 'warranty' | 'person'
   status: 'active' | 'archived'
 }
 export interface Reminder {

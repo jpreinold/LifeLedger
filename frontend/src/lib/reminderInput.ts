@@ -19,6 +19,7 @@ const today = new Date().toISOString().slice(0, 10)
 
 export function emptyBirthdayDetails(): BirthdayDetailsInput {
   return {
+    subject_type: 'person',
     person_name: '',
     birth_month: null,
     birth_day: null,
@@ -204,6 +205,7 @@ function buildBirthdaySubmitInput(baseInput: ReminderInput): ReminderInput {
     repeat: 'Yearly',
     priority: baseInput.priority || 'Medium',
     birthday_details: {
+      subject_type: details.subject_type ?? 'person',
       person_name: details.person_name.trim(),
       birth_month: details.birth_month,
       birth_day: details.birth_day,

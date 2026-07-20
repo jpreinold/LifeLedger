@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
-import re
 from uuid import NAMESPACE_URL, uuid5
 
+from app.birthday_value import BirthdayValueError, ParsedBirthday, parse_birthday_value
 from app.birthdays import enrich_birthday_details, get_next_birthday_due_date
 from app.linked_items_repository import (
     DuplicateLinkedItemError,
@@ -13,6 +12,7 @@ from app.linked_items_repository import (
     linked_item_lookup_key,
 )
 from app.models import LinkedItem, Record, Reminder
+from app.records_repository import RecordRepository
 from app.repository import ReminderRepository
 from app.responsibility_lifecycle_service import ResponsibilityLifecycleService
 from app.schemas import (
@@ -34,47 +34,11 @@ from app.search_service import SearchProjectionService
 
 PERSON_BIRTHDAY_KEY = "birthday"
 PERSON_RELATIONSHIP_KEY = "relationship_context"
+SUPPORTED_BIRTHDAY_RECORD_TYPES = {RecordType.PERSON, RecordType.PET}
 
-
-class PersonBirthdayValueError(ValueError):
-    pass
-
-
-@dataclass(frozen=True)
-class ParsedPersonBirthday:
-    month: int
-    day: int
-    year: int | None = None
-
-    @property
-    def stored_value(self) -> str:
-        if self.year is None:
-            return f"--{self.month:02d}-{self.day:02d}"
-        return f"{self.year:04d}-{self.month:02d}-{self.day:02d}"
-
-
-def parse_person_birthday(value: object, *, today: date | None = None) -> ParsedPersonBirthday:
-    text = str(value).strip()
-    month_day = re.fullmatch(r"--(\d{2})-(\d{2})", text)
-    full_date = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", text)
-    if not month_day and not full_date:
-        raise PersonBirthdayValueError("Person birthdays must include a month and day; the year is optional.")
-
-    year = int(full_date.group(1)) if full_date else None
-    month = int((full_date or month_day).group(2 if full_date else 1))
-    day = int((full_date or month_day).group(3 if full_date else 2))
-    try:
-        date(year or 2000, month, day)
-    except ValueError as exc:
-        raise PersonBirthdayValueError("Choose a valid birthday.") from exc
-
-    parsed = ParsedPersonBirthday(month=month, day=day, year=year)
-    if year is not None:
-        due_date = get_next_birthday_due_date(month, day, today=today)
-        age = due_date.year - year
-        if age < 0 or age > 150:
-            raise PersonBirthdayValueError("Birth year must produce an age between 0 and 150.")
-    return parsed
+PersonBirthdayValueError = BirthdayValueError
+ParsedPersonBirthday = ParsedBirthday
+parse_person_birthday = parse_birthday_value
 
 
 def validate_person_birthday_field(
@@ -86,15 +50,15 @@ def validate_person_birthday_field(
     has_value: bool,
     today: date | None = None,
 ) -> None:
-    if record.record_type != RecordType.PERSON or field_key != PERSON_BIRTHDAY_KEY or not has_value:
+    if record.record_type not in SUPPORTED_BIRTHDAY_RECORD_TYPES or field_key != PERSON_BIRTHDAY_KEY or not has_value:
         return
     if is_sensitive:
         raise PersonBirthdayValueError("Birthday must be a normal detail so LifeLedger can maintain its reminder.")
-    parse_person_birthday(value, today=today)
+    parse_birthday_value(value, today=today)
 
 
 class PersonBirthdayService:
-    """Maintains the one system-owned birthday reminder derived from a Person item."""
+    """Keeps Person/Pet items and their one linked annual birthday reminder in sync."""
 
     def __init__(
         self,
@@ -102,26 +66,40 @@ class PersonBirthdayService:
         lifecycle: ResponsibilityLifecycleService,
         links: LinkedItemRepository,
         search: SearchProjectionService,
+        records: RecordRepository | None = None,
     ):
         self.reminders = reminders
+        self.records = records
         self.lifecycle = lifecycle
         self.links = links
         self.search = search
 
     def synchronize(self, record: Record, *, now: datetime | None = None) -> Reminder | None:
         current = _utc(now)
+        record = self._canonical_record(record, today=current.date(), persist=True)
         birthday = self._birthday(record, today=current.date())
         existing = self._managed_reminder(record, birthday)
-        if record.record_type != RecordType.PERSON or record.status == RecordStatus.ARCHIVED or birthday is None:
+        if record.record_type not in SUPPORTED_BIRTHDAY_RECORD_TYPES or record.status == RecordStatus.ARCHIVED or birthday is None:
             return self._archive(existing, current)
 
         due_date = get_next_birthday_due_date(birthday.month, birthday.day, today=current.date())
+        retained_age = None
+        if (
+            birthday.year is None
+            and existing is not None
+            and existing.birthday_details is not None
+            and existing.birthday_details.inferred_birth_year
+            and (existing.birthday_details.birth_month, existing.birthday_details.birth_day) == (birthday.month, birthday.day)
+        ):
+            retained_age = existing.birthday_details.age_turning_next_birthday
         details = enrich_birthday_details(
             BirthdayDetails(
+                subject_type=record.record_type,
                 person_name=record.title,
                 birth_month=birthday.month,
                 birth_day=birthday.day,
                 birth_year=birthday.year,
+                age_turning_next_birthday=retained_age,
                 relationship=self._relationship(record),
             ),
             due_date,
@@ -198,11 +176,124 @@ class PersonBirthdayService:
     def retire(self, record: Record, *, now: datetime | None = None) -> Reminder | None:
         return self._archive(self._managed_reminder(record, None), _utc(now))
 
+    def synchronize_from_reminder(
+        self,
+        reminder: Reminder,
+        *,
+        item_id: str | None = None,
+        now: datetime | None = None,
+    ) -> Record | None:
+        """Create or update the birthday subject for a confirmed birthday reminder.
+
+        This intentionally does not call ``synchronize`` again: the reminder that
+        caused the item write is already the canonical paired reminder.
+        """
+        if reminder.reminder_type != ReminderType.BIRTHDAY or reminder.birthday_details is None:
+            return None
+        if self.records is None:
+            return None
+
+        current = _utc(now)
+        details = reminder.birthday_details
+        subject_type = details.subject_type
+        if subject_type not in SUPPORTED_BIRTHDAY_RECORD_TYPES:
+            return None
+        birthday = ParsedBirthday(
+            month=details.birth_month,
+            day=details.birth_day,
+            year=None if details.inferred_birth_year else details.birth_year,
+        )
+
+        record = self._linked_birthday_record(reminder, preferred_record_id=item_id)
+        if record is None:
+            record = self._matching_birthday_record(reminder.user_id, subject_type, details.person_name, birthday)
+
+        if record is None:
+            record_id = str(uuid5(NAMESPACE_URL, f"lifeledger:birthday-subject:{reminder.user_id}:{reminder.id}"))
+            record = self.records.get_record(reminder.user_id, record_id)
+            if record is None:
+                record = Record(
+                    id=record_id,
+                    user_id=reminder.user_id,
+                    record_type=subject_type,
+                    title=details.person_name,
+                    category="People" if subject_type == RecordType.PERSON else "Family",
+                    birthday=birthday.stored_value,
+                    created_at=current,
+                    updated_at=current,
+                )
+                record = self.records.create_record(record)
+
+        next_title = details.person_name if record.id == str(
+            uuid5(NAMESPACE_URL, f"lifeledger:birthday-subject:{reminder.user_id}:{reminder.id}")
+        ) else record.title
+        updates: dict[str, object] = {
+            "birthday": birthday.stored_value,
+            "dynamic_fields": [field for field in record.dynamic_fields if field.key != PERSON_BIRTHDAY_KEY],
+            "updated_at": current,
+        }
+        if next_title != record.title:
+            updates["title"] = next_title
+        updated = record.model_copy(update=updates)
+        if updated != record:
+            record = self.records.update_record(updated)
+            self.search.sync_entity_and_neighbors_observed(
+                record.user_id,
+                LinkedEntityType.RECORD,
+                record.id,
+                operation="birthday_reminder_item_sync",
+            )
+        self._ensure_link(record, reminder, current)
+        return record
+
+    def canonical_record(self, record: Record, *, today: date | None = None) -> Record:
+        """Expose old dynamic birthday data through the new first-class field."""
+        return self._canonical_record(record, today=today or date.today(), persist=False)
+
     @staticmethod
     def reminder_id(user_id: str, record_id: str) -> str:
         return str(uuid5(NAMESPACE_URL, f"lifeledger:person-birthday:{user_id}:{record_id}"))
 
-    def _managed_reminder(self, record: Record, birthday: ParsedPersonBirthday | None) -> Reminder | None:
+    def _canonical_record(self, record: Record, *, today: date, persist: bool) -> Record:
+        updated = canonicalize_birthday_record(record, today=today)
+        if updated == record:
+            return record
+        return self.records.update_record(updated) if persist and self.records is not None else updated
+
+    def _linked_birthday_record(self, reminder: Reminder, *, preferred_record_id: str | None) -> Record | None:
+        if preferred_record_id:
+            preferred = self.records.get_record(reminder.user_id, preferred_record_id)
+            if preferred is not None and preferred.record_type in SUPPORTED_BIRTHDAY_RECORD_TYPES:
+                return preferred
+        for link in self.links.list_links_for_entity(reminder.user_id, LinkedEntityType.REMINDER, reminder.id):
+            if link.source_type == LinkedEntityType.RECORD:
+                record_id = link.source_id
+            elif link.target_type == LinkedEntityType.RECORD:
+                record_id = link.target_id
+            else:
+                continue
+            candidate = self.records.get_record(reminder.user_id, record_id)
+            if candidate is not None and candidate.record_type in SUPPORTED_BIRTHDAY_RECORD_TYPES:
+                return candidate
+        return None
+
+    def _matching_birthday_record(
+        self,
+        user_id: str,
+        subject_type: RecordType,
+        name: str,
+        birthday: ParsedBirthday,
+    ) -> Record | None:
+        matches: list[Record] = []
+        for candidate in self.records.list_records(user_id):
+            if candidate.record_type != subject_type or candidate.title.casefold() != name.casefold():
+                continue
+            existing = self._birthday(candidate, today=date.today())
+            if existing is None or (existing.month, existing.day) == (birthday.month, birthday.day):
+                matches.append(candidate)
+        return matches[0] if len(matches) == 1 else None
+
+    def _managed_reminder(self, record: Record, birthday: ParsedBirthday | None) -> Reminder | None:
         deterministic = self.reminders.get_reminder(record.user_id, self.reminder_id(record.user_id, record.id))
         if deterministic is not None:
             return deterministic
@@ -222,9 +313,11 @@ class PersonBirthdayService:
         return None
 
     @staticmethod
-    def _birthday(record: Record, *, today: date) -> ParsedPersonBirthday | None:
-        if record.record_type != RecordType.PERSON:
+    def _birthday(record: Record, *, today: date) -> ParsedBirthday | None:
+        if record.record_type not in SUPPORTED_BIRTHDAY_RECORD_TYPES:
             return None
+        if record.birthday:
+            return parse_birthday_value(record.birthday, today=today)
         field = next(
             (
                 item
@@ -233,10 +326,12 @@ class PersonBirthdayService:
             ),
             None,
         )
-        return parse_person_birthday(field.value, today=today) if field else None
+        return parse_birthday_value(field.value, today=today) if field else None
 
     @staticmethod
     def _relationship(record: Record) -> str | None:
+        if record.record_type != RecordType.PERSON:
+            return None
         field = next(
             (
                 item
@@ -320,6 +415,26 @@ def _managed_values(reminder: Reminder) -> tuple[object, ...]:
         reminder.completed_at,
         reminder.archived_at,
     )
+
+
+def canonicalize_birthday_record(record: Record, *, today: date | None = None) -> Record:
+    if record.record_type not in SUPPORTED_BIRTHDAY_RECORD_TYPES:
+        return record
+    legacy = next(
+        (
+            field
+            for field in record.dynamic_fields
+            if field.key == PERSON_BIRTHDAY_KEY and field.has_value and not field.is_sensitive and field.value is not None
+        ),
+        None,
+    )
+    birthday = record.birthday
+    if birthday is None and legacy is not None:
+        birthday = parse_birthday_value(legacy.value, today=today).stored_value
+    next_fields = [field for field in record.dynamic_fields if field.key != PERSON_BIRTHDAY_KEY]
+    if birthday == record.birthday and len(next_fields) == len(record.dynamic_fields):
+        return record
+    return record.model_copy(update={"birthday": birthday, "dynamic_fields": next_fields})
 
 
 def _utc(value: datetime | None) -> datetime:

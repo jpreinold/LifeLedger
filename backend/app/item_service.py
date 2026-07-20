@@ -75,7 +75,7 @@ ITEM_DETAIL_SPECS: dict[RecordType, dict[str, DetailSpec]] = {
     RecordType.PET: {
         **COMMON_DETAILS,
         "breed": _detail("breed", "Breed"),
-        "birthday": _detail("birthday", "Birthday", DynamicFieldType.DATE),
+        "birthday": _detail("birthday", "Birthday", record_field="birthday"),
         "vet": _detail("vet", "Veterinarian"),
         "next_vaccination_due_date": _detail("next_vaccination_due_date", "Next vaccination due", DynamicFieldType.DATE),
     },
@@ -104,8 +104,8 @@ ITEM_DETAIL_SPECS: dict[RecordType, dict[str, DetailSpec]] = {
     RecordType.WARRANTY: {**COMMON_DETAILS, "coverage": _detail("coverage", "Coverage")},
     RecordType.PERSON: {
         "preferred_name": _detail("preferred_name", "Preferred name"),
-        # Person birthdays intentionally support either YYYY-MM-DD or --MM-DD.
-        "birthday": _detail("birthday", "Birthday"),
+        # Person and Pet birthdays support either YYYY-MM-DD or --MM-DD.
+        "birthday": _detail("birthday", "Birthday", record_field="birthday"),
         "relationship_context": _detail(
             "relationship_context",
             "Relationship",
@@ -310,7 +310,7 @@ class ItemApplicationService:
 
 
 def _normalize_detail_value(spec: DetailSpec, value: object):
-    if spec.key == "birthday" and spec.field_type == DynamicFieldType.SHORT_TEXT:
+    if spec.key == "birthday":
         try:
             return parse_person_birthday(value).stored_value
         except ValueError as exc:

@@ -207,7 +207,7 @@ function CaptureReview({ detail, pending, onClose, onApprove, onReject, onAnswer
       {clarification?.status === 'open' ? clarification.questions.map((question) => (
         <fieldset className="capture-question" key={question.question_id}>
           <legend>{question.prompt}</legend>
-          {question.options.map((option) => <button type="button" key={option.option_id} disabled={pending === proposal?.proposal_id} onClick={() => proposal && void onAnswer(proposal.proposal_id, question.question_id, option.option_id)}>{option.label}</button>)}
+          {question.options.map((option) => <button type="button" className="capture-question-option" key={option.option_id} disabled={pending === proposal?.proposal_id} onClick={() => proposal && void onAnswer(proposal.proposal_id, question.question_id, option.option_id)}>{option.label}</button>)}
           {question.allow_free_text && proposal ? (
             <ClarificationTextAnswer
               disabled={pending === proposal.proposal_id}
@@ -302,8 +302,8 @@ function ClarificationTextAnswer({ disabled, onSubmit }: { disabled: boolean; on
   return (
     <form className="capture-question-text" onSubmit={(event) => { event.preventDefault(); if (value.trim()) void onSubmit(value.trim()) }}>
       <label>
-        <span className="sr-only">Clarification answer</span>
-        <textarea value={value} onChange={(event) => setValue(event.target.value)} maxLength={500} rows={3} disabled={disabled} />
+        <span>Your answer</span>
+        <textarea value={value} onChange={(event) => setValue(event.target.value)} maxLength={500} rows={2} disabled={disabled} placeholder="Add the missing name or detail" />
       </label>
       <button type="submit" className="primary-button" disabled={disabled || !value.trim()}>Continue</button>
     </form>

@@ -143,7 +143,10 @@ describe('Phase 10 product language and item flows', () => {
 
     expect(screen.getByLabelText('Pet name')).toBeInTheDocument()
     expect(screen.getByLabelText('Breed')).toBeInTheDocument()
-    expect(screen.getByLabelText('Birthday')).toHaveAttribute('type', 'date')
+    expect(screen.getByLabelText('Birthday')).toBeInTheDocument()
+    expect(screen.getByLabelText('Month')).toBeInTheDocument()
+    expect(screen.getByLabelText('Day')).toBeInTheDocument()
+    expect(screen.getByLabelText(/Year/)).toBeInTheDocument()
     expect(screen.getByLabelText('Veterinarian')).toBeInTheDocument()
     expect(screen.getByLabelText('Microchip number')).toBeInTheDocument()
 
@@ -177,13 +180,41 @@ describe('Phase 10 product language and item flows', () => {
     await user.type(screen.getByLabelText('Display name'), 'Alex')
     await user.selectOptions(screen.getByLabelText('Month'), '7')
     await user.type(screen.getByLabelText('Day'), '18')
-    expect(screen.getByLabelText(/Year/)).toHaveValue(null)
+    expect(screen.getByLabelText(/Year/)).toHaveValue('')
     await user.click(screen.getByRole('button', { name: 'Add person' }))
 
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1))
-    expect((onCreate.mock.calls[0] as unknown[])[5]).toEqual(expect.arrayContaining([
-      expect.objectContaining({ key: 'birthday', value: '--07-18' }),
+    expect((onCreate.mock.calls[0] as unknown[])[0]).toEqual(expect.objectContaining({ birthday: '--07-18' }))
+    expect((onCreate.mock.calls[0] as unknown[])[5]).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'birthday' }),
     ]))
+  })
+
+  it('keeps the selected month and day while a birth year is typed', async () => {
+    const user = userEvent.setup()
+    render(
+      <RecordForm
+        isOpen
+        isSaving={false}
+        record={null}
+        records={[]}
+        recordType="person"
+        reminders={[]}
+        onClose={vi.fn()}
+        onCreate={vi.fn(async () => true)}
+        onUpdate={vi.fn()}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('Display name'), 'Jackson')
+    await user.selectOptions(screen.getByLabelText('Month'), '1')
+    await user.type(screen.getByLabelText('Day'), '10')
+    await user.type(screen.getByLabelText(/Year/), '1996')
+
+    expect(screen.getByLabelText('Month')).toHaveValue('1')
+    expect(screen.getByLabelText('Day')).toHaveValue(10)
+    expect(screen.getByLabelText(/Year/)).toHaveValue('1996')
+    expect(screen.getByText(/turning/i)).toBeInTheDocument()
   })
 
   it('renders vehicle-specific fields including protected VIN support', () => {

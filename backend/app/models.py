@@ -1,6 +1,8 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.birthday_value import BirthdayValueError, parse_birthday_value
 
 from app.schemas import (
     AttachmentScanResult,
@@ -140,6 +142,7 @@ class Record(BaseModel):
     expiration_date: date | None = None
     purchase_date: date | None = None
     renewal_date: date | None = None
+    birthday: str | None = None
     location_hint: str | None = None
     notes: str | None = None
     tags: list[str] = Field(default_factory=list)
@@ -154,6 +157,18 @@ class Record(BaseModel):
     protected_field_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_birthday(self) -> "Record":
+        if self.birthday is None:
+            return self
+        if self.record_type not in {RecordType.PERSON, RecordType.PET}:
+            raise ValueError("Birthday is available only for Person and Pet items.")
+        try:
+            self.birthday = parse_birthday_value(self.birthday).stored_value
+        except BirthdayValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
 
 
 class LinkedItem(BaseModel):

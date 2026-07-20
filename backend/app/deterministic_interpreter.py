@@ -36,6 +36,10 @@ class DeterministicInterpreter:
         local_now = _local_now(captured_at, timezone_name)
         value = " ".join(text.strip().split())
 
+        result = self._create_birthday_subject(value, local_now)
+        if result:
+            return result, []
+
         result = self._explicit_reminder(value, local_now)
         if result:
             return result, []
@@ -46,6 +50,33 @@ class DeterministicInterpreter:
             if result:
                 return result, candidates
         return None, candidates
+
+    def _create_birthday_subject(self, text: str, now: datetime) -> StructuredInterpretation | None:
+        match = re.fullmatch(
+            r"(?:create|add)\s+(?:a\s+)?(?P<kind>person|pet)(?:\s+(?:named|called))?\s+"
+            r"(?P<name>[^,]+?),?\s+(?:(?:their|his|her|its)\s+)?birthday\s+is\s+(?P<birthday>.+?)[.!]?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        birthday = parse_birthday_phrase(match.group("birthday"), today=now.date())
+        if birthday is None:
+            return None
+        item_type = RecordType.PERSON if match.group("kind").casefold() == "person" else RecordType.PET
+        name = match.group("name").strip().title()
+        label = "Person" if item_type == RecordType.PERSON else "Pet"
+        return _interpretation(
+            f"Create {name} as a {label} and save the birthday. LifeLedger will maintain the linked annual reminder.",
+            [
+                ActionSeed(
+                    action_type=ActionType.CREATE_ITEM,
+                    item_type=item_type,
+                    fields={"title": name, "details": {"birthday": birthday}},
+                    explanation=f"Create {name} as a {label}; LifeLedger handles the birthday reminder automatically.",
+                )
+            ],
+        )
 
     def _explicit_reminder(self, text: str, now: datetime) -> StructuredInterpretation | None:
         match = re.fullmatch(
@@ -258,11 +289,14 @@ def parse_date_phrase(value: str, today: date) -> date | None:
 
 def parse_absolute_date(value: str, *, default_year: int | None = None) -> date | None:
     normalized = " ".join(value.casefold().strip(" .").replace(",", " ").split())
+    normalized = re.sub(r"(?<=\d)(?:st|nd|rd|th)\b", "", normalized)
     try:
         return date.fromisoformat(normalized)
     except ValueError:
         pass
     match = re.fullmatch(r"(?P<month>[a-z]+) (?P<day>\d{1,2})(?: (?P<year>\d{4}))?", normalized)
+    year_first = re.fullmatch(r"(?P<year>\d{4}) (?P<month>[a-z]+) (?P<day>\d{1,2})", normalized)
+    match = match or year_first
     if not match or match.group("month") not in MONTHS:
         return None
     year = int(match.group("year")) if match.group("year") else default_year
@@ -272,6 +306,26 @@ def parse_absolute_date(value: str, *, default_year: int | None = None) -> date 
         return date(year, MONTHS[match.group("month")], int(match.group("day")))
     except ValueError:
         return None
+
+
+def parse_birthday_phrase(value: str, *, today: date) -> str | None:
+    full = parse_absolute_date(value)
+    if full is not None:
+        if full > today or today.year - full.year > 150:
+            return None
+        return full.isoformat()
+    normalized = " ".join(value.casefold().strip(" .").replace(",", " ").split())
+    normalized = re.sub(r"(?<=\d)(?:st|nd|rd|th)\b", "", normalized)
+    match = re.fullmatch(r"(?P<month>[a-z]+) (?P<day>\d{1,2})", normalized)
+    if not match or match.group("month") not in MONTHS:
+        return None
+    month = MONTHS[match.group("month")]
+    day = int(match.group("day"))
+    try:
+        date(2000, month, day)
+    except ValueError:
+        return None
+    return f"--{month:02d}-{day:02d}"
 
 
 def _interpretation(summary: str, actions: list[ActionSeed]) -> StructuredInterpretation:

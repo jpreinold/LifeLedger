@@ -32,6 +32,7 @@ export type RecordField =
   | 'expiration_date'
   | 'purchase_date'
   | 'renewal_date'
+  | 'birthday'
   | 'location_hint'
   | 'notes'
   | 'tags'
@@ -225,7 +226,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     suggestedDetails: [
       detail('preferred_name', 'Preferred name', 'short_text', 100, { placeholder: 'Name they prefer' }),
       detail('relationship_context', 'Relationship', 'select', 110, { selectOptions: ['Friend', 'Family', 'Coworker', 'Neighbor', 'Other'] }),
-      detail('birthday', 'Birthday', 'short_text', 120, { placeholder: 'Month and day', helperText: 'A year is optional. LifeLedger never invents one.', showByDefault: true }),
+      detail('birthday', 'Birthday', 'short_text', 120, { recordField: 'birthday', placeholder: 'Month and day', helperText: 'A year is optional. LifeLedger never invents one.', showByDefault: true, section: 'overview' }),
       detail('aliases', 'Aliases', 'short_text', 130, { placeholder: 'Other names, separated by commas' }),
       detail('notes', 'Notes', 'long_text', 200, { recordField: 'notes', placeholder: 'A short, useful note' }),
     ],
@@ -248,7 +249,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     defaultTitle: 'Person',
     tone: 'family',
     legacyDuplicateCategories: ['Person', 'People'],
-    coreFields: ['title'],
+    coreFields: ['title', 'birthday'],
     additionalFields: ['notes', 'tags'],
   }),
   general: defineEntity({
@@ -477,7 +478,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     defaultStatus: 'active',
     suggestedDetails: [
       detail('breed', 'Breed', 'short_text', 100, { placeholder: 'Breed or mix', showByDefault: true, section: 'overview' }),
-      detail('birthday', 'Birthday', 'date', 110, { placeholder: 'Choose a date', showByDefault: true, section: 'overview' }),
+      detail('birthday', 'Birthday', 'short_text', 110, { recordField: 'birthday', placeholder: 'Month and day', helperText: 'A year is optional. LifeLedger never invents one.', showByDefault: true, section: 'overview' }),
       detail('vet', 'Veterinarian', 'short_text', 120, { placeholder: 'Veterinarian or clinic', showByDefault: true, section: 'overview' }),
       detail('next_vaccination_due_date', 'Next vaccination due', 'date', 125, { placeholder: 'Choose a date', showByDefault: true, section: 'overview' }),
       detail('microchip', 'Microchip number', 'short_text', 130, { placeholder: 'Microchip number', protectedByDefault: true, searchable: false, showByDefault: true, section: 'overview' }),
@@ -486,6 +487,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     ],
     supportedSections: standardSections,
     suggestedResponsibilities: [
+      responsibility('birthday', 'Birthday reminder', 'Remember this pet’s birthday every year.', 'Birthday', 7, 'days'),
       responsibility('renewal', 'Annual vaccination', 'Track the next vaccination due date.', 'Vaccination due date', 1),
       responsibility('generic', 'Wellness visit', 'Plan the next routine veterinary visit.', 'Visit date', 2, 'weeks'),
     ],
@@ -502,7 +504,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     defaultTitle: 'My pet',
     tone: 'family',
     legacyDuplicateCategories: ['Pet'],
-    coreFields: ['title'],
+    coreFields: ['title', 'birthday'],
     additionalFields: ['subtitle', 'notes', 'tags'],
   }),
   home: defineEntity({

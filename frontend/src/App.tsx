@@ -384,7 +384,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           setError('The reminder was added, but LifeLedger could not connect it to this item. You can add it from Related items.')
         }
       }
-      await loadReminderData()
+      await Promise.all([loadReminderData(), loadRecordData()])
       setResponsibilityRecordId(null)
       return true
     } catch (requestError) {
@@ -418,7 +418,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     try {
       const updated = await remindersApi.snooze(id, snoozedUntil)
       replaceReminder(updated)
-      await loadReminderData()
+      await Promise.all([loadReminderData(), loadRecordData()])
       setNotice('Reminder snoozed.')
       return true
     } catch (requestError) {
@@ -498,7 +498,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       await remindersApi.update(id, input)
-      await loadReminderData()
+      await Promise.all([loadReminderData(), loadRecordData()])
       setNotice('Reminder updated.')
       return true
     } catch (requestError) {
@@ -707,7 +707,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function handleRecordChange(updated: LifeRecord) {
     replaceRecord(updated)
-    if (updated.record_type === 'person') {
+    if (updated.record_type === 'person' || updated.record_type === 'pet') {
       void loadReminderData()
     }
   }
@@ -1115,7 +1115,22 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     }
     let input: ReminderInput
 
-    if (suggestion?.type === 'renewal') {
+    if (suggestion?.type === 'birthday' && (record.record_type === 'person' || record.record_type === 'pet')) {
+      const birthday = parseStoredBirthday(record.birthday ?? null)
+      input = createBirthdayReminderInput({
+        ...commonOverrides,
+        title: `${record.title}'s Birthday`,
+        ...(birthday ? { due_date: getNextStoredBirthdayDate(birthday.month, birthday.day) } : {}),
+        birthday_details: {
+          ...emptyBirthdayDetails(),
+          subject_type: record.record_type,
+          person_name: record.title,
+          birth_month: birthday?.month ?? null,
+          birth_day: birthday?.day ?? null,
+          birth_year: birthday?.year ?? null,
+        },
+      })
+    } else if (suggestion?.type === 'renewal') {
       const relevantDate = record.renewal_date ?? record.expiration_date ?? getDateKey(new Date())
       input = createRenewalReminderInput({
         ...commonOverrides,
@@ -1740,6 +1755,22 @@ function getBirthdayDateOverride(date: string | null): Partial<ReminderInput> {
       birth_day: parsedDate.getDate(),
     },
   }
+}
+
+function parseStoredBirthday(value: string | null) {
+  if (!value) return null
+  const yearless = /^--(\d{2})-(\d{2})$/.exec(value)
+  if (yearless) return { month: Number(yearless[1]), day: Number(yearless[2]), year: null }
+  const complete = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  return complete ? { year: Number(complete[1]), month: Number(complete[2]), day: Number(complete[3]) } : null
+}
+
+function getNextStoredBirthdayDate(month: number, day: number) {
+  const now = new Date()
+  const dateForYear = (year: number) => new Date(year, month - 1, Math.min(day, new Date(year, month, 0).getDate()))
+  const candidate = dateForYear(now.getFullYear())
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return getDateKey(candidate < today ? dateForYear(now.getFullYear() + 1) : candidate)
 }
 
 function getRenewalDateOverride(date: string | null): Partial<ReminderInput> {

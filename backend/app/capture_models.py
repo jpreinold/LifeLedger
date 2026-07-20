@@ -23,7 +23,7 @@ from app.schemas import (
 SCHEMA_VERSION = 1
 ACTION_SCHEMA_VERSION = 1
 INTERPRETATION_VERSION = "capture-v1"
-PROMPT_VERSION = "capture-openai-v1"
+PROMPT_VERSION = "capture-openai-actions-v2"
 
 
 class CaptureSource(StrEnum):
@@ -201,11 +201,18 @@ class UpdateItemDetailFields(BaseModel):
 
 class BirthdayActionDetails(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    subject_type: RecordType = RecordType.PERSON
     person_name: str = Field(min_length=1, max_length=120)
     birth_month: int = Field(ge=1, le=12)
     birth_day: int = Field(ge=1, le=31)
     birth_year: int | None = Field(default=None, ge=1, le=9999)
     relationship: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def validate_subject_type(self) -> "BirthdayActionDetails":
+        if self.subject_type not in {RecordType.PERSON, RecordType.PET}:
+            raise ValueError("Birthday subjects must be a Person or Pet")
+        return self
 
 
 class RenewalActionDetails(BaseModel):

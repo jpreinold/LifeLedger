@@ -22,6 +22,7 @@ def create_record(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> RecordResponse:
     normalized_key = normalize_idempotency_key(idempotency_key)
     record_id = (
@@ -31,6 +32,7 @@ def create_record(
     )
     existing = repo.get_record(current_user.user_id, record_id)
     if existing is not None:
+        birthdays.synchronize(existing, now=existing.updated_at)
         sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, existing.id, "record_create_retry")
         return to_record_response(existing)
 
@@ -46,6 +48,7 @@ def create_record(
     )
 
     saved = repo.create_record(record)
+    birthdays.synchronize(saved, now=saved.updated_at)
     sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, saved.id, "record_create")
     return to_record_response(saved)
 

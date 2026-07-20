@@ -12,6 +12,7 @@ import type {
 import type {
   ProtectedRecordField,
   ProtectedRecordInput,
+  LifeRecord,
   RecordInput,
   RecordType,
 } from '../types/record'
@@ -48,13 +49,14 @@ export function createRecordInput(type: RecordType): RecordInput {
     expiration_date: null,
     purchase_date: null,
     renewal_date: null,
+    birthday: null,
     location_hint: null,
     notes: null,
     tags: [],
   }
 }
 
-export function recordToInput(record: RecordInput): RecordInput {
+export function recordToInput(record: RecordInput | LifeRecord): RecordInput {
   const definition = getRecordTypeDefinition(record.record_type)
 
   return {
@@ -69,6 +71,7 @@ export function recordToInput(record: RecordInput): RecordInput {
     expiration_date: record.expiration_date,
     purchase_date: record.purchase_date,
     renewal_date: record.renewal_date,
+    birthday: record.birthday ?? null,
     location_hint: record.location_hint,
     notes: record.notes,
     tags: [...record.tags],
@@ -90,6 +93,7 @@ export function normalizeRecordInput(input: RecordInput): RecordInput {
     expiration_date: input.expiration_date || null,
     purchase_date: input.purchase_date || null,
     renewal_date: input.renewal_date || null,
+    birthday: input.birthday || null,
     location_hint: normalizeOptionalText(input.location_hint),
     notes: normalizeOptionalText(input.notes),
     tags: normalizeTags(input.tags),

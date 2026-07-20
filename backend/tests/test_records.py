@@ -413,34 +413,37 @@ def test_dynamic_record_field_crud_preserves_record_and_validates_types(client, 
     assert record_repo.get_record("local-dev-user", created["id"]) is not None
 
 
-def test_person_birthday_field_mutations_trigger_system_reminder_sync(client, birthday_service):
+@pytest.mark.parametrize("record_type", ["person", "pet"])
+def test_first_class_birthday_mutations_trigger_system_reminder_sync(client, birthday_service, record_type):
     created = client.post(
         "/records",
-        json=record_payload(record_type="person", title="Alex", category="People"),
+        json=record_payload(record_type=record_type, title="Alex", category="People"),
     ).json()
+    birthday_service.synchronize.reset_mock()
 
-    added = client.post(
-        f"/records/{created['id']}/fields",
-        json={"key": "birthday", "label": "Birthday", "field_type": "short_text", "value": "--07-18"},
+    added = client.put(
+        f"/records/{created['id']}",
+        json={"birthday": "--07-18"},
     )
-    assert added.status_code == 201
-    field = added.json()["dynamic_fields"][0]
+    assert added.status_code == 200
+    assert added.json()["birthday"] == "--07-18"
+    assert added.json()["dynamic_fields"] == []
     synchronized = birthday_service.synchronize.call_args.args[0]
-    assert synchronized.record_type.value == "person"
-    assert next(item for item in synchronized.dynamic_fields if item.key == "birthday").value == "--07-18"
+    assert synchronized.record_type.value == record_type
+    assert synchronized.birthday == "--07-18"
 
     updated = client.put(
-        f"/records/{created['id']}/fields/{field['field_id']}",
-        json={"value": "1990-07-18"},
+        f"/records/{created['id']}",
+        json={"birthday": "1990-07-18"},
     )
     assert updated.status_code == 200
     synchronized = birthday_service.synchronize.call_args.args[0]
-    assert next(item for item in synchronized.dynamic_fields if item.key == "birthday").value == "1990-07-18"
+    assert synchronized.birthday == "1990-07-18"
     assert birthday_service.synchronize.call_count == 2
 
     invalid = client.put(
-        f"/records/{created['id']}/fields/{field['field_id']}",
-        json={"value": "July 18"},
+        f"/records/{created['id']}",
+        json={"birthday": "July 18"},
     )
     assert invalid.status_code == 422
     assert birthday_service.synchronize.call_count == 2

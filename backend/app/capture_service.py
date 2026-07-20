@@ -210,7 +210,7 @@ class CaptureApplicationService:
                 interpretation = provider_result.interpretation
                 interpreter = provider_result.provider
                 model_name = provider_result.model
-                prompt_version = "capture-openai-v1"
+                prompt_version = "capture-openai-actions-v2"
                 usage_record, _ = self.usage.record(
                     provider_request_id=provider_result.provider_request_id,
                     user_id=user_id,

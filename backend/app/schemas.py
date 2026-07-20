@@ -6,6 +6,8 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.birthday_value import BirthdayValueError, parse_birthday_value
+
 
 class ReminderCategory(str, Enum):
     CAR = "Car"
@@ -221,6 +223,7 @@ class MaintenanceIntervalUnit(str, Enum):
 
 
 class BirthdayDetails(BaseModel):
+    subject_type: RecordType = RecordType.PERSON
     person_name: str = Field(..., min_length=1, max_length=120)
     birth_month: int = Field(..., ge=1, le=12)
     birth_day: int = Field(..., ge=1, le=31)
@@ -248,6 +251,8 @@ class BirthdayDetails(BaseModel):
 
     @model_validator(mode="after")
     def validate_month_day(self) -> "BirthdayDetails":
+        if self.subject_type not in {RecordType.PERSON, RecordType.PET}:
+            raise ValueError("Birthday reminders can be linked only to a person or pet")
         last_day = calendar.monthrange(2000, self.birth_month)[1]
         if self.birth_day > last_day:
             raise ValueError("Birth day is not valid for the selected month")
@@ -621,6 +626,7 @@ class RecordBase(BaseModel):
     expiration_date: date | None = None
     purchase_date: date | None = None
     renewal_date: date | None = None
+    birthday: str | None = Field(default=None, max_length=10)
     location_hint: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=1000)
     tags: list[str] = Field(default_factory=list, max_length=12)
@@ -686,6 +692,24 @@ class RecordBase(BaseModel):
 
         return normalized
 
+    @field_validator("birthday", mode="before")
+    @classmethod
+    def normalize_birthday(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            return parse_birthday_value(value).stored_value
+        except BirthdayValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @model_validator(mode="after")
+    def validate_birthday_subject(self) -> "RecordBase":
+        if self.birthday is not None and self.record_type not in {RecordType.PERSON, RecordType.PET}:
+            raise ValueError("Birthday is available only for Person and Pet items.")
+        return self
+
 
 class RecordCreate(RecordBase):
     model_config = ConfigDict(extra="forbid")
@@ -707,6 +731,7 @@ class RecordUpdate(BaseModel):
     expiration_date: date | None = None
     purchase_date: date | None = None
     renewal_date: date | None = None
+    birthday: str | None = Field(default=None, max_length=10)
     location_hint: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=1000)
     tags: list[str] | None = Field(default=None, max_length=12)
@@ -732,6 +757,11 @@ class RecordUpdate(BaseModel):
         if value is None:
             return None
         return RecordBase.normalize_tags(value)
+
+    @field_validator("birthday", mode="before")
+    @classmethod
+    def normalize_birthday(cls, value: str | None) -> str | None:
+        return RecordBase.normalize_birthday(value)
 
 
 DynamicFieldValue = str | int | float | bool | None

@@ -494,6 +494,7 @@ export function RecordDetailDrawer({
                 { label: 'Category', value: categoryPresentation },
                 { label: definition.labels.owner_name ?? productTerms.owner, value: record.owner_name },
                 { label: definition.labels.provider_or_brand ?? productTerms.provider, value: record.provider_or_brand },
+                { label: 'Birthday', value: formatBirthdayDetail(record.birthday ?? null) },
                 { label: 'Summary', value: providerLine },
                 { label: definition.labels.location_hint ?? 'Location', value: record.location_hint },
               ]}
@@ -513,7 +514,7 @@ export function RecordDetailDrawer({
 
             <DynamicFieldsSection
               error={fieldError}
-              fields={record.dynamic_fields}
+              fields={record.dynamic_fields.filter((field) => field.key !== 'birthday')}
               revealedFields={revealedFields}
               revealingFieldId={revealingFieldId}
               removingFieldId={removingFieldId}
@@ -850,11 +851,13 @@ function DynamicFieldsSection({
                         </button>
                       )
                     ) : null}
-                    <button type="button" className="icon-button ghost-icon-button dynamic-field-edit" onClick={() => onEditField(field)} aria-label={`Edit ${field.label}`}>
+                    <button type="button" className="small-outline-button dynamic-field-action-button dynamic-field-edit" onClick={() => onEditField(field)} aria-label={`Edit ${field.label}`}>
                       <Pencil size={15} aria-hidden="true" />
+                      Edit
                     </button>
-                    <button type="button" className="icon-button ghost-icon-button dynamic-field-remove" disabled={removingFieldId === field.field_id} onClick={() => onRemoveField(field)} aria-label={`Remove ${field.label}`}>
+                    <button type="button" className="small-outline-button dynamic-field-action-button dynamic-field-remove" disabled={removingFieldId === field.field_id} onClick={() => onRemoveField(field)} aria-label={`Remove ${field.label}`}>
                       <Trash2 size={15} aria-hidden="true" />
+                      {removingFieldId === field.field_id ? 'Removing' : 'Remove'}
                     </button>
                   </span>
                 </dd>
@@ -872,6 +875,31 @@ function DynamicFieldsSection({
       </button>
     </section>
   )
+}
+
+function formatBirthdayDetail(value: string | null) {
+  if (!value) return null
+  const yearless = /^--(\d{2})-(\d{2})$/.exec(value)
+  const complete = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!yearless && !complete) return value
+  const year = complete ? Number(complete[1]) : null
+  const month = Number((complete ?? yearless)![complete ? 2 : 1])
+  const day = Number((complete ?? yearless)![complete ? 3 : 2])
+  const today = new Date()
+  const dateForYear = (targetYear: number) => new Date(
+    targetYear,
+    month - 1,
+    Math.min(day, new Date(targetYear, month, 0).getDate()),
+  )
+  const thisYear = dateForYear(today.getFullYear())
+  const next = thisYear < new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    ? dateForYear(today.getFullYear() + 1)
+    : thisYear
+  const birthdayLabel = year === null
+    ? dateForYear(2000).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+    : new Date(year, month - 1, day).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+  const nextLabel = next.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+  return `${birthdayLabel} · next ${nextLabel} · ${year === null ? 'age unknown' : `turning ${next.getFullYear() - year}`}`
 }
 
 function DynamicFieldDisplay({ field, isMasked, value }: { field: DynamicRecordField; isMasked: boolean; value: string }) {

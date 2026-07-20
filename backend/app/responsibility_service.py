@@ -12,6 +12,7 @@ from app.linked_items_repository import (
     linked_item_lookup_key,
 )
 from app.models import LinkedItem, Reminder
+from app.person_birthday_service import PersonBirthdayService
 from app.records_repository import RecordRepository
 from app.relationship_service import ItemResolver
 from app.repository import ReminderRepository
@@ -127,11 +128,13 @@ class ResponsibilityApplicationService:
         lifecycle: ResponsibilityLifecycleService,
         relationships: RelationshipApplicationService,
         linked_repository: LinkedItemRepository,
+        birthdays: PersonBirthdayService | None = None,
     ):
         self.reminders = reminders
         self.lifecycle = lifecycle
         self.relationships = relationships
         self.linked_repository = linked_repository
+        self.birthdays = birthdays
 
     def create(
         self,
@@ -145,10 +148,14 @@ class ResponsibilityApplicationService:
         payload = ReminderCreate.model_validate(fields)
         duplicate = self._find_duplicate(user_id, payload, item_id)
         if duplicate:
+            if self.birthdays is not None:
+                self.birthdays.synchronize_from_reminder(duplicate, item_id=item_id, now=now)
             return ResponsibilityMutationResult(duplicate, True)
         reminder_id = str(uuid5(NAMESPACE_URL, f"lifeledger:responsibility-service:{user_id}:{idempotency_key}"))
         existing = self.reminders.get_reminder(user_id, reminder_id)
         if existing:
+            if self.birthdays is not None:
+                self.birthdays.synchronize_from_reminder(existing, item_id=item_id, now=now)
             return ResponsibilityMutationResult(existing, True)
         current = _utc(now)
         reminder = Reminder(
@@ -179,6 +186,8 @@ class ResponsibilityApplicationService:
                 idempotency_key=f"{idempotency_key}:item-link",
                 now=current,
             )
+        if self.birthdays is not None:
+            self.birthdays.synchronize_from_reminder(result.reminder, item_id=item_id, now=current)
         return ResponsibilityMutationResult(result.reminder, result.idempotent_replay)
 
     def complete(

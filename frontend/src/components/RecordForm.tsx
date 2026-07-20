@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { AlertCircle, Bell, Clock3, FileText, FileUp, Link2, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
+import { AlertCircle, Bell, Clock3, FileText, FileUp, Link2, Pencil, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
 
 import { linkedItemsApi } from '../api/linkedItemsApi'
 import {
@@ -99,6 +99,7 @@ export function RecordForm({
   const [isDetailDraftOpen, setIsDetailDraftOpen] = useState(false)
   const [suggestedDetailValues, setSuggestedDetailValues] = useState<Record<string, DynamicFieldValue>>({})
   const [touchedSuggestedDetails, setTouchedSuggestedDetails] = useState<Set<string>>(new Set())
+  const [isBirthdayInputValid, setIsBirthdayInputValid] = useState(true)
   const formBodyRef = useRef<HTMLDivElement | null>(null)
   const stagedFileInputRef = useRef<HTMLInputElement | null>(null)
   const initialLinksRef = useRef<LinkedItemsResponse | null>(null)
@@ -139,6 +140,7 @@ export function RecordForm({
       setIsDetailDraftOpen(false)
       setSuggestedDetailValues({})
       setTouchedSuggestedDetails(new Set())
+      setIsBirthdayInputValid(true)
       return
     }
 
@@ -162,6 +164,7 @@ export function RecordForm({
     setIsDetailDraftOpen(false)
     setSuggestedDetailValues({})
     setTouchedSuggestedDetails(new Set())
+    setIsBirthdayInputValid(true)
   }, [isOpen, record, recordType])
 
   useEffect(() => {
@@ -214,6 +217,11 @@ export function RecordForm({
       setActiveTab('record')
       formBodyRef.current?.scrollTo({ top: 0 })
       setValidationError(`${definition.titleLabel} is required.`)
+      return
+    }
+    if (!isBirthdayInputValid) {
+      setActiveTab('record')
+      setValidationError('Complete a valid birthday, or leave it blank. The year is optional.')
       return
     }
 
@@ -498,13 +506,13 @@ export function RecordForm({
                 <strong>{definition.singularLabel}</strong>
               </div>
 
-              <RecordFieldGrid fields={visibleEssentialFields} form={form} onChange={updateField} />
+              <RecordFieldGrid fields={visibleEssentialFields} form={form} onBirthdayValidityChange={setIsBirthdayInputValid} onChange={updateField} />
             </section>
 
             {(visibleDateFields.length > 0 || hiddenSuggestedFields.some((field) => dateFields.includes(field))) ? (
               <details className="record-progressive-section record-collapsible-section">
                 <summary>Dates</summary>
-                <RecordFieldGrid fields={visibleDateFields} form={form} onChange={updateField} />
+                <RecordFieldGrid fields={visibleDateFields} form={form} onBirthdayValidityChange={setIsBirthdayInputValid} onChange={updateField} />
                 <SuggestedFieldButtons
                   fields={hiddenSuggestedFields.filter((field) => dateFields.includes(field))}
                   recordType={form.record_type}
@@ -516,7 +524,7 @@ export function RecordForm({
             {(visibleAdditionalFields.length > 0 || hiddenSuggestedFields.some((field) => !dateFields.includes(field))) ? (
               <details className="record-progressive-section record-collapsible-section">
                 <summary>More details</summary>
-                <RecordFieldGrid fields={visibleAdditionalFields} form={form} onChange={updateField} />
+                <RecordFieldGrid fields={visibleAdditionalFields} form={form} onBirthdayValidityChange={setIsBirthdayInputValid} onChange={updateField} />
                 <SuggestedFieldButtons
                   fields={hiddenSuggestedFields.filter((field) => !dateFields.includes(field))}
                   recordType={form.record_type}
@@ -766,13 +774,20 @@ function CustomDetailDraftsSection({
         <div className="staged-detail-list">
           {details.map((detail) => (
             <article className="staged-detail-row" key={detail.id}>
-              <button type="button" className="staged-detail-main" onClick={() => onEdit(detail)} aria-label={`Edit ${detail.label}`}>
+              <div className="staged-detail-main">
                 <strong>{detail.label}</strong>
                 <span>{getDynamicFieldTypeLabel(detail.field_type)}{detail.is_sensitive ? ' · Protected' : ''}</span>
-              </button>
-              <button type="button" className="icon-button ghost-icon-button" onClick={() => onRemove(detail.id)} aria-label={`Remove ${detail.label}`}>
-                <Trash2 size={15} aria-hidden="true" />
-              </button>
+              </div>
+              <div className="staged-detail-actions">
+                <button type="button" className="small-outline-button" onClick={() => onEdit(detail)} aria-label={`Edit ${detail.label}`}>
+                  <Pencil size={14} aria-hidden="true" />
+                  Edit
+                </button>
+                <button type="button" className="small-outline-button staged-detail-remove" onClick={() => onRemove(detail.id)} aria-label={`Remove ${detail.label}`}>
+                  <Trash2 size={14} aria-hidden="true" />
+                  Remove
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -1231,10 +1246,12 @@ function SuggestedFieldButtons({
 function RecordFieldGrid({
   fields,
   form,
+  onBirthdayValidityChange,
   onChange,
 }: {
   fields: RecordField[]
   form: RecordInput
+  onBirthdayValidityChange?: (isValid: boolean) => void
   onChange: (field: keyof RecordInput, value: string | null) => void
 }) {
   const visibleFields = fields.filter((field) => field !== 'location_hint' || form.record_type !== 'subscription')
@@ -1246,7 +1263,15 @@ function RecordFieldGrid({
   return (
     <div className="record-form-grid">
       {visibleFields.map((field) =>
-        dateFields.includes(field) ? (
+        field === 'birthday' ? (
+          <PersonBirthdayInput
+            key={field}
+            onValidityChange={onBirthdayValidityChange}
+            subjectName={form.title}
+            value={form.birthday}
+            onChange={(value) => onChange('birthday', typeof value === 'string' ? value : null)}
+          />
+        ) : dateFields.includes(field) ? (
           <RecordDateField field={field} form={form} key={field} onChange={onChange} />
         ) : (
           <RecordTextField field={field} form={form} definitionType={form.record_type} key={field} onChange={onChange} />
@@ -1349,6 +1374,7 @@ function getFieldLabel(field: RecordField, type: RecordType) {
     expiration_date: 'Expiration date',
     purchase_date: 'Purchase date',
     renewal_date: 'Renewal date',
+    birthday: 'Birthday',
     location_hint: 'Location hint',
     notes: 'Notes',
     tags: 'Tags',

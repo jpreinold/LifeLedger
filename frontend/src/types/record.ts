@@ -83,6 +83,7 @@ export interface LifeRecord {
   expiration_date: string | null
   purchase_date: string | null
   renewal_date: string | null
+  birthday?: string | null
   location_hint: string | null
   notes: string | null
   tags: string[]
@@ -106,6 +107,7 @@ export interface RecordInput {
   expiration_date: string | null
   purchase_date: string | null
   renewal_date: string | null
+  birthday: string | null
   location_hint: string | null
   notes: string | null
   tags: string[]

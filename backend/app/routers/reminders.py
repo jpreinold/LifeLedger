@@ -94,6 +94,7 @@ def create_reminder(
     current_user: UserContext = Depends(get_current_user),
     repo: ReminderRepository = Depends(get_repository),
     lifecycle_service: ResponsibilityLifecycleService = Depends(get_responsibility_lifecycle_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> ReminderResponse:
     normalized_key = normalize_idempotency_key(idempotency_key)
     reminder_id = (
@@ -103,6 +104,7 @@ def create_reminder(
     )
     existing = repo.get_reminder(current_user.user_id, reminder_id)
     if existing is not None:
+        birthdays.synchronize_from_reminder(existing, item_id=item_id, now=existing.updated_at)
         return to_response(existing)
 
     now = utc_now()
@@ -125,6 +127,7 @@ def create_reminder(
         )
     except LifecycleWriteConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    birthdays.synchronize_from_reminder(result.reminder, item_id=item_id, now=now)
     return to_response(result.reminder, lifecycle_reconciliation_status=result.reconciliation_status, last_lifecycle_event_id=result.event.event_id)
 
 @reminders_router.get("/reminders/{reminder_id}", response_model=ReminderResponse)
@@ -158,6 +161,7 @@ def update_reminder(
     calendar_service: GoogleCalendarService = Depends(get_google_calendar_service),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
     lifecycle_service: ResponsibilityLifecycleService = Depends(get_responsibility_lifecycle_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> ReminderResponse:
     reminder = require_reminder(repo, current_user.user_id, reminder_id)
     updates = payload.model_dump(exclude_unset=True)
@@ -197,6 +201,7 @@ def update_reminder(
         now,
     )
     sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.REMINDER, synced.id, "reminder_update")
+    birthdays.synchronize_from_reminder(synced, now=now)
     return to_response(synced, lifecycle_reconciliation_status=reconciliation_status)
 
 @reminders_router.delete("/reminders/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)

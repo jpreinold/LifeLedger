@@ -915,11 +915,19 @@ function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
       </div>
 
       <p className="birthday-helper-text">
-        Optional: add a birth year or turning age to calculate age automatically.
+        LifeLedger will create or update and link the matching Person or Pet item automatically.
       </p>
 
       <label>
-        <span>Person</span>
+        <span>Birthday for</span>
+        <select value={details.subject_type ?? 'person'} onChange={(event) => updateDetails({ subject_type: event.target.value as 'person' | 'pet' })}>
+          <option value="person">Person</option>
+          <option value="pet">Pet</option>
+        </select>
+      </label>
+
+      <label>
+        <span>{details.subject_type === 'pet' ? 'Pet' : 'Person'}</span>
         <input
           required
           maxLength={120}
@@ -996,15 +1004,17 @@ function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
         </label>
       </div>
 
-      <label>
-        <span>Relationship</span>
-        <input
-          maxLength={80}
-          value={details.relationship ?? ''}
-          onChange={(event) => updateDetails({ relationship: event.target.value || null })}
-          placeholder="Friend"
-        />
-      </label>
+      {details.subject_type === 'person' ? (
+        <label>
+          <span>Relationship</span>
+          <input
+            maxLength={80}
+            value={details.relationship ?? ''}
+            onChange={(event) => updateDetails({ relationship: event.target.value || null })}
+            placeholder="Friend"
+          />
+        </label>
+      ) : null}
 
       <p className="birthday-preview">{preview}</p>
     </section>

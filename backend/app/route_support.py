@@ -83,7 +83,12 @@ from app.maintenance import (
     prepare_maintenance_details,
 )
 from app.models import DynamicRecordField, GoogleCalendarConnection, GoogleOAuthState, LinkedItem, PushSubscription, Record, RecordAttachment, Reminder, ResponsibilityEvent
-from app.person_birthday_service import PersonBirthdayService, PersonBirthdayValueError, validate_person_birthday_field
+from app.person_birthday_service import (
+    PersonBirthdayService,
+    PersonBirthdayValueError,
+    canonicalize_birthday_record,
+    validate_person_birthday_field,
+)
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
@@ -340,11 +345,12 @@ def get_responsibility_lifecycle_service(
 
 def get_person_birthday_service(
     reminder_repo: ReminderRepository = Depends(get_repository),
+    record_repo: RecordRepository = Depends(get_record_repository),
     lifecycle: ResponsibilityLifecycleService = Depends(get_responsibility_lifecycle_service),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
 ) -> PersonBirthdayService:
-    return PersonBirthdayService(reminder_repo, lifecycle, linked_repo, search_service)
+    return PersonBirthdayService(reminder_repo, lifecycle, linked_repo, search_service, records=record_repo)
 
 def get_item_application_service(
     record_repo: RecordRepository = Depends(get_record_repository),
@@ -369,8 +375,9 @@ def get_responsibility_application_service(
     lifecycle: ResponsibilityLifecycleService = Depends(get_responsibility_lifecycle_service),
     relationships: RelationshipApplicationService = Depends(get_relationship_application_service),
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> ResponsibilityApplicationService:
-    return ResponsibilityApplicationService(reminder_repo, lifecycle, relationships, linked_repo)
+    return ResponsibilityApplicationService(reminder_repo, lifecycle, relationships, linked_repo, birthdays)
 
 def get_entity_resolution_service(
     record_repo: RecordRepository = Depends(get_record_repository),
@@ -1082,6 +1089,7 @@ def remove_dynamic_sensitive_value(
     return encrypt_record_private_payload(updated_record, next_payload, previous_record.protected_field_names, encryption_service, now)
 
 def to_record_response(record: Record) -> RecordResponse:
+    record = canonicalize_birthday_record(record)
     return RecordResponse.model_validate(
         {
             **record.model_dump(),

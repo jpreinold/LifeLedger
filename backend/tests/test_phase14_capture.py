@@ -61,9 +61,9 @@ def build_services(tmp_path, *, provider=None, settings=None):
     reconciliation = ReconciliationService(LocalReconciliationRepository(tmp_path / "reconciliation.json"))
     search = SearchProjectionService(search_repo, records, reminders, attachments, links, reconciliation)
     lifecycle = ResponsibilityLifecycleService(reminders, history, records, links, attachments, search)
-    birthdays = PersonBirthdayService(reminders, lifecycle, links, search)
+    birthdays = PersonBirthdayService(reminders, lifecycle, links, search, records=records)
     relationship_service = RelationshipApplicationService(links, records, reminders, attachments, search)
-    responsibility_service = ResponsibilityApplicationService(reminders, lifecycle, relationship_service, links)
+    responsibility_service = ResponsibilityApplicationService(reminders, lifecycle, relationship_service, links, birthdays)
     items = ItemApplicationService(records, search, birthdays)
     assistant = LocalAssistantRepository(tmp_path / "assistant.json")
     entities = EntityResolutionService(records, reminders, links, assistant, SearchQueryService(search_repo))
@@ -197,14 +197,30 @@ def test_person_birthday_creates_person_month_day_and_annual_responsibility(tmp_
     assert completed.status == ProposalStatus.COMPLETED
     people = services["records"].list_records("user-a")
     assert len(people) == 1 and people[0].record_type == RecordType.PERSON
-    birthday = next(item for item in people[0].dynamic_fields if item.key == "birthday")
-    assert birthday.value == "--07-18"
+    assert people[0].birthday == "--07-18"
+    assert all(item.key != "birthday" for item in people[0].dynamic_fields)
     assert services["search"].get_projection("user-a", f"record#{people[0].id}") is not None
     reminder = services["reminders"].list_reminders("user-a")[0]
     assert reminder.repeat == RepeatOption.YEARLY
     assert reminder.reminder_lead_value == 7
     assert reminder.workflow_id.value == "person_birthday"
     assert len(services["history"].list_for_user("user-a")) == 1
+
+
+def test_explicit_person_creation_with_year_first_birthday_needs_no_clarification(tmp_path):
+    services = build_services(tmp_path)
+    detail = create_and_interpret(services, "Create a person named Alina, her birthday is 1999 May 7th")
+
+    assert detail.capture.status == CaptureStatus.READY_FOR_REVIEW
+    assert detail.proposal.proposed_actions[0].action_type == ActionType.CREATE_ITEM
+    assert detail.proposal.proposed_actions[0].fields["details"]["birthday"] == "1999-05-07"
+
+    completed = services["capture"].approve_proposal("user-a", detail.proposal.proposal_id, now=NOW)
+    assert completed.status == ProposalStatus.COMPLETED
+    person = services["records"].list_records("user-a")[0]
+    assert person.title == "Alina"
+    assert person.birthday == "1999-05-07"
+    assert len(services["reminders"].list_reminders("user-a")) == 1
 
 
 def test_duplicate_birthday_capture_does_not_duplicate_responsibility(tmp_path):
@@ -231,15 +247,8 @@ def test_person_birthday_year_updates_the_same_system_reminder(tmp_path):
     assert original.birthday_details.age_turning_next_birthday is None
     assert len(services["links"].list_links_for_entity("user-a", "record", person.id)) == 1
 
-    birthday = next(field for field in person.dynamic_fields if field.key == "birthday")
-    fields = [
-        field.model_copy(update={"value": "1990-07-18", "updated_at": NOW + timedelta(minutes=1)})
-        if field.field_id == birthday.field_id
-        else field
-        for field in person.dynamic_fields
-    ]
     updated_person = services["records"].update_record(
-        person.model_copy(update={"title": "Alex Morgan", "dynamic_fields": fields, "updated_at": NOW + timedelta(minutes=1)})
+        person.model_copy(update={"title": "Alex Morgan", "birthday": "1990-07-18", "updated_at": NOW + timedelta(minutes=1)})
     )
     updated = services["birthdays"].synchronize(updated_person, now=NOW + timedelta(minutes=1))
 
@@ -252,7 +261,7 @@ def test_person_birthday_year_updates_the_same_system_reminder(tmp_path):
     without_birthday = services["records"].update_record(
         updated_person.model_copy(
             update={
-                "dynamic_fields": [field for field in fields if field.field_id != birthday.field_id],
+                "birthday": None,
                 "updated_at": NOW + timedelta(minutes=2),
             }
         )
@@ -601,7 +610,11 @@ class FakeResponse:
             }],
             "ambiguity_reasons":[], "conflict_warnings":[], "missing_information":[],
         }
-        return {"id":"response-1","output":[{"type":"message","content":[{"type":"output_text","text":json.dumps(output)}]}],"usage":{"input_tokens":10,"output_tokens":5}}
+        return {
+            "id": "response-1",
+            "output": [{"type": "function_call", "name": "propose_lifeledger_actions", "arguments": json.dumps(output)}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
 
 
 class FakeClient:
@@ -609,7 +622,7 @@ class FakeClient:
     def post(self, _url, **kwargs): self.payload = kwargs["json"]; return FakeResponse()
 
 
-def test_openai_provider_uses_no_store_no_tools_strict_schema_and_safety_identifier():
+def test_openai_provider_uses_no_store_strict_action_tool_and_safety_identifier():
     settings = Settings(ai_provider=AI_PROVIDER_OPENAI, openai_api_key="test-key")
     client = FakeClient()
     provider = OpenAIInterpretationProvider(settings, SecretProvider(settings), client=client)
@@ -620,8 +633,10 @@ def test_openai_provider_uses_no_store_no_tools_strict_schema_and_safety_identif
     assert result.interpretation.actions[0].action_type == ActionType.NO_ACTION
     assert client.payload["store"] is False
     assert client.payload["safety_identifier"] == "hashed-user"
-    assert "tools" not in client.payload
-    assert client.payload["text"]["format"]["strict"] is True
+    assert client.payload["tools"][0]["name"] == "propose_lifeledger_actions"
+    assert client.payload["tools"][0]["strict"] is True
+    assert client.payload["tool_choice"] == {"type": "function", "name": "propose_lifeledger_actions"}
+    assert client.payload["parallel_tool_calls"] is False
 
 
 def test_openai_provider_removes_redundant_person_birthday_reminder_action():
@@ -697,7 +712,7 @@ def test_openai_provider_removes_redundant_person_birthday_reminder_action():
 
     assert [action.action_type for action in result.interpretation.actions] == [ActionType.CREATE_ITEM]
     assert "maintain the linked annual reminder automatically" in result.interpretation.summary
-    assert "never also propose create_responsibility" in client.payload["input"][0]["content"][0]["text"]
+    assert "never duplicate its automatic birthday counterpart" in client.payload["input"][0]["content"][0]["text"]
 
 
 def test_invalid_openai_output_is_rejected_safely():

@@ -391,6 +391,72 @@ def test_create_birthday_reminder_with_birth_year_calculates_age(client):
     assert created["birthday_details"]["inferred_birth_year"] is False
     assert created["birthday_age_label"] == "Turning 27"
     assert created["computed_label"].startswith("Turns 27")
+    records = client.get("/records").json()
+    assert len(records) == 1
+    assert records[0]["record_type"] == "person"
+    assert records[0]["title"] == "Max"
+    assert records[0]["birthday"] == f"{birth_year:04d}-{birthday.month:02d}-{birthday.day:02d}"
+    assert all(field["key"] != "birthday" for field in records[0]["dynamic_fields"])
+    linked = client.get(f"/reminders/{created['id']}").json()["linked_records"]
+    assert [(item["id"], item["record_type"]) for item in linked] == [(records[0]["id"], "person")]
+
+
+def test_create_pet_birthday_reminder_creates_yearless_pet_and_updates_it(client):
+    birthday = date.today() + timedelta(days=25)
+    created = create_reminder(
+        client,
+        title="Pepper's birthday",
+        category="Family",
+        due_date=date.today().isoformat(),
+        reminder_type="birthday",
+        birthday_details={
+            "subject_type": "pet",
+            "person_name": "Pepper",
+            "birth_month": birthday.month,
+            "birth_day": birthday.day,
+            "age_turning_next_birthday": 4,
+        },
+    )
+
+    pet = client.get("/records").json()[0]
+    assert pet["record_type"] == "pet"
+    assert pet["birthday"] == f"--{birthday.month:02d}-{birthday.day:02d}"
+
+    birth_year = birthday.year - 4
+    updated = client.put(
+        f"/reminders/{created['id']}",
+        json={
+            "birthday_details": {
+                "subject_type": "pet",
+                "person_name": "Pepper",
+                "birth_month": birthday.month,
+                "birth_day": birthday.day,
+                "birth_year": birth_year,
+            }
+        },
+    )
+    assert updated.status_code == 200
+    refreshed = client.get(f"/records/{pet['id']}").json()
+    assert refreshed["birthday"] == f"{birth_year:04d}-{birthday.month:02d}-{birthday.day:02d}"
+
+
+def test_first_class_person_birthday_creates_linked_annual_reminder(client):
+    created = create_record(
+        client,
+        record_type="person",
+        title="Alina",
+        category="People",
+        birthday="1999-05-07",
+        renewal_date=None,
+    )
+
+    assert created["birthday"] == "1999-05-07"
+    assert all(field["key"] != "birthday" for field in created["dynamic_fields"])
+    reminders = client.get("/reminders").json()
+    assert len(reminders) == 1
+    assert reminders[0]["reminder_type"] == "birthday"
+    assert reminders[0]["birthday_details"]["person_name"] == "Alina"
+    assert reminders[0]["birthday_details"]["birth_year"] == 1999
 
 
 def test_create_birthday_reminder_with_age_turning_infers_birth_year(client):

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { DynamicFieldValue } from '../types/record'
 
@@ -16,27 +16,41 @@ const months = [
 export function PersonBirthdayInput({
   label = 'Birthday',
   onChange,
+  onValidityChange,
+  subjectName,
   value,
 }: {
   label?: string
   onChange: (value: DynamicFieldValue) => void
+  onValidityChange?: (isValid: boolean) => void
+  subjectName?: string
   value: DynamicFieldValue
 }) {
   const [parts, setParts] = useState<BirthdayParts>(() => parseBirthday(value))
+  const partsRef = useRef(parts)
 
   useEffect(() => {
     const parsed = parseBirthday(value)
-    setParts((current) => sameParts(current, parsed) ? current : parsed)
+    setParts((current) => {
+      if (sameParts(current, parsed)) return current
+      partsRef.current = parsed
+      return parsed
+    })
   }, [value])
 
   function update(part: keyof BirthdayParts, nextValue: string) {
-    const next = { ...parts, [part]: nextValue }
+    const next = { ...partsRef.current, [part]: nextValue }
+    partsRef.current = next
     setParts(next)
-    onChange(toStoredBirthday(next))
+    onValidityChange?.(isBirthdayDraftValid(next, currentYear))
+    const stored = toStoredBirthday(next)
+    if (stored !== undefined) onChange(stored)
   }
 
   const currentYear = new Date().getFullYear()
   const invalidDay = Boolean(parts.month && parts.day && !isValidMonthDay(Number(parts.month), Number(parts.day)))
+  const invalidYear = Boolean(parts.year && (parts.year.length === 4 && !isValidBirthYear(Number(parts.year), currentYear)))
+  const preview = getBirthdayPreview(parts, subjectName)
 
   return (
     <div className="person-birthday-input" aria-label={label}>
@@ -67,14 +81,16 @@ export function PersonBirthdayInput({
             max={currentYear}
             min={currentYear - 150}
             placeholder="YYYY"
-            type="number"
+            type="text"
             value={parts.year}
-            onChange={(event) => update('year', event.target.value)}
+            onChange={(event) => update('year', event.target.value.replace(/\D/g, '').slice(0, 4))}
           />
         </label>
       </div>
       <small className="field-helper">Month and day create an annual linked reminder. Add the year whenever you know it.</small>
+      {preview ? <small className="person-birthday-preview" role="status">{preview}</small> : null}
       {invalidDay ? <small className="field-error" role="alert">Choose a valid day for that month.</small> : null}
+      {invalidYear ? <small className="field-error" role="alert">Enter a birth year that produces an age from 0 to 150.</small> : null}
     </div>
   )
 }
@@ -90,13 +106,15 @@ function parseBirthday(value: DynamicFieldValue): BirthdayParts {
   return { month: '', day: '', year: '' }
 }
 
-function toStoredBirthday(parts: BirthdayParts): DynamicFieldValue {
+function toStoredBirthday(parts: BirthdayParts): DynamicFieldValue | undefined {
   const month = Number(parts.month)
   const day = Number(parts.day)
   if (!parts.month || !parts.day || !isValidMonthDay(month, day)) return null
   const monthDay = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   if (!parts.year) return `--${monthDay}`
-  return `${parts.year.padStart(4, '0')}-${monthDay}`
+  if (parts.year.length < 4) return undefined
+  if (!isValidBirthYear(Number(parts.year), new Date().getFullYear())) return undefined
+  return `${parts.year}-${monthDay}`
 }
 
 function isValidMonthDay(month: number, day: number) {
@@ -106,4 +124,39 @@ function isValidMonthDay(month: number, day: number) {
 
 function sameParts(left: BirthdayParts, right: BirthdayParts) {
   return left.month === right.month && left.day === right.day && left.year === right.year
+}
+
+function isValidBirthYear(year: number, currentYear: number) {
+  return Number.isInteger(year) && year <= currentYear && year >= currentYear - 150
+}
+
+function isBirthdayDraftValid(parts: BirthdayParts, currentYear: number) {
+  if (!parts.month && !parts.day && !parts.year) return true
+  if (!parts.month || !parts.day || !isValidMonthDay(Number(parts.month), Number(parts.day))) return false
+  if (!parts.year) return true
+  return parts.year.length === 4 && isValidBirthYear(Number(parts.year), currentYear)
+}
+
+function getBirthdayPreview(parts: BirthdayParts, subjectName?: string) {
+  const month = Number(parts.month)
+  const day = Number(parts.day)
+  if (!parts.month || !parts.day || !isValidMonthDay(month, day)) return null
+  const today = new Date()
+  const thisYear = birthdayDateForYear(today.getFullYear(), month, day)
+  const next = thisYear < startOfToday(today) ? birthdayDateForYear(today.getFullYear() + 1, month, day) : thisYear
+  const dateLabel = next.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+  const name = subjectName?.trim() || 'This birthday'
+  if (parts.year.length === 4 && isValidBirthYear(Number(parts.year), today.getFullYear())) {
+    return `${name} is next on ${dateLabel} · turning ${next.getFullYear() - Number(parts.year)}.`
+  }
+  return `${name} is next on ${dateLabel} · age unknown.`
+}
+
+function birthdayDateForYear(year: number, month: number, day: number) {
+  const lastDay = new Date(year, month, 0).getDate()
+  return new Date(year, month - 1, Math.min(day, lastDay))
+}
+
+function startOfToday(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate())
 }
