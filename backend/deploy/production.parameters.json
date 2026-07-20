@@ -18,6 +18,8 @@
   "ResponsibilityHistoryTableName": "lifeledger-responsibility-history-auth",
   "ReconciliationTableName": "lifeledger-reconciliation-auth",
   "AccountOperationsTableName": "lifeledger-account-operations-auth",
+  "AIProvider": "openai",
+  "AIApiSecretArn": "arn:aws:secretsmanager:us-east-1:089029532069:secret:lifeledger/prod/openai-Hs1DwU",
   "GoogleClientId": "541055055469-2adf7kikavgjng6thb5v6gfuubgvrbqv.apps.googleusercontent.com",
   "GoogleOAuthSecretArn": "arn:aws:secretsmanager:us-east-1:089029532069:secret:lifeledger/prod/google-oauth-xCh0Wc",
   "GoogleOAuthRedirectUri": "https://lifeledger.jpreinold.com/",
