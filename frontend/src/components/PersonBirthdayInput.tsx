@@ -36,8 +36,18 @@ export function PersonBirthdayInput({
 }) {
   const [draft, setDraft] = useState<BirthdayDraft>(() => parseBirthday(value, inferredBirthYear))
   const draftRef = useRef(draft)
+  const pendingEchoRef = useRef<{ value: DynamicFieldValue; inferredBirthYear: number | null } | null>(null)
 
   useEffect(() => {
+    const pending = pendingEchoRef.current
+    if (pending) {
+      const valueMatches = Object.is(value, pending.value)
+      const inferredMatches = (inferredBirthYear ?? null) === pending.inferredBirthYear
+      if (valueMatches || inferredMatches) {
+        if (valueMatches && inferredMatches) pendingEchoRef.current = null
+        return
+      }
+    }
     const parsed = parseBirthday(value, inferredBirthYear)
     setDraft((current) => {
       if (sameDraft(current, parsed)) return current
@@ -46,6 +56,24 @@ export function PersonBirthdayInput({
     })
   }, [inferredBirthYear, value])
 
+  function commit(next: BirthdayDraft) {
+    draftRef.current = next
+    setDraft(next)
+    onValidityChange?.(isBirthdayDraftValid(next))
+
+    const stored = toStoredBirthday(next)
+    if (stored === undefined) return
+    const nextInferredBirthYear = stored !== null && next.ageSource === 'turning_age' && next.birthYear
+      ? Number(next.birthYear)
+      : null
+    pendingEchoRef.current = {
+      value: stored,
+      inferredBirthYear: onInferredBirthYearChange ? nextInferredBirthYear : (inferredBirthYear ?? null),
+    }
+    onChange(stored)
+    onInferredBirthYearChange?.(nextInferredBirthYear)
+  }
+
   function update(part: 'month' | 'day' | 'birthYear' | 'turningAge', nextValue: string) {
     const current = draftRef.current
     let ageSource = current.ageSource
@@ -53,18 +81,16 @@ export function PersonBirthdayInput({
     if (part === 'turningAge') ageSource = nextValue ? 'turning_age' : null
 
     const next = calculateDraft({ ...current, [part]: nextValue, ageSource })
-    draftRef.current = next
-    setDraft(next)
-    onValidityChange?.(isBirthdayDraftValid(next))
+    commit(next)
+  }
 
-    const stored = toStoredBirthday(next)
-    if (stored === undefined) return
-    onChange(stored)
-    onInferredBirthYearChange?.(
-      stored !== null && next.ageSource === 'turning_age' && next.birthYear
-        ? Number(next.birthYear)
-        : null,
-    )
+  function useToday() {
+    const today = new Date()
+    commit(calculateDraft({
+      ...draftRef.current,
+      month: String(today.getMonth() + 1),
+      day: String(today.getDate()),
+    }))
   }
 
   const invalidDay = Boolean(draft.month && draft.day && !isValidMonthDay(Number(draft.month), Number(draft.day)))
@@ -78,7 +104,10 @@ export function PersonBirthdayInput({
 
   return (
     <div className="person-birthday-input" aria-label={label}>
-      <span className="person-birthday-label">{label}</span>
+      <div className="person-birthday-heading-row">
+        <span className="person-birthday-label">{label}</span>
+        <button type="button" className="birthday-today-button" onClick={useToday}>Use today</button>
+      </div>
       <div className="person-birthday-date-fields">
         <label>
           <span>Month</span>
@@ -91,11 +120,10 @@ export function PersonBirthdayInput({
           <span>Day</span>
           <input
             inputMode="numeric"
-            max={31}
-            min={1}
-            type="number"
+            pattern="[0-9]*"
+            type="text"
             value={draft.day}
-            onChange={(event) => update('day', event.target.value)}
+            onChange={(event) => update('day', event.target.value.replace(/\D/g, '').slice(0, 2))}
           />
         </label>
       </div>
@@ -127,9 +155,10 @@ export function PersonBirthdayInput({
             max={150}
             min={0}
             placeholder="31"
-            type="number"
+            pattern="[0-9]*"
+            type="text"
             value={draft.turningAge}
-            onChange={(event) => update('turningAge', event.target.value)}
+            onChange={(event) => update('turningAge', event.target.value.replace(/\D/g, '').slice(0, 3))}
           />
         </label>
       </div>

@@ -49,3 +49,29 @@ def parse_birthday_value(value: object, *, today: date | None = None) -> ParsedB
         if age < 0 or age > 150:
             raise BirthdayValueError("Birth year must produce an age between 0 and 150.")
     return parsed
+
+
+def infer_birth_year_from_turning_age(
+    birthday: ParsedBirthday,
+    turning_age: object,
+    *,
+    today: date | None = None,
+) -> int:
+    if birthday.year is not None:
+        raise BirthdayValueError("Age at next birthday is used only when the birth year is unknown.")
+    try:
+        numeric_age = float(str(turning_age).strip())
+    except (TypeError, ValueError) as exc:
+        raise BirthdayValueError("Age at next birthday must be a whole number from 0 to 150.") from exc
+    if not numeric_age.is_integer() or numeric_age < 0 or numeric_age > 150:
+        raise BirthdayValueError("Age at next birthday must be a whole number from 0 to 150.")
+    age = int(numeric_age)
+
+    current_day = today or date.today()
+    candidate_day = min(birthday.day, calendar.monthrange(current_day.year, birthday.month)[1])
+    candidate = date(current_day.year, birthday.month, candidate_day)
+    due_year = current_day.year + 1 if candidate < current_day else current_day.year
+    inferred_year = due_year - age
+    if inferred_year < 1:
+        raise BirthdayValueError("Age at next birthday does not produce a valid birth year.")
+    return inferred_year

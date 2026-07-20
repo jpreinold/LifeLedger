@@ -10,7 +10,9 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Save,
   Trash2,
+  X,
 } from 'lucide-react'
 
 import { recordsApi } from '../api/recordsApi'
@@ -30,17 +32,18 @@ import {
   sortActionCenterReminders,
 } from '../lib/reminderDisplay'
 import { formatDynamicFieldValue, getVisibleDynamicFieldCount, hasDisplayValue, hasSensitiveDynamicFields, maskedValue } from '../lib/fieldRendering'
-import { getProtectedFieldLabel, getRecordTypeDefinition } from '../lib/recordTypes'
+import { getProtectedFieldLabel, getRecordTypeDefinition, normalizeRecordInput, recordToInput, tagsFromText, tagsToText } from '../lib/recordTypes'
 import type { SuggestedResponsibilityDefinition } from '../lib/entityRegistry'
 import { getGuidedWorkflowsForItemType, type GuidedWorkflowDefinition, type GuidedWorkflowId } from '../lib/guidedWorkflows'
 import { getCategoryPresentation, getResponsibilityPresentation, getSectionLabel, productTerms } from '../lib/terminology'
-import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordPayload, ProtectedRecordStatus } from '../types/record'
+import type { DynamicFieldValue, DynamicRecordField, LifeRecord, ProtectedRecordInput, ProtectedRecordPayload, ProtectedRecordStatus, RecordInput } from '../types/record'
 import type { Reminder } from '../types/reminder'
 import { AddFieldDrawer } from './AddFieldDrawer'
 import { ConfirmDialog } from './ConfirmDialog'
 import { DetailSection } from './DetailSection'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
+import { RecordFieldGrid } from './RecordForm'
 import { SheetDrawer } from './SheetDrawer'
 
 const ResponsibilityHistoryPanel = lazy(() => import('./ResponsibilityHistoryPanel'))
@@ -59,7 +62,8 @@ interface RecordDetailDrawerProps {
   onStartGuidedWorkflow?: (record: LifeRecord, workflowId: GuidedWorkflowId) => void
   onBack?: () => void
   onClose: () => void
-  onEdit: (record: LifeRecord) => void
+  onEdit?: (record: LifeRecord) => void
+  onSave?: (id: string, input: RecordInput, protectedInput: ProtectedRecordInput) => Promise<boolean>
   onOpenLinkedDocument?: (recordId: string, documentId: string) => void
   onOpenLinkedRecord: (recordId: string) => void
   onOpenLinkedReminder: (reminderId: string) => void
@@ -85,6 +89,7 @@ export function RecordDetailDrawer({
   onBack,
   onClose,
   onEdit,
+  onSave,
   onOpenLinkedDocument,
   onOpenLinkedRecord,
   onOpenLinkedReminder,
@@ -109,6 +114,12 @@ export function RecordDetailDrawer({
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [pendingFieldRemoval, setPendingFieldRemoval] = useState<DynamicRecordField | null>(null)
   const [isProtectedClearConfirmOpen, setIsProtectedClearConfirmOpen] = useState(false)
+  const [editForm, setEditForm] = useState<RecordInput | null>(null)
+  const [editTags, setEditTags] = useState('')
+  const [editProtectedInput, setEditProtectedInput] = useState<ProtectedRecordInput>({})
+  const [isBirthdayInputValid, setIsBirthdayInputValid] = useState(true)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
@@ -167,6 +178,10 @@ export function RecordDetailDrawer({
     clearSensitiveState()
     setIsAddFieldOpen(false)
     setEditingField(null)
+    setEditForm(null)
+    setEditProtectedInput({})
+    setEditError(null)
+    setIsBirthdayInputValid(true)
     setActiveTab(initialTab)
     setIsDrawerOpen(false)
     resetDetailScroll()
@@ -265,12 +280,60 @@ export function RecordDetailDrawer({
   }
 
   function handleEdit() {
+    if (onSave) {
+      const next = recordToInput(record)
+      setEditForm(next)
+      setEditTags(tagsToText(next.tags))
+      setEditProtectedInput({})
+      setEditError(null)
+      setActiveTab('details')
+      window.requestAnimationFrame(resetDetailScroll)
+      return
+    }
+    if (!onEdit) return
     clearSensitiveState()
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onEdit(record)
     }, drawerCloseMs)
+  }
+
+  function updateEditField(field: keyof RecordInput, value: string | number | null) {
+    setEditForm((current) => current ? ({ ...current, [field]: value } as RecordInput) : current)
+  }
+
+  async function handleEditSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editForm || !onSave || isSavingEdit) return
+    if (!editForm.title.trim()) {
+      setEditError(`${definition.titleLabel} is required.`)
+      return
+    }
+    if (!isBirthdayInputValid) {
+      setEditError('Complete a valid birthday, or leave it blank. The year is optional.')
+      return
+    }
+    const protectedChanges = Object.fromEntries(
+      Object.entries(editProtectedInput).map(([field, value]) => [field, typeof value === 'string' ? value.trim() || null : value]),
+    ) as ProtectedRecordInput
+    setIsSavingEdit(true)
+    setEditError(null)
+    try {
+      const saved = await onSave(
+        record.id,
+        normalizeRecordInput({ ...editForm, tags: tagsFromText(editTags) }),
+        protectedChanges,
+      )
+      if (saved) {
+        setEditForm(null)
+        setEditProtectedInput({})
+      }
+    } catch (requestError) {
+      setEditError(requestError instanceof Error ? requestError.message : 'Unable to save item changes.')
+    } finally {
+      setIsSavingEdit(false)
+    }
   }
 
   async function handleRevealProtected() {
@@ -368,7 +431,18 @@ export function RecordDetailDrawer({
         bodyRef={detailBodyRef}
         className="detail-dialog record-detail-dialog"
         closeLabel="Close item details"
-        footer={activeTab === 'details' ? (
+        footer={activeTab === 'details' && editForm ? (
+          <section className="inline-edit-footer" aria-label="Item edit actions">
+            <button className="primary-button" type="submit" form="inline-record-edit-form" disabled={isSavingEdit || !editForm.title.trim() || !isBirthdayInputValid}>
+              <Save size={17} aria-hidden="true" />
+              {isSavingEdit ? 'Saving' : 'Save changes'}
+            </button>
+            <button type="button" className="secondary-button" disabled={isSavingEdit} onClick={() => { setEditForm(null); setEditProtectedInput({}); setEditError(null) }}>
+              <X size={17} aria-hidden="true" />
+              Discard changes
+            </button>
+          </section>
+        ) : activeTab === 'details' ? (
           <section className="detail-actions" aria-label="Item actions">
             <button type="button" className="primary-button" onClick={handleEdit}>
               <Pencil size={17} aria-hidden="true" />
@@ -436,6 +510,7 @@ export function RecordDetailDrawer({
                 className={activeTab === 'responsibilities' ? 'record-detail-tab active' : 'record-detail-tab'}
                 id="record-responsibilities-tab"
                 role="tab"
+                disabled={editForm !== null}
                 aria-selected={activeTab === 'responsibilities'}
                 aria-controls="record-responsibilities-panel"
                 onClick={() => selectTab('responsibilities')}
@@ -448,6 +523,7 @@ export function RecordDetailDrawer({
               className={activeTab === 'documents' ? 'record-detail-tab active' : 'record-detail-tab'}
               id="record-documents-tab"
               role="tab"
+              disabled={editForm !== null}
               aria-selected={activeTab === 'documents'}
               aria-controls="record-documents-panel"
               onClick={() => selectTab('documents')}
@@ -459,6 +535,7 @@ export function RecordDetailDrawer({
               className={activeTab === 'linkedItems' ? 'record-detail-tab active' : 'record-detail-tab'}
               id="record-linked-items-tab"
               role="tab"
+              disabled={editForm !== null}
               aria-selected={activeTab === 'linkedItems'}
               aria-controls="record-linked-items-panel"
               onClick={() => selectTab('linkedItems')}
@@ -470,6 +547,7 @@ export function RecordDetailDrawer({
               className={activeTab === 'activity' ? 'record-detail-tab active' : 'record-detail-tab'}
               id="record-activity-tab"
               role="tab"
+              disabled={editForm !== null}
               aria-selected={activeTab === 'activity'}
               aria-controls="record-activity-panel"
               onClick={() => selectTab('activity')}
@@ -485,8 +563,53 @@ export function RecordDetailDrawer({
             role="tabpanel"
             aria-labelledby="record-details-tab"
           >
+            {editForm ? (
+              <form id="inline-record-edit-form" className="reminder-form inline-detail-form" onSubmit={(event) => void handleEditSubmit(event)}>
+                <div className="inline-edit-heading">
+                  <div><h3>Edit item details</h3><p>Change any value below, then save or discard from the sticky footer.</p></div>
+                </div>
+                {editError ? <p className="form-error" role="alert">{editError}</p> : null}
+                <section className="record-progressive-section record-essentials-section">
+                  <label>
+                    <span>{definition.titleLabel}</span>
+                    <input maxLength={120} value={editForm.title} onChange={(event) => updateEditField('title', event.target.value)} />
+                  </label>
+                  <RecordFieldGrid
+                    fields={definition.fields.filter((field) => field !== 'notes' && field !== 'tags')}
+                    form={editForm}
+                    onBirthdayValidityChange={setIsBirthdayInputValid}
+                    onChange={updateEditField}
+                  />
+                </section>
+                {definition.fields.includes('notes') ? (
+                  <label><span>Notes</span><textarea rows={4} maxLength={1000} value={editForm.notes ?? ''} onChange={(event) => updateEditField('notes', event.target.value || null)} /></label>
+                ) : null}
+                {definition.fields.includes('tags') ? (
+                  <label><span>Tags</span><input maxLength={500} value={editTags} onChange={(event) => setEditTags(event.target.value)} placeholder="Comma-separated tags" /></label>
+                ) : null}
+                {definition.protectedFields.length > 0 ? (
+                  <details className="record-progressive-section record-collapsible-section">
+                    <summary>Protected details</summary>
+                    <p className="field-helper">Enter only the protected values you want to add or replace. Existing values stay unchanged when left blank.</p>
+                    <div className="record-form-grid">
+                      {definition.protectedFields.map((field) => (
+                        <label key={field}>
+                          <span>{getProtectedFieldLabel(field)}</span>
+                          <input
+                            autoComplete="off"
+                            value={editProtectedInput[field] ?? ''}
+                            onChange={(event) => setEditProtectedInput((current) => ({ ...current, [field]: event.target.value }))}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+              </form>
+            ) : <>
             <DetailSection
               title="Important details"
+              onEditRow={() => handleEdit()}
               rows={[
                 { label: productTerms.itemType, value: definition.singularLabel },
                 { label: 'Category', value: categoryPresentation },
@@ -501,6 +624,7 @@ export function RecordDetailDrawer({
             <DetailSection
               title="Important dates"
               className="detail-schedule-section"
+              onEditRow={() => handleEdit()}
               rows={[
                 { label: 'Start date', value: formatRecordDate(record.start_date) },
                 { label: 'Issue date', value: formatRecordDate(record.issue_date) },
@@ -537,7 +661,7 @@ export function RecordDetailDrawer({
 
             {record.tags.length > 0 ? (
               <section className="detail-section" aria-label="Tags">
-                <h3>Tags</h3>
+                <div className="detail-section-edit-heading"><h3>Tags</h3><button type="button" className="detail-row-edit-button" onClick={handleEdit} aria-label="Edit Tags"><Pencil size={14} aria-hidden="true" /></button></div>
                 <div className="record-tag-list">
                   {record.tags.map((tag) => (
                     <span className="record-tag" key={tag}>{tag}</span>
@@ -548,7 +672,7 @@ export function RecordDetailDrawer({
 
             {record.notes ? (
               <section className="detail-section" aria-label="Notes">
-                <h3>Notes</h3>
+                <div className="detail-section-edit-heading"><h3>Notes</h3><button type="button" className="detail-row-edit-button" onClick={handleEdit} aria-label="Edit Notes"><Pencil size={14} aria-hidden="true" /></button></div>
                 <p className="detail-note">{record.notes}</p>
               </section>
             ) : null}
@@ -560,6 +684,7 @@ export function RecordDetailDrawer({
                 { label: 'Updated', value: formatRecordTimestamp(record.updated_at) },
               ]}
             />
+            </>}
           </div>
 
           {definition.supportedSections.includes('responsibilities') ? (

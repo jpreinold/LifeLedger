@@ -907,11 +907,22 @@ function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
     }, 'turning_age')
   }
 
+  function useToday() {
+    const today = new Date()
+    updateDetails({
+      birth_month: today.getMonth() + 1,
+      birth_day: today.getDate(),
+    })
+  }
+
   return (
     <section className="birthday-details-section" aria-labelledby="birthday-details-heading">
-      <div className="form-section-heading">
-        <Cake size={16} aria-hidden="true" />
-        <span id="birthday-details-heading">Birthday</span>
+      <div className="birthday-section-heading">
+        <div className="form-section-heading">
+          <Cake size={16} aria-hidden="true" />
+          <span id="birthday-details-heading">Birthday</span>
+        </div>
+        <button type="button" className="birthday-today-button" onClick={useToday}>Use today</button>
       </div>
 
       <p className="birthday-helper-text">
@@ -937,7 +948,7 @@ function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
         />
       </label>
 
-      <div className="form-row">
+      <div className="form-row birthday-date-row">
         <label>
           <span>Month</span>
           <select value={details.birth_month ?? ''} onChange={(event) => handleMonthChange(event.target.value)}>
@@ -966,7 +977,7 @@ function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
         </label>
       </div>
 
-      <div className="form-row">
+      <div className="form-row birthday-age-row">
         <label className="calculated-field-label">
           <span className="field-label-row">
             <span>Birth year</span>
@@ -978,9 +989,10 @@ function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
             inputMode="numeric"
             min="1"
             max="9999"
-            type="number"
+            pattern="[0-9]*"
+            type="text"
             value={details.birth_year ?? ''}
-            onChange={(event) => handleBirthYearChange(event.target.value)}
+            onChange={(event) => handleBirthYearChange(event.target.value.replace(/\D/g, '').slice(0, 4))}
             placeholder="1999"
           />
         </label>
@@ -996,9 +1008,10 @@ function BirthdayFields({ form, setForm }: ReminderFieldsProps) {
             inputMode="numeric"
             min="0"
             max="150"
-            type="number"
+            pattern="[0-9]*"
+            type="text"
             value={details.age_turning_next_birthday ?? ''}
-            onChange={(event) => handleTurningAgeChange(event.target.value)}
+            onChange={(event) => handleTurningAgeChange(event.target.value.replace(/\D/g, '').slice(0, 3))}
             placeholder="31"
           />
         </label>

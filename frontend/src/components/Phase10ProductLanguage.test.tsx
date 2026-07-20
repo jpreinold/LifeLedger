@@ -212,7 +212,7 @@ describe('Phase 10 product language and item flows', () => {
     await user.type(screen.getByLabelText(/Year/), '1996')
 
     expect(screen.getByLabelText('Month')).toHaveValue('1')
-    expect(screen.getByLabelText('Day')).toHaveValue(10)
+    expect(screen.getByLabelText('Day')).toHaveValue('10')
     expect(screen.getByLabelText(/Year/)).toHaveValue('1996')
     expect(screen.getByText(/turning/i)).toBeInTheDocument()
   })

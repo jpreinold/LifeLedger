@@ -1,5 +1,5 @@
 import { buildReminderInputWithDefaultTiming } from './reminderSchedule'
-import type { BirthdayDetailsInput, MaintenanceDetailsInput, ReminderInput, RenewalDetailsInput } from '../types/reminder'
+import type { BirthdayDetailsInput, MaintenanceDetailsInput, Reminder, ReminderInput, RenewalDetailsInput } from '../types/reminder'
 import {
   getBackendRenewalKind,
   getRenewalDefaults,
@@ -143,6 +143,35 @@ export function createMaintenanceReminderInput(overrides: Partial<ReminderInput>
     ...overrides,
     due_date: dueDate,
     maintenance_details: mergedDetails,
+  })
+}
+
+export function reminderToInput(reminder: Reminder): ReminderInput {
+  return buildReminderInputWithDefaultTiming({
+    title: reminder.title,
+    category: reminder.category,
+    due_date: reminder.due_date,
+    repeat: reminder.repeat,
+    priority: reminder.priority,
+    notes: reminder.notes,
+    reminder_lead_value: reminder.reminder_lead_value,
+    reminder_lead_unit: reminder.reminder_lead_unit,
+    reminder_time: reminder.reminder_time,
+    reminder_type: reminder.reminder_type ?? 'generic',
+    birthday_details: reminder.birthday_details
+      ? {
+          subject_type: reminder.birthday_details.subject_type ?? 'person',
+          person_name: reminder.birthday_details.person_name,
+          birth_month: reminder.birthday_details.birth_month,
+          birth_day: reminder.birthday_details.birth_day,
+          birth_year: reminder.birthday_details.birth_year,
+          age_turning_next_birthday: reminder.birthday_details.age_turning_next_birthday,
+          inferred_birth_year: reminder.birthday_details.inferred_birth_year,
+          relationship: reminder.birthday_details.relationship,
+        }
+      : null,
+    renewal_details: reminder.renewal_details ? { ...reminder.renewal_details } : null,
+    maintenance_details: reminder.maintenance_details ? { ...reminder.maintenance_details } : null,
   })
 }
 

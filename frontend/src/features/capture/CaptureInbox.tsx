@@ -205,8 +205,8 @@ function CaptureReview({ detail, pending, onClose, onApprove, onReject, onAnswer
       ))}</div> : null}
       {proposal?.conflict_warnings.map((warning) => <p className="capture-warning" key={warning}><CircleAlert size={16} />{warning}</p>)}
       {clarification?.status === 'open' ? clarification.questions.map((question) => (
-        <fieldset className="capture-question" key={question.question_id}>
-          <legend>{question.prompt}</legend>
+        <section className="capture-question" key={question.question_id} aria-labelledby={`capture-question-${question.question_id}`}>
+          <h5 className="capture-question-prompt" id={`capture-question-${question.question_id}`}>{question.prompt}</h5>
           {question.options.map((option) => <button type="button" className="capture-question-option" key={option.option_id} disabled={pending === proposal?.proposal_id} onClick={() => proposal && void onAnswer(proposal.proposal_id, question.question_id, option.option_id)}>{option.label}</button>)}
           {question.allow_free_text && proposal ? (
             <ClarificationTextAnswer
@@ -214,7 +214,7 @@ function CaptureReview({ detail, pending, onClose, onApprove, onReject, onAnswer
               onSubmit={(value) => onAnswer(proposal.proposal_id, question.question_id, value)}
             />
           ) : null}
-        </fieldset>
+        </section>
       )) : null}
       {proposal?.action_results.length ? <div className="capture-results"><h4>What happened</h4>{proposal.action_results.map((result) => (
         <div className="capture-result" key={result.action_id}>

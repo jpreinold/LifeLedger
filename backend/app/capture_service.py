@@ -41,6 +41,7 @@ from app.deterministic_interpreter import DeterministicInterpreter
 from app.entity_resolution_service import EntityResolutionService
 from app.item_service import ItemApplicationService, ItemDetailConflict, ItemNotFound
 from app.responsibility_service import ResponsibilityApplicationService, ResponsibilityNotFound
+from app.schemas import RecordType
 
 
 class CaptureConflict(ValueError):
@@ -454,6 +455,7 @@ class CaptureApplicationService:
         merged_answers = {**session.answers, **answers}
         actions = list(proposal.proposed_actions)
         candidates = proposal.entity_candidates
+        requires_ai_free_text = False
         for question_id, option_id in answers.items():
             question = questions[question_id]
             if question.allow_free_text:
@@ -461,6 +463,8 @@ class CaptureApplicationService:
                 if not clean or len(clean) > 500:
                     raise CaptureConflict("A clarification answer must contain 1 to 500 characters.")
                 merged_answers[question_id] = clean
+                if not _apply_birthday_clarification(actions, question.prompt, clean):
+                    requires_ai_free_text = True
                 continue
             if not any(item.option_id == option_id for item in question.options):
                 raise CaptureConflict("A clarification answer is invalid.")
@@ -499,7 +503,7 @@ class CaptureApplicationService:
                 proposal=proposal,
                 clarification=updated_session,
             )
-        if any(question.allow_free_text for question in session.questions):
+        if requires_ai_free_text:
             if self.usage.settings.ai_max_clarification_calls < 1:
                 raise CaptureConflict("This clarification needs manual review because additional AI calls are disabled.")
             capture = self._capture(user_id, proposal.capture_id)
@@ -622,6 +626,9 @@ class CaptureApplicationService:
                     questions.append(question)
                 else:
                     missing.append(decision.safe_reason or "More information is needed.")
+
+        if _has_yearless_birthday_action(actions):
+            missing = [item for item in missing if "birth year" not in item.casefold()]
 
         needs_clarification = bool(questions or ambiguity or missing or conflicts)
         # Prohibited proposals remain reviewable but cannot execute; the review explains why.
@@ -793,6 +800,53 @@ class CaptureApplicationService:
 
 def _option_id(proposal_id: str, question_id: str, entity_id: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"{proposal_id}:{question_id}:{entity_id}"))
+
+
+def _has_yearless_birthday_action(actions: list[ProposedAction]) -> bool:
+    return any(
+        action.action_type == ActionType.CREATE_ITEM
+        and action.item_type in {RecordType.PERSON, RecordType.PET}
+        and str(action.fields.get("details", {}).get("birthday", "")).startswith("--")
+        for action in actions
+    )
+
+
+def _apply_birthday_clarification(actions: list[ProposedAction], prompt: str, answer: str) -> bool:
+    if "birth year" not in prompt.casefold():
+        return False
+    year_match = re.fullmatch(r"(?:the\s+year\s+)?(?P<year>\d{4})", answer.strip(), flags=re.IGNORECASE)
+    age_match = re.fullmatch(
+        r"(?:(?:turning|turns?|age(?:\s+at\s+next\s+birthday)?)\s+)?(?P<age>\d{1,3})",
+        answer.strip(),
+        flags=re.IGNORECASE,
+    )
+    for index, action in enumerate(actions):
+        if action.action_type != ActionType.CREATE_ITEM or action.item_type not in {RecordType.PERSON, RecordType.PET}:
+            continue
+        details = dict(action.fields.get("details", {}))
+        birthday = str(details.get("birthday", ""))
+        if not re.fullmatch(r"--\d{2}-\d{2}", birthday):
+            continue
+        if year_match:
+            year = int(year_match.group("year"))
+            try:
+                date.fromisoformat(f"{year:04d}{birthday[1:]}")
+            except ValueError:
+                return False
+            details["birthday"] = f"{year:04d}{birthday[1:]}"
+            details.pop("birthday_turning_age", None)
+        elif age_match and 0 <= int(age_match.group("age")) <= 150:
+            details["birthday_turning_age"] = int(age_match.group("age"))
+        else:
+            return False
+        fields = {**action.fields, "details": details}
+        actions[index] = action.model_copy(update={
+            "fields": fields,
+            "explanation": _edited_explanation(action.action_type),
+            "confirmation_requirement": ConfirmationRequirement.ALWAYS,
+        })
+        return True
+    return False
 
 
 def _appears_to_contain_protected_identifier(value: str) -> bool:

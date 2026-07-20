@@ -354,6 +354,8 @@ def _system_prompt() -> str:
         "Call only propose_lifeledger_actions; it records a proposed plan and never executes mutations. "
         "Person and Pet birthday details (YYYY-MM-DD or --MM-DD when the year is unknown) automatically maintain their "
         "linked annual birthday reminder, and a birthday reminder automatically maintains its linked Person or Pet. "
+        "A birth year is optional. If the user gives an age at the next birthday, use the allowed "
+        "birthday_turning_age detail with a yearless birthday and let LifeLedger calculate the inferred year. "
         "Propose only the object the user explicitly requested and never duplicate its automatic birthday counterpart. "
         "When the user explicitly says to create an item, use create_item even when a similarly named candidate exists. "
         "Use only supplied candidate IDs. Prefer clarification or no_action over guessing. "

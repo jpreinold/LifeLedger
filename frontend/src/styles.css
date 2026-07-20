@@ -14,10 +14,14 @@
   --color-surface-muted: #f7faff;
   --color-text: #0d172a;
   --color-text-muted: #52647f;
+  --color-text-secondary: #52647f;
   --color-text-soft: #76859c;
   --color-primary: #075eea;
   --color-primary-dark: #0349c6;
   --color-primary-soft: #e8f0ff;
+  --color-primary-strong: #0349c6;
+  --color-focus-ring: rgba(7, 94, 234, 0.18);
+  --color-surface-subtle: #f7faff;
   --color-success: #0ea66b;
   --color-success-soft: #e2f8ef;
   --color-warning: #f59e0b;
@@ -120,7 +124,7 @@
 .capture-result p { margin: 10px 0; }
 .capture-warning { align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--color-warning-soft); color: #714300; }
 .capture-question { display: grid; gap: var(--space-3); margin: var(--space-4) 0; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface-muted); }
-.capture-question legend { padding: 0 6px; font-weight: 700; }
+.capture-question-prompt { margin: 0; font-size: .9rem; font-weight: 750; line-height: 1.35; overflow-wrap: anywhere; }
 .capture-question-option { width: 100%; border: 1px solid var(--color-border-strong); border-radius: 10px; padding: 10px 12px; background: var(--color-surface); text-align: left; cursor: pointer; }
 .capture-question-option:hover { border-color: var(--color-primary); background: var(--color-primary-soft); }
 .capture-question-text { display: grid; gap: 10px; }
@@ -156,9 +160,12 @@
 }
 
 html {
-  min-width: 320px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 100%;
   min-height: 100dvh;
+  overflow-x: clip;
   background:
     radial-gradient(circle at top left, rgba(202, 225, 255, 0.72), transparent 32rem),
     linear-gradient(180deg, #ffffff 0%, var(--color-bg) 48%, var(--color-bg-deep) 100%);
@@ -167,9 +174,12 @@ html {
 
 body {
   margin: 0;
-  min-width: 320px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
+  overflow-x: clip;
   color: var(--color-text);
   font-family: var(--font-ui);
   -webkit-text-size-adjust: 100%;
@@ -1164,6 +1174,13 @@ textarea:focus-visible {
   contain: layout paint;
 }
 
+.sheet-dialog,
+.sheet-dialog *,
+.sheet-body,
+.sheet-body > * {
+  min-width: 0;
+}
+
 @supports (height: 100dvh) {
   .sheet-dialog {
     height: calc(100dvh - max(12px, env(safe-area-inset-top))) !important;
@@ -1272,10 +1289,14 @@ textarea:focus-visible {
 .add-type-options {
   display: grid;
   gap: var(--space-3);
+  width: 100%;
   padding: var(--space-3) var(--space-5) var(--space-5);
+  overflow-x: hidden;
 }
 
 .add-type-option {
+  width: 100%;
+  height: max-content;
   min-width: 0;
   min-height: 82px;
   display: grid;
@@ -1290,6 +1311,7 @@ textarea:focus-visible {
   box-shadow: 0 8px 24px rgba(15, 32, 61, 0.06);
   cursor: pointer;
   text-align: left;
+  overflow: visible;
 }
 
 .add-type-option:disabled {
@@ -2187,16 +2209,17 @@ textarea:focus-visible {
 
 .header-calendar-button {
   justify-self: start;
-  color: var(--color-primary);
-  border: 1px solid rgba(7, 94, 234, 0.12);
-  background: var(--color-surface);
-  box-shadow: 0 8px 20px rgba(15, 32, 61, 0.06);
+  color: var(--color-text);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .header-calendar-button.active {
-  color: #ffffff;
-  background: var(--color-primary);
-  box-shadow: var(--shadow-button);
+  color: var(--color-primary);
+  border-color: transparent;
+  background: rgba(7, 94, 234, 0.08);
+  box-shadow: none;
 }
 
 .calendar-view {
@@ -2942,6 +2965,32 @@ textarea:focus-visible {
   font-weight: 760;
 }
 
+.person-birthday-heading-row,
+.birthday-section-heading {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.birthday-today-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px;
+  border: 1px solid rgba(7, 94, 234, 0.2);
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 760;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .person-birthday-date-fields,
 .person-birthday-age-fields {
   display: grid;
@@ -2981,6 +3030,201 @@ textarea:focus-visible {
 @media (max-width: 460px) {
   .person-birthday-age-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Birthday fields stay compact even when the general mobile form rows stack. */
+.reminder-form .form-row.birthday-date-row,
+.reminder-form .form-row.birthday-age-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Shared control and inline-edit consistency */
+.sheet-dialog :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea),
+.capture-review :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea),
+.quick-capture textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 13px;
+  color: var(--color-text);
+  background-color: var(--color-surface-muted);
+  background-image: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 500;
+  appearance: none;
+  -webkit-appearance: none;
+  -webkit-border-radius: 13px;
+}
+
+.sheet-dialog :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select) {
+  min-height: 50px;
+  padding: 0 var(--space-3);
+  line-height: 1.25;
+}
+
+.sheet-dialog select,
+.capture-review select {
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2352647f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 18px 18px;
+}
+
+.sheet-dialog :where(textarea),
+.capture-review :where(textarea) {
+  min-height: 88px;
+  padding: 10px var(--space-3);
+  resize: vertical;
+}
+
+.sheet-dialog :where(input, select, textarea):focus,
+.capture-review :where(input, select, textarea):focus,
+.quick-capture textarea:focus {
+  border-color: var(--color-primary);
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.sheet-dialog input[type='date'],
+.sheet-dialog input[type='time'],
+.sheet-dialog input[type='datetime-local'],
+.capture-review input[type='date'],
+.capture-review input[type='time'],
+.capture-review input[type='datetime-local'] {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  text-align: left;
+  -webkit-min-logical-width: 0;
+}
+
+.sheet-dialog input[type='date']::-webkit-date-and-time-value,
+.sheet-dialog input[type='time']::-webkit-date-and-time-value,
+.sheet-dialog input[type='datetime-local']::-webkit-date-and-time-value,
+.capture-review input[type='date']::-webkit-date-and-time-value,
+.capture-review input[type='time']::-webkit-date-and-time-value,
+.capture-review input[type='datetime-local']::-webkit-date-and-time-value {
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+}
+
+.reminder-form .birthday-date-row,
+.reminder-form .birthday-age-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.inline-detail-form {
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+}
+
+.inline-edit-heading h3,
+.inline-edit-heading p {
+  margin: 0;
+}
+
+.inline-edit-heading p {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+}
+
+.inline-edit-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.inline-edit-footer > button {
+  width: 100%;
+  min-height: 50px;
+}
+
+.detail-row dd {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.detail-row dd > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-row-edit-button {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  flex: 0 0 32px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.detail-section-edit-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.detail-section-edit-heading h3 {
+  margin: 0;
+}
+
+.record-detail-tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.guided-workflow-dialog :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 380px) {
+  .add-type-options {
+    gap: var(--space-2);
+    padding-inline: var(--space-3);
+  }
+
+  .add-type-option {
+    grid-template-columns: 42px minmax(0, 1fr) 16px;
+    gap: var(--space-2);
+    padding: 10px;
+  }
+
+  .add-type-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .add-type-copy strong {
+    font-size: 0.9rem;
+  }
+
+  .reminder-form .birthday-age-row,
+  .inline-edit-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-row dd {
+    justify-content: space-between;
   }
 }
 
@@ -6948,6 +7192,10 @@ textarea:focus-visible {
 
 .action-center-panel .reminder-type-tabs {
   padding-bottom: var(--space-2);
+}
+
+.action-center-panel .filter-tab.active {
+  box-shadow: none;
 }
 
 .action-center-heading p {

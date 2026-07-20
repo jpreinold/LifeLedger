@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { Cake, CalendarCheck, CalendarPlus, CalendarX, CheckCircle2, Clock3, History, Pencil, RefreshCcw, RotateCcw, Trash2, Wrench } from 'lucide-react'
+import { Cake, CalendarCheck, CalendarPlus, CalendarX, CheckCircle2, Clock3, History, Pencil, RefreshCcw, RotateCcw, Save, Trash2, Wrench, X } from 'lucide-react'
 
 import { getMaintenanceAreaLabel, getMaintenanceDueDate } from '../lib/maintenanceUx'
 import {
@@ -18,13 +18,15 @@ import {
   getRenewalKindLabel,
 } from '../lib/renewalUx'
 import { getSmartReminderLabel } from '../lib/smartReminderLabels'
+import { buildReminderSubmitInput, isReminderReady, reminderToInput } from '../lib/reminderInput'
 import type { GoogleCalendarStatus } from '../api/calendarApi'
-import type { Reminder } from '../types/reminder'
+import type { Reminder, ReminderInput } from '../types/reminder'
 import type { LifeRecord } from '../types/record'
 import { getCategoryVisual } from './categoryVisuals'
 import { ConfirmDialog } from './ConfirmDialog'
 import { DetailSection, type DetailRow } from './DetailSection'
 import { LinkedItemsPanel } from './LinkedItemsPanel'
+import { ReminderFields } from './ReminderForm'
 import { SheetDrawer } from './SheetDrawer'
 
 const drawerCloseMs = 220
@@ -42,7 +44,8 @@ interface ReminderDetailDrawerProps {
   onDisableCalendarSync: (id: string) => Promise<boolean>
   onEnableCalendarSync: (id: string) => Promise<boolean>
   onDismiss: (id: string) => Promise<void>
-  onEdit: (reminder: Reminder) => void
+  onEdit?: (reminder: Reminder) => void
+  onSave?: (id: string, input: ReminderInput) => Promise<boolean>
   onOpenLinkedDocument?: (recordId: string, documentId: string) => void
   onOpenLinkedRecord: (recordId: string) => void
   onRenew: (id: string, newDueDate: string) => Promise<boolean>
@@ -65,6 +68,7 @@ export function ReminderDetailDrawer({
   onEnableCalendarSync,
   onDismiss,
   onEdit,
+  onSave,
   onOpenLinkedDocument,
   onOpenLinkedRecord,
   onRenew,
@@ -78,6 +82,9 @@ export function ReminderDetailDrawer({
   const [isCalendarDisableConfirmOpen, setIsCalendarDisableConfirmOpen] = useState(false)
   const [customSnoozeDate, setCustomSnoozeDate] = useState(() => addDaysDateOnly(3))
   const [showHistory, setShowHistory] = useState(false)
+  const [editForm, setEditForm] = useState<ReminderInput | null>(null)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const detailBodyRef = useRef<HTMLDivElement | null>(null)
   const openFrameRef = useRef<number | null>(null)
@@ -94,6 +101,8 @@ export function ReminderDetailDrawer({
   useEffect(() => {
     setCustomSnoozeDate(addDaysDateOnly(3))
     setShowHistory(false)
+    setEditForm(null)
+    setEditError(null)
     setIsDrawerOpen(false)
     resetDetailScroll()
     openFrameRef.current = window.requestAnimationFrame(() => {
@@ -149,11 +158,40 @@ export function ReminderDetailDrawer({
   }, [onClose])
 
   function handleEdit() {
+    if (onSave) {
+      setEditError(null)
+      setEditForm(reminderToInput(reminder))
+      window.requestAnimationFrame(resetDetailScroll)
+      return
+    }
+    if (!onEdit) return
     setIsDrawerOpen(false)
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       onEdit(reminder)
     }, drawerCloseMs)
+  }
+
+  async function handleEditSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editForm || !onSave || !isReminderReady(editForm) || isSavingEdit) return
+    setIsSavingEdit(true)
+    setEditError(null)
+    try {
+      const saved = await onSave(reminder.id, buildReminderSubmitInput(editForm))
+      if (saved) setEditForm(null)
+    } catch (requestError) {
+      setEditError(requestError instanceof Error ? requestError.message : 'Unable to save reminder changes.')
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  const updateEditForm: React.Dispatch<React.SetStateAction<ReminderInput>> = (next) => {
+    setEditForm((current) => {
+      if (!current) return current
+      return typeof next === 'function' ? next(current) : next
+    })
   }
 
   async function handleComplete() {
@@ -224,7 +262,18 @@ export function ReminderDetailDrawer({
       bodyRef={detailBodyRef}
       className="detail-dialog"
       closeLabel="Close reminder details"
-      footer={(
+      footer={editForm ? (
+        <section className="inline-edit-footer" aria-label="Reminder edit actions">
+          <button className="primary-button" type="submit" form="inline-reminder-edit-form" disabled={isSavingEdit || !isReminderReady(editForm)}>
+            <Save size={17} aria-hidden="true" />
+            {isSavingEdit ? 'Saving' : 'Save changes'}
+          </button>
+          <button type="button" className="secondary-button" disabled={isSavingEdit} onClick={() => { setEditForm(null); setEditError(null) }}>
+            <X size={17} aria-hidden="true" />
+            Discard changes
+          </button>
+        </section>
+      ) : (
         <section className="detail-actions reminder-detail-actions" aria-label="Reminder actions">
           <button type="button" className="secondary-button" onClick={handleEdit} disabled={isActionPending}>
             <Pencil size={17} aria-hidden="true" />
@@ -291,8 +340,18 @@ export function ReminderDetailDrawer({
           </div>
         </section>
 
+        {editForm ? (
+          <form id="inline-reminder-edit-form" className="reminder-form inline-detail-form" onSubmit={(event) => void handleEditSubmit(event)}>
+            <div className="inline-edit-heading">
+              <div><h3>Edit reminder details</h3><p>Change any value below, then save or discard from the sticky footer.</p></div>
+            </div>
+            {editError ? <p className="form-error" role="alert">{editError}</p> : null}
+            <ReminderFields form={editForm} setForm={updateEditForm} />
+          </form>
+        ) : <>
         <DetailSection
           title={getDetailSectionTitle(reminder)}
+          onEditRow={() => handleEdit()}
           rows={[
             { label: 'Priority', value: `${reminder.priority} priority` },
             ...typeRows,
@@ -302,6 +361,7 @@ export function ReminderDetailDrawer({
         <DetailSection
           title="Schedule"
           className="detail-schedule-section"
+          onEditRow={() => handleEdit()}
           rows={[
             { label: 'Due date', value: formatLongDate(reminder.due_date) },
             { label: 'Reminder timing', value: formatReminderTiming(reminder) },
@@ -358,10 +418,14 @@ export function ReminderDetailDrawer({
 
         {note ? (
           <section className="detail-section" aria-labelledby="detail-notes-heading">
-            <h3 id="detail-notes-heading">{reminder.reminder_type === 'maintenance' ? 'Notes & Instructions' : 'Notes'}</h3>
+            <div className="detail-section-edit-heading">
+              <h3 id="detail-notes-heading">{reminder.reminder_type === 'maintenance' ? 'Notes & Instructions' : 'Notes'}</h3>
+              <button type="button" className="detail-row-edit-button" onClick={handleEdit} aria-label="Edit Notes"><Pencil size={14} aria-hidden="true" /></button>
+            </div>
             <p className="detail-note">{note}</p>
           </section>
         ) : null}
+        </>}
         <ConfirmDialog
           body="The Google Calendar event for this reminder will be permanently deleted. The LifeLedger reminder will remain and can be synced again later."
           busyLabel="Stopping sync"

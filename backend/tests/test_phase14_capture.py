@@ -223,6 +223,52 @@ def test_explicit_person_creation_with_year_first_birthday_needs_no_clarificatio
     assert len(services["reminders"].list_reminders("user-a")) == 1
 
 
+def test_person_creation_uses_next_birthday_age_without_birth_year_clarification(tmp_path):
+    services = build_services(tmp_path)
+    detail = create_and_interpret(
+        services,
+        "Add Daniel as a person item. His birthday is May 19th and next birthday he will be turning 29.",
+    )
+
+    assert detail.capture.status == CaptureStatus.READY_FOR_REVIEW
+    action = detail.proposal.proposed_actions[0]
+    assert action.action_type == ActionType.CREATE_ITEM
+    assert action.fields["details"] == {"birthday": "--05-19", "birthday_turning_age": 29}
+    assert detail.clarification is None
+
+    completed = services["capture"].approve_proposal("user-a", detail.proposal.proposal_id, now=NOW)
+    assert completed.status == ProposalStatus.COMPLETED
+    person = services["records"].list_records("user-a")[0]
+    assert person.title == "Daniel"
+    assert person.birthday == "--05-19"
+    assert person.birthday_inferred_birth_year == 1998
+    reminder = services["reminders"].list_reminders("user-a")[0]
+    assert reminder.birthday_details.age_turning_next_birthday == 29
+    assert reminder.birthday_details.inferred_birth_year is True
+
+
+def test_yearless_birthday_proposal_does_not_ask_for_optional_birth_year(tmp_path):
+    output = StructuredInterpretation(
+        supported=True,
+        confidence=ConfidenceCategory.HIGH,
+        summary="Create Daniel and save the birthday.",
+        actions=[ActionSeed(
+            action_type=ActionType.CREATE_ITEM,
+            item_type=RecordType.PERSON,
+            fields={"title": "Daniel", "details": {"birthday": "--05-19"}},
+            explanation="Create Daniel with a May 19 birthday.",
+        )],
+        missing_information=["Daniel's birth year (optional)."],
+    )
+    services = build_services(tmp_path, provider=MockAIProvider([output]))
+
+    detail = create_and_interpret(services, "Please add Daniel with a May 19 birthday.")
+
+    assert detail.capture.status == CaptureStatus.READY_FOR_REVIEW
+    assert detail.proposal.missing_information == []
+    assert detail.clarification is None
+
+
 def test_duplicate_birthday_capture_does_not_duplicate_responsibility(tmp_path):
     services = build_services(tmp_path)
     first = create_and_interpret(services, "It's Alex's birthday today.", "birthday-one")

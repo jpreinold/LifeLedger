@@ -52,28 +52,40 @@ class DeterministicInterpreter:
         return None, candidates
 
     def _create_birthday_subject(self, text: str, now: datetime) -> StructuredInterpretation | None:
-        match = re.fullmatch(
+        patterns = (
             r"(?:create|add)\s+(?:a\s+)?(?P<kind>person|pet)(?:\s+(?:named|called))?\s+"
             r"(?P<name>[^,]+?),?\s+(?:(?:their|his|her|its)\s+)?birthday\s+is\s+(?P<birthday>.+?)[.!]?",
-            text,
-            flags=re.IGNORECASE,
+            r"(?:create|add)\s+(?P<name>[\w .'-]+?)\s+as\s+(?:a\s+)?(?P<kind>person|pet)(?:\s+item)?[.!]?\s+"
+            r"(?:(?:their|his|her|its)\s+)?birthday\s+is\s+(?P<birthday>.+?)[.!]?",
         )
+        match = next((value for pattern in patterns if (value := re.fullmatch(pattern, text, flags=re.IGNORECASE))), None)
         if not match:
             return None
-        birthday = parse_birthday_phrase(match.group("birthday"), today=now.date())
+        birthday_phrase, turning_age = _birthday_phrase_and_turning_age(match.group("birthday"))
+        birthday = parse_birthday_phrase(birthday_phrase, today=now.date())
         if birthday is None:
+            return None
+        if turning_age is not None and not 0 <= turning_age <= 150:
             return None
         item_type = RecordType.PERSON if match.group("kind").casefold() == "person" else RecordType.PET
         name = match.group("name").strip().title()
         label = "Person" if item_type == RecordType.PERSON else "Pet"
+        details: dict[str, object] = {"birthday": birthday}
+        if turning_age is not None:
+            details["birthday_turning_age"] = turning_age
+        age_summary = f" and calculate the birth year from age {turning_age} at the next birthday" if turning_age is not None else ""
         return _interpretation(
-            f"Create {name} as a {label} and save the birthday. LifeLedger will maintain the linked annual reminder.",
+            f"Create {name} as a {label}, save the birthday{age_summary}. LifeLedger will maintain the linked annual reminder.",
             [
                 ActionSeed(
                     action_type=ActionType.CREATE_ITEM,
                     item_type=item_type,
-                    fields={"title": name, "details": {"birthday": birthday}},
-                    explanation=f"Create {name} as a {label}; LifeLedger handles the birthday reminder automatically.",
+                    fields={"title": name, "details": details},
+                    explanation=(
+                        f"Create {name} as a {label} with a {birthday_phrase} birthday; LifeLedger calculates the birth year from the next-birthday age and handles the reminder automatically."
+                        if turning_age is not None
+                        else f"Create {name} as a {label}; LifeLedger handles the birthday reminder automatically."
+                    ),
                 )
             ],
         )
@@ -326,6 +338,19 @@ def parse_birthday_phrase(value: str, *, today: date) -> str | None:
     except ValueError:
         return None
     return f"--{month:02d}-{day:02d}"
+
+
+def _birthday_phrase_and_turning_age(value: str) -> tuple[str, int | None]:
+    normalized = " ".join(value.strip(" .").split())
+    age_match = re.search(
+        r"\s+and\s+(?:(?:on|at)\s+)?(?:(?:their|his|her|its)\s+)?next\s+birthday"
+        r"(?:\s+(?:they|he|she|it))?\s+(?:will\s+)?(?:be\s+)?(?:turning|turns?|turn)\s+(?P<age>\d{1,3})$",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if age_match is None:
+        return normalized, None
+    return normalized[:age_match.start()].strip(" ,."), int(age_match.group("age"))
 
 
 def _interpretation(summary: str, actions: list[ActionSeed]) -> StructuredInterpretation:

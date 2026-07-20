@@ -280,6 +280,44 @@ describe('Phase 6 mobile flows', () => {
     await waitFor(() => expect(onEdit).toHaveBeenCalledWith(baseRecord))
   })
 
+  it('edits item values inside the detail drawer with sticky save and discard actions', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_id: string, _input: RecordInput, _protectedInput: ProtectedRecordInput) => true)
+
+    render(
+      <RecordDetailDrawer
+        record={baseRecord}
+        records={[]}
+        reminders={[]}
+        onArchive={vi.fn(async () => undefined)}
+        onAddResponsibility={vi.fn()}
+        onClose={vi.fn()}
+        onSave={onSave}
+        onOpenLinkedRecord={vi.fn()}
+        onOpenLinkedReminder={vi.fn()}
+        onProtectedStatusChange={vi.fn()}
+        onRecordChange={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onRestore={vi.fn(async () => undefined)}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Item details' })).toBeVisible())
+    await user.click(within(screen.getByLabelText('Item actions')).getByRole('button', { name: 'Edit' }))
+
+    const title = screen.getByLabelText('Item name')
+    await user.clear(title)
+    await user.type(title, 'Updated item')
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    expect(save.closest('.sheet-footer')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Discard changes' }).closest('.sheet-footer')).not.toBeNull()
+    await user.click(save)
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toBe(baseRecord.id)
+    expect(onSave.mock.calls[0][1].title).toBe('Updated item')
+  })
+
   it('stages linked items while adding a record and includes them in the create payload', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn(async (

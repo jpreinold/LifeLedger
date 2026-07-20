@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { getActionCenterGroups } from '../lib/reminderDisplay'
-import type { Reminder } from '../types/reminder'
+import type { Reminder, ReminderInput } from '../types/reminder'
 import { ReminderDetailDrawer } from './ReminderDetailDrawer'
 import { ReminderForm } from './ReminderForm'
 import { ReminderList } from './ReminderList'
@@ -231,5 +231,48 @@ describe('Phase 7 reminder lifecycle UI', () => {
 
     await user.click(within(lifecycleSection as HTMLElement).getByRole('button', { name: 'Review renewal' }))
     expect(onRenew).toHaveBeenCalledWith('renewal', renewalReminder.due_date)
+  })
+
+  it('edits reminder values in place and saves from the sticky footer', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_id: string, _input: ReminderInput) => true)
+    const target = reminder({ id: 'inline-edit', title: 'Call Mom' })
+
+    render(
+      <ReminderDetailDrawer
+        reminder={target}
+        records={[]}
+        calendarStatus={null}
+        isCalendarStatusLoading={false}
+        isAlertEligible={false}
+        isActionPending={false}
+        onClearSnooze={vi.fn(async () => true)}
+        onClose={vi.fn()}
+        onComplete={vi.fn(async () => undefined)}
+        onDisableCalendarSync={vi.fn(async () => true)}
+        onDismiss={vi.fn(async () => undefined)}
+        onEnableCalendarSync={vi.fn(async () => true)}
+        onOpenLinkedRecord={vi.fn()}
+        onRenew={vi.fn(async () => true)}
+        onReopen={vi.fn(async () => true)}
+        onRequestDelete={vi.fn()}
+        onSave={onSave}
+        onSnooze={vi.fn(async () => true)}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Reminder details' })).toBeVisible())
+    await user.click(within(screen.getByLabelText('Reminder actions')).getByRole('button', { name: 'Edit' }))
+    const title = screen.getByLabelText('Title')
+    await user.clear(title)
+    await user.type(title, 'Call Daniel')
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    expect(save.closest('.sheet-footer')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Discard changes' }).closest('.sheet-footer')).not.toBeNull()
+    await user.click(save)
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toBe(target.id)
+    expect(onSave.mock.calls[0][1].title).toBe('Call Daniel')
   })
 })

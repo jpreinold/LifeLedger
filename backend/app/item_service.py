@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
+from app.birthday_value import BirthdayValueError, infer_birth_year_from_turning_age
 from app.models import DynamicRecordField, Record
 from app.person_birthday_service import PersonBirthdayService, parse_person_birthday
 from app.records_repository import RecordRepository
@@ -21,6 +23,9 @@ class ItemDetailNotAllowed(ValueError):
 
 class ItemDetailConflict(ValueError):
     pass
+
+
+BIRTHDAY_TURNING_AGE_KEY = "birthday_turning_age"
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,7 @@ ITEM_DETAIL_SPECS: dict[RecordType, dict[str, DetailSpec]] = {
         **COMMON_DETAILS,
         "breed": _detail("breed", "Breed"),
         "birthday": _detail("birthday", "Birthday", record_field="birthday"),
+        BIRTHDAY_TURNING_AGE_KEY: _detail(BIRTHDAY_TURNING_AGE_KEY, "Age at next birthday", DynamicFieldType.NUMBER),
         "vet": _detail("vet", "Veterinarian"),
         "next_vaccination_due_date": _detail("next_vaccination_due_date", "Next vaccination due", DynamicFieldType.DATE),
     },
@@ -105,6 +111,7 @@ ITEM_DETAIL_SPECS: dict[RecordType, dict[str, DetailSpec]] = {
     RecordType.PERSON: {
         # Person and Pet birthdays support either YYYY-MM-DD or --MM-DD.
         "birthday": _detail("birthday", "Birthday", record_field="birthday"),
+        BIRTHDAY_TURNING_AGE_KEY: _detail(BIRTHDAY_TURNING_AGE_KEY, "Age at next birthday", DynamicFieldType.NUMBER),
         "relationship_context": _detail(
             "relationship_context",
             "Relationship",
@@ -169,6 +176,8 @@ class ItemApplicationService:
         record_values: dict[str, object] = {}
         dynamic_fields: list[DynamicRecordField] = []
         for order, (key, value) in enumerate(details.items(), start=1):
+            if key == BIRTHDAY_TURNING_AGE_KEY:
+                continue
             if key == "notes":
                 record_values["notes"] = _safe_note(value)
                 continue
@@ -178,6 +187,20 @@ class ItemApplicationService:
                 record_values[spec.record_field] = normalized
             else:
                 dynamic_fields.append(self._new_dynamic_field(item_id, spec, normalized, order, current))
+
+        if BIRTHDAY_TURNING_AGE_KEY in details:
+            birthday_value = record_values.get("birthday")
+            if birthday_value is None:
+                raise ItemDetailNotAllowed("Age at next birthday requires a birthday month and day.")
+            try:
+                parsed_birthday = parse_person_birthday(birthday_value, today=current.date())
+                record_values["birthday_inferred_birth_year"] = infer_birth_year_from_turning_age(
+                    parsed_birthday,
+                    details[BIRTHDAY_TURNING_AGE_KEY],
+                    today=current.date(),
+                )
+            except BirthdayValueError as exc:
+                raise ItemDetailNotAllowed(str(exc)) from exc
 
         item = Record(
             id=item_id,
@@ -207,6 +230,28 @@ class ItemApplicationService:
         now: datetime | None = None,
     ) -> tuple[Record, bool]:
         item = self._required_item(user_id, item_id)
+        if detail_key == BIRTHDAY_TURNING_AGE_KEY:
+            if item.record_type not in {RecordType.PERSON, RecordType.PET} or not item.birthday:
+                raise ItemDetailNotAllowed("Age at next birthday requires a Person or Pet birthday.")
+            try:
+                inferred_year = infer_birth_year_from_turning_age(
+                    parse_person_birthday(item.birthday, today=_utc(now).date()),
+                    value,
+                    today=_utc(now).date(),
+                )
+            except BirthdayValueError as exc:
+                raise ItemDetailNotAllowed(str(exc)) from exc
+            if item.birthday_inferred_birth_year == inferred_year:
+                return item, True
+            current = _utc(now)
+            saved = self.records.update_record(item.model_copy(update={
+                "birthday_inferred_birth_year": inferred_year,
+                "updated_at": current,
+            }))
+            if self.birthdays is not None:
+                self.birthdays.synchronize(saved, now=current)
+            self.search.sync_entity_observed(user_id, LinkedEntityType.RECORD, saved.id, operation="assistant_item_detail")
+            return saved, False
         spec = self._required_spec(item.record_type, detail_key)
         normalized = _normalize_detail_value(spec, value)
         current = _utc(now)
@@ -264,6 +309,14 @@ class ItemApplicationService:
     def get_normal_detail(self, user_id: str, item_id: str, detail_key: str):
         """Return one allowlisted normal detail for conflict checks without protected data."""
         item = self._required_item(user_id, item_id)
+        if detail_key == BIRTHDAY_TURNING_AGE_KEY:
+            if not item.birthday or item.birthday_inferred_birth_year is None:
+                return None
+            parsed = parse_person_birthday(item.birthday)
+            current = date.today()
+            candidate = date(current.year, parsed.month, min(parsed.day, calendar.monthrange(current.year, parsed.month)[1]))
+            due_year = current.year + 1 if candidate < current else current.year
+            return due_year - item.birthday_inferred_birth_year
         spec = self._required_spec(item.record_type, detail_key)
         if spec.record_field:
             return getattr(item, spec.record_field)

@@ -29,7 +29,6 @@ import { AlertCenter } from './components/AlertCenter'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { DailyDigestDrawer } from './components/DailyDigestDrawer'
 import { Dashboard } from './components/Dashboard'
-import { EditReminderDrawer } from './components/EditReminderDrawer'
 import { HomeDashboard } from './components/HomeDashboard'
 import { LifeAdminTemplates } from './components/LifeAdminTemplates'
 import type { RecordDetailTab } from './components/RecordDetailDrawer'
@@ -163,9 +162,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null)
   const [viewingReminder, setViewingReminder] = useState<{ reminder: Reminder; fromAlert: boolean } | null>(null)
-  const [editingRecord, setEditingRecord] = useState<LifeRecord | null>(null)
   const [viewingRecord, setViewingRecord] = useState<ViewingRecordState | null>(null)
   const [recordBackStack, setRecordBackStack] = useState<ViewingRecordState[]>([])
   const recordCreationProgressRef = useRef(new Map<string, RecordCreationProgress>())
@@ -661,7 +658,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       await remindersApi.remove(target.id)
       await loadReminderData()
       setNotice('Reminder deleted.')
-      setEditingReminder((current) => (current?.id === target.id ? null : current))
       setViewingReminder((current) => (current?.reminder.id === target.id ? null : current))
       setPendingDelete(null)
     } catch (requestError) {
@@ -695,13 +691,11 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   function replaceReminder(updated: Reminder) {
     setReminders((current) => current.map((item) => (item.id === updated.id ? updated : item)))
     setViewingReminder((current) => (current?.reminder.id === updated.id ? { ...current, reminder: updated } : current))
-    setEditingReminder((current) => (current?.id === updated.id ? updated : current))
   }
 
   function replaceRecord(updated: LifeRecord) {
     setRecords((current) => current.map((item) => (item.id === updated.id ? updated : item)))
     setViewingRecord((current) => (current?.record.id === updated.id ? { ...current, record: updated } : current))
-    setEditingRecord((current) => (current?.id === updated.id ? updated : current))
     setRecordBackStack((current) => current.map((item) => (item.record.id === updated.id ? { ...item, record: updated } : item)))
   }
 
@@ -748,7 +742,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function openAlertDetail(reminder: Reminder) {
     setIsAlertCenterOpen(false)
-    setEditingReminder(null)
     setViewingReminder({ reminder, fromAlert: true })
   }
 
@@ -772,17 +765,14 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   }
 
   function openDetailEdit(reminder: Reminder) {
-    setViewingReminder(null)
-    setEditingReminder(reminder)
+    setViewingReminder({ reminder, fromAlert: false })
   }
 
   function openReminderDetail(reminder: Reminder) {
-    setEditingReminder(null)
     setViewingReminder({ reminder, fromAlert: false })
   }
 
   function openRecordDetail(record: LifeRecord) {
-    setEditingRecord(null)
     setRecordBackStack([])
     setViewingRecord({ record, initialTab: 'details' })
   }
@@ -794,7 +784,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       return
     }
 
-    setEditingRecord(null)
     setViewingReminder(null)
     if (viewingRecord) {
       setRecordBackStack((current) => [...current, viewingRecord])
@@ -813,7 +802,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     setViewingRecord(null)
     setRecordBackStack([])
-    setEditingReminder(null)
     setViewingReminder({ reminder, fromAlert: false })
   }
 
@@ -824,7 +812,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       return
     }
 
-    setEditingRecord(null)
     setViewingReminder(null)
     if (viewingRecord) {
       setRecordBackStack((current) => [...current, viewingRecord])
@@ -839,7 +826,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     try {
       const record = records.find((item) => item.id === recordId) ?? await recordsApi.get(recordId)
       setRecords((current) => (current.some((item) => item.id === record.id) ? current.map((item) => (item.id === record.id ? record : item)) : [...current, record]))
-      setEditingRecord(null)
       setViewingReminder(null)
       setRecordBackStack([])
       setViewingRecord({ record, initialTab: 'details' })
@@ -855,7 +841,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       setReminders((current) => (current.some((item) => item.id === reminder.id) ? current.map((item) => (item.id === reminder.id ? reminder : item)) : [...current, reminder]))
       setViewingRecord(null)
       setRecordBackStack([])
-      setEditingReminder(null)
       setViewingReminder({ reminder, fromAlert: false })
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to open search result.')
@@ -867,7 +852,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     try {
       const record = records.find((item) => item.id === recordId) ?? await recordsApi.get(recordId)
       setRecords((current) => (current.some((item) => item.id === record.id) ? current.map((item) => (item.id === record.id ? record : item)) : [...current, record]))
-      setEditingRecord(null)
       setViewingReminder(null)
       setRecordBackStack([])
       setViewingRecord({ record, initialTab: 'documents', documentId: normalizeDocumentAttachmentId(recordId, documentId) })
@@ -899,7 +883,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       await recordsApi.remove(pendingRecordDelete.id)
       await Promise.all([loadRecordData(), loadReminderData()])
       setNotice('Item deleted.')
-      setEditingRecord((current) => (current?.id === pendingRecordDelete.id ? null : current))
       setViewingRecord((current) => (current?.record.id === pendingRecordDelete.id ? null : current))
       setPendingRecordDelete(null)
     } catch (requestError) {
@@ -940,14 +923,12 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
   function handleProtectedRecordStatusChange(id: string, protectedStatus: ProtectedRecordStatus) {
     setRecords((current) => current.map((record) => (record.id === id ? withProtectedStatus(record, protectedStatus) : record)))
     setViewingRecord((current) => (current?.record.id === id ? { ...current, record: withProtectedStatus(current.record, protectedStatus) } : current))
-    setEditingRecord((current) => (current?.id === id ? withProtectedStatus(current, protectedStatus) : current))
   }
 
   function openAddReminder() {
     if (isAccountDeleting) return
     setResponsibilityRecordId(null)
     setAddDateContext(null)
-    setEditingRecord(null)
     setIsRecordFormOpen(false)
     setIsRecordTypeSelectorOpen(false)
     setIsTemplateModalOpen(false)
@@ -959,7 +940,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setAddDateContext(date)
     setCalendarSelectedDate(date)
     setCalendarVisibleMonth(getMonthStartDateKey(date))
-    setEditingRecord(null)
     setIsRecordFormOpen(false)
     setIsRecordTypeSelectorOpen(false)
     setIsTemplateModalOpen(false)
@@ -976,7 +956,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     if (isAccountDeleting) return
     setResponsibilityRecordId(null)
     setAddDateContext(null)
-    setEditingRecord(null)
     setViewingRecord(null)
     setRecordBackStack([])
     setIsRecordFormOpen(false)
@@ -1011,7 +990,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     if (isAccountDeleting) return
     setResponsibilityRecordId(null)
     setAddDateContext(null)
-    setEditingRecord(null)
     setIsReminderFormOpen(false)
     setIsTemplateModalOpen(false)
     setIsAddTypeSelectorOpen(false)
@@ -1025,23 +1003,13 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
   function openRecordForm(recordType: RecordType) {
     setSelectedRecordType(recordType)
-    setEditingRecord(null)
     setIsRecordTypeSelectorOpen(false)
     setIsAddTypeSelectorOpen(false)
     setIsRecordFormOpen(true)
   }
 
-  function openRecordDetailEdit(record: LifeRecord) {
-    setViewingRecord(null)
-    setRecordBackStack([])
-    setSelectedRecordType(record.record_type)
-    setEditingRecord(record)
-    setIsRecordFormOpen(true)
-  }
-
   function closeRecordForm() {
     setIsRecordFormOpen(false)
-    setEditingRecord(null)
   }
 
   function continueRecordSetupLater(recordId: string) {
@@ -1512,7 +1480,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       <RecordForm
         isOpen={isRecordFormOpen}
         isSaving={isSaving}
-        record={editingRecord}
+        record={null}
         records={records}
         recordType={selectedRecordType}
         reminders={reminders}
@@ -1563,7 +1531,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onDisableCalendarSync={handleDisableCalendarSync}
           onEnableCalendarSync={handleEnableCalendarSync}
           onDismiss={handleDismissAlert}
-          onEdit={openDetailEdit}
+          onSave={handleUpdate}
           onOpenLinkedDocument={openLinkedDocument}
           onOpenLinkedRecord={openLinkedRecord}
           onRenew={handleRenewReminder}
@@ -1589,7 +1557,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
             setViewingRecord(null)
             setRecordBackStack([])
           }}
-          onEdit={openRecordDetailEdit}
+          onSave={handleUpdateRecord}
           onOpenLinkedDocument={openLinkedDocument}
           onOpenLinkedRecord={openLinkedRecord}
           onOpenLinkedReminder={openLinkedReminder}
@@ -1606,15 +1574,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           records={records}
           onClose={() => setLifecycleAction(null)}
           onSaved={(updated, message) => void handleLifecycleSaved(updated, message)}
-        />
-      ) : null}
-      {editingReminder ? (
-        <EditReminderDrawer
-          reminder={editingReminder}
-          isSaving={isSaving}
-          onCancel={() => setEditingReminder(null)}
-          onDelete={requestDelete}
-          onSave={handleUpdate}
         />
       ) : null}
       <ConfirmDialog

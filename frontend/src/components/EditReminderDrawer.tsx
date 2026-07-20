@@ -3,8 +3,7 @@ import type { FormEvent } from 'react'
 import { Save, Trash2 } from 'lucide-react'
 
 import type { Reminder, ReminderInput } from '../types/reminder'
-import { buildReminderSubmitInput, isReminderReady } from '../lib/reminderInput'
-import { buildReminderInputWithDefaultTiming } from '../lib/reminderSchedule'
+import { buildReminderSubmitInput, isReminderReady, reminderToInput } from '../lib/reminderInput'
 import { ReminderFields } from './ReminderForm'
 import { SheetDrawer } from './SheetDrawer'
 
@@ -20,7 +19,7 @@ interface EditReminderDrawerProps {
 }
 
 export function EditReminderDrawer({ reminder, isSaving, onCancel, onDelete, onSave }: EditReminderDrawerProps) {
-  const [form, setForm] = useState<ReminderInput>(() => toReminderInput(reminder))
+  const [form, setForm] = useState<ReminderInput>(() => reminderToInput(reminder))
   const [isDrawerOpen, setIsDrawerOpen] = useState(true)
   const isClosingRef = useRef(false)
   const closeTimerRef = useRef<number | null>(null)
@@ -28,7 +27,7 @@ export function EditReminderDrawer({ reminder, isSaving, onCancel, onDelete, onS
   useEffect(() => {
     isClosingRef.current = false
     setIsDrawerOpen(true)
-    setForm(toReminderInput(reminder))
+    setForm(reminderToInput(reminder))
   }, [reminder])
 
   useEffect(() => {
@@ -121,54 +120,4 @@ function getEditDescription(reminderType: ReminderInput['reminder_type']) {
   }
 
   return 'Update details and keep the next due date clear.'
-}
-
-function toReminderInput(reminder: Reminder): ReminderInput {
-  return buildReminderInputWithDefaultTiming({
-    title: reminder.title,
-    category: reminder.category,
-    due_date: reminder.due_date,
-    repeat: reminder.repeat,
-    priority: reminder.priority,
-    notes: reminder.notes,
-    reminder_lead_value: reminder.reminder_lead_value,
-    reminder_lead_unit: reminder.reminder_lead_unit,
-    reminder_time: reminder.reminder_time,
-    reminder_type: reminder.reminder_type ?? 'generic',
-    birthday_details: reminder.birthday_details
-      ? {
-          person_name: reminder.birthday_details.person_name,
-          birth_month: reminder.birthday_details.birth_month,
-          birth_day: reminder.birthday_details.birth_day,
-          birth_year: reminder.birthday_details.birth_year,
-          age_turning_next_birthday: reminder.birthday_details.age_turning_next_birthday,
-          inferred_birth_year: reminder.birthday_details.inferred_birth_year,
-          relationship: reminder.birthday_details.relationship,
-        }
-      : null,
-    renewal_details: reminder.renewal_details
-      ? {
-          item_name: reminder.renewal_details.item_name,
-          renewal_kind: reminder.renewal_details.renewal_kind,
-          owner_name: reminder.renewal_details.owner_name,
-          provider: reminder.renewal_details.provider,
-          renewal_date: reminder.renewal_details.renewal_date,
-          expiration_date: reminder.renewal_details.expiration_date,
-          renewal_window_days: reminder.renewal_details.renewal_window_days,
-          review_lead_days: reminder.renewal_details.review_lead_days,
-          frequency: reminder.renewal_details.frequency,
-        }
-      : null,
-    maintenance_details: reminder.maintenance_details
-      ? {
-          item_name: reminder.maintenance_details.item_name,
-          maintenance_area: reminder.maintenance_details.maintenance_area,
-          last_completed_date: reminder.maintenance_details.last_completed_date,
-          interval_value: reminder.maintenance_details.interval_value,
-          interval_unit: reminder.maintenance_details.interval_unit,
-          next_due_date: reminder.maintenance_details.next_due_date,
-          instructions: reminder.maintenance_details.instructions,
-        }
-      : null,
-  })
 }

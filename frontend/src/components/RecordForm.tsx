@@ -1232,7 +1232,7 @@ function SuggestedFieldButtons({
     </div>
   )
 }
-function RecordFieldGrid({
+export function RecordFieldGrid({
   fields,
   form,
   onBirthdayValidityChange,

@@ -26,12 +26,16 @@ def domain_automation_context() -> dict[str, Any]:
         "birthday_pairing": {
             "supported_item_types": ["person", "pet"],
             "birthday_formats": ["YYYY-MM-DD", "--MM-DD"],
+            "turning_age_detail_key": "birthday_turning_age",
+            "turning_age_is_converted_programmatically": True,
             "item_birthday_automatically_maintains_annual_reminder": True,
             "birthday_reminder_automatically_maintains_linked_item": True,
             "yearless_birthday_stays_yearless_on_item": True,
             "instruction": (
                 "Propose only the object explicitly requested. LifeLedger creates, updates, "
-                "and links its birthday counterpart after confirmation."
+                "and links its birthday counterpart after confirmation. When the user gives the age at the next "
+                "birthday instead of a year, send birthday_turning_age with the yearless birthday; LifeLedger "
+                "calculates and stores the inferred birth year programmatically. A birth year is optional."
             ),
         },
         "mutation_policy": {
