@@ -58,8 +58,8 @@ COMMON_DETAILS = {
 
 ITEM_DETAIL_SPECS: dict[RecordType, dict[str, DetailSpec]] = {
     RecordType.GENERAL: dict(COMMON_DETAILS),
-    RecordType.PASSPORT: dict(COMMON_DETAILS),
-    RecordType.DRIVER_LICENSE: dict(COMMON_DETAILS),
+    RecordType.PASSPORT: {key: spec for key, spec in COMMON_DETAILS.items() if key != "owner_name"},
+    RecordType.DRIVER_LICENSE: {key: spec for key, spec in COMMON_DETAILS.items() if key != "owner_name"},
     RecordType.VEHICLE: {
         **COMMON_DETAILS,
         "model": _detail("model", "Model"),
@@ -103,14 +103,12 @@ ITEM_DETAIL_SPECS: dict[RecordType, dict[str, DetailSpec]] = {
     },
     RecordType.WARRANTY: {**COMMON_DETAILS, "coverage": _detail("coverage", "Coverage")},
     RecordType.PERSON: {
-        "preferred_name": _detail("preferred_name", "Preferred name"),
         # Person and Pet birthdays support either YYYY-MM-DD or --MM-DD.
         "birthday": _detail("birthday", "Birthday", record_field="birthday"),
         "relationship_context": _detail(
             "relationship_context",
             "Relationship",
-            DynamicFieldType.SELECT,
-            select_options=("Friend", "Family", "Coworker", "Neighbor", "Other"),
+            record_field="relationship_context",
         ),
         "aliases": _detail("aliases", "Aliases"),
     },

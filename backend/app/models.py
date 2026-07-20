@@ -143,6 +143,8 @@ class Record(BaseModel):
     purchase_date: date | None = None
     renewal_date: date | None = None
     birthday: str | None = None
+    birthday_inferred_birth_year: int | None = Field(default=None, ge=1, le=9999)
+    relationship_context: str | None = None
     location_hint: str | None = None
     notes: str | None = None
     tags: list[str] = Field(default_factory=list)
@@ -160,14 +162,26 @@ class Record(BaseModel):
 
     @model_validator(mode="after")
     def validate_birthday(self) -> "Record":
-        if self.birthday is None:
-            return self
-        if self.record_type not in {RecordType.PERSON, RecordType.PET}:
-            raise ValueError("Birthday is available only for Person and Pet items.")
-        try:
-            self.birthday = parse_birthday_value(self.birthday).stored_value
-        except BirthdayValueError as exc:
-            raise ValueError(str(exc)) from exc
+        if self.birthday is not None:
+            if self.record_type not in {RecordType.PERSON, RecordType.PET}:
+                raise ValueError("Birthday is available only for Person and Pet items.")
+            try:
+                self.birthday = parse_birthday_value(self.birthday).stored_value
+            except BirthdayValueError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.birthday_inferred_birth_year is not None:
+            if self.record_type not in {RecordType.PERSON, RecordType.PET}:
+                raise ValueError("A calculated birth year is available only for Person and Pet items.")
+            if self.birthday is None or not self.birthday.startswith("--"):
+                raise ValueError("A calculated birth year requires a birthday with an unknown year.")
+            try:
+                parse_birthday_value(f"{self.birthday_inferred_birth_year:04d}{self.birthday[1:]}")
+            except BirthdayValueError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.relationship_context is not None:
+            self.relationship_context = self.relationship_context.strip() or None
+            if self.relationship_context is not None and self.record_type != RecordType.PERSON:
+                raise ValueError("Relationship is available only for Person items.")
         return self
 
 

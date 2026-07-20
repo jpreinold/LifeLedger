@@ -459,6 +459,62 @@ def test_first_class_person_birthday_creates_linked_annual_reminder(client):
     assert reminders[0]["birthday_details"]["birth_year"] == 1999
 
 
+def test_person_profile_turning_age_and_relationship_sync_to_birthday_reminder(client):
+    birthday = date.today() + timedelta(days=45)
+    inferred_birth_year = birthday.year - 31
+    created = create_record(
+        client,
+        record_type="person",
+        title="Jasmine",
+        category="People",
+        birthday=f"--{birthday.month:02d}-{birthday.day:02d}",
+        birthday_inferred_birth_year=inferred_birth_year,
+        relationship_context="Friend",
+        renewal_date=None,
+    )
+
+    assert created["birthday"] == f"--{birthday.month:02d}-{birthday.day:02d}"
+    assert created["birthday_inferred_birth_year"] == inferred_birth_year
+    assert created["relationship_context"] == "Friend"
+    reminder = client.get("/reminders").json()[0]
+    assert reminder["birthday_details"]["birth_year"] == inferred_birth_year
+    assert reminder["birthday_details"]["age_turning_next_birthday"] == 31
+    assert reminder["birthday_details"]["inferred_birth_year"] is True
+    assert reminder["birthday_details"]["relationship"] == "Friend"
+
+    updated = client.put(
+        f"/records/{created['id']}",
+        json={"relationship_context": "Family"},
+    )
+    assert updated.status_code == 200
+    refreshed_reminder = client.get(f"/reminders/{reminder['id']}").json()
+    assert refreshed_reminder["birthday_details"]["relationship"] == "Family"
+
+    known_year = birthday.year - 31
+    known = client.put(
+        f"/records/{created['id']}",
+        json={"birthday": f"{known_year:04d}-{birthday.month:02d}-{birthday.day:02d}"},
+    )
+    assert known.status_code == 200
+    assert known.json()["birthday_inferred_birth_year"] is None
+    known_reminder = client.get(f"/reminders/{reminder['id']}").json()
+    assert known_reminder["birthday_details"]["inferred_birth_year"] is False
+
+
+def test_relationship_is_rejected_outside_person_profiles(client):
+    response = client.post(
+        "/records",
+        json={
+            "record_type": "pet",
+            "title": "Pepper",
+            "category": "Family",
+            "relationship_context": "Friend",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_create_birthday_reminder_with_age_turning_infers_birth_year(client):
     birthday = date.today() + timedelta(days=45)
 

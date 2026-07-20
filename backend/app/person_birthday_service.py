@@ -92,6 +92,9 @@ class PersonBirthdayService:
             and (existing.birthday_details.birth_month, existing.birthday_details.birth_day) == (birthday.month, birthday.day)
         ):
             retained_age = existing.birthday_details.age_turning_next_birthday
+        inferred_birth_year = record.birthday_inferred_birth_year if birthday.year is None else None
+        if retained_age is None and inferred_birth_year is not None:
+            retained_age = due_date.year - inferred_birth_year
         details = enrich_birthday_details(
             BirthdayDetails(
                 subject_type=record.record_type,
@@ -100,6 +103,7 @@ class PersonBirthdayService:
                 birth_day=birthday.day,
                 birth_year=birthday.year,
                 age_turning_next_birthday=retained_age,
+                inferred_birth_year=inferred_birth_year is not None,
                 relationship=self._relationship(record),
             ),
             due_date,
@@ -219,6 +223,8 @@ class PersonBirthdayService:
                     title=details.person_name,
                     category="People" if subject_type == RecordType.PERSON else "Family",
                     birthday=birthday.stored_value,
+                    birthday_inferred_birth_year=details.birth_year if details.inferred_birth_year else None,
+                    relationship_context=details.relationship if subject_type == RecordType.PERSON else None,
                     created_at=current,
                     updated_at=current,
                 )
@@ -229,9 +235,16 @@ class PersonBirthdayService:
         ) else record.title
         updates: dict[str, object] = {
             "birthday": birthday.stored_value,
-            "dynamic_fields": [field for field in record.dynamic_fields if field.key != PERSON_BIRTHDAY_KEY],
+            "birthday_inferred_birth_year": details.birth_year if details.inferred_birth_year else None,
+            "dynamic_fields": [
+                field
+                for field in record.dynamic_fields
+                if field.key not in {PERSON_BIRTHDAY_KEY, PERSON_RELATIONSHIP_KEY}
+            ],
             "updated_at": current,
         }
+        if subject_type == RecordType.PERSON and details.relationship is not None:
+            updates["relationship_context"] = details.relationship
         if next_title != record.title:
             updates["title"] = next_title
         updated = record.model_copy(update=updates)
@@ -332,6 +345,8 @@ class PersonBirthdayService:
     def _relationship(record: Record) -> str | None:
         if record.record_type != RecordType.PERSON:
             return None
+        if record.relationship_context:
+            return record.relationship_context
         field = next(
             (
                 item
@@ -431,10 +446,38 @@ def canonicalize_birthday_record(record: Record, *, today: date | None = None) -
     birthday = record.birthday
     if birthday is None and legacy is not None:
         birthday = parse_birthday_value(legacy.value, today=today).stored_value
-    next_fields = [field for field in record.dynamic_fields if field.key != PERSON_BIRTHDAY_KEY]
-    if birthday == record.birthday and len(next_fields) == len(record.dynamic_fields):
+    legacy_relationship = next(
+        (
+            field
+            for field in record.dynamic_fields
+            if record.record_type == RecordType.PERSON
+            and field.key == PERSON_RELATIONSHIP_KEY
+            and field.has_value
+            and not field.is_sensitive
+            and field.value is not None
+        ),
+        None,
+    )
+    relationship = record.relationship_context
+    if relationship is None and legacy_relationship is not None:
+        relationship = str(legacy_relationship.value).strip() or None
+    migrated_keys = {PERSON_BIRTHDAY_KEY}
+    if record.record_type == RecordType.PERSON:
+        migrated_keys.add(PERSON_RELATIONSHIP_KEY)
+    next_fields = [field for field in record.dynamic_fields if field.key not in migrated_keys]
+    if (
+        birthday == record.birthday
+        and relationship == record.relationship_context
+        and len(next_fields) == len(record.dynamic_fields)
+    ):
         return record
-    return record.model_copy(update={"birthday": birthday, "dynamic_fields": next_fields})
+    return record.model_copy(
+        update={
+            "birthday": birthday,
+            "relationship_context": relationship,
+            "dynamic_fields": next_fields,
+        }
+    )
 
 
 def _utc(value: datetime | None) -> datetime:

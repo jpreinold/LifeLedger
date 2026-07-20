@@ -1249,15 +1249,26 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       <>
       <main className="app-shell" id="app-top">
         <header className="app-header app-header-main">
-          <button
-            type="button"
-            className={`icon-button header-calendar-button ${activePage === 'calendar' ? 'active' : ''}`.trim()}
-            onClick={() => showCalendar()}
-            aria-current={activePage === 'calendar' ? 'page' : undefined}
-            aria-label={activePage === 'calendar' ? 'Calendar open' : 'Open calendar'}
-          >
-            <CalendarDays size={20} aria-hidden="true" />
-          </button>
+          <div className="header-actions header-main-leading">
+            <button
+              type="button"
+              className={`icon-button header-calendar-button ${activePage === 'calendar' ? 'active' : ''}`.trim()}
+              onClick={() => showCalendar()}
+              aria-current={activePage === 'calendar' ? 'page' : undefined}
+              aria-label={activePage === 'calendar' ? 'Calendar open' : 'Open calendar'}
+            >
+              <CalendarDays size={20} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className={`icon-button header-inbox-button ${activePage === 'inbox' ? 'active' : ''}`.trim()}
+              onClick={() => showPage('inbox')}
+              aria-current={activePage === 'inbox' ? 'page' : undefined}
+              aria-label={activePage === 'inbox' ? 'Capture Inbox open' : 'Open Capture Inbox'}
+            >
+              <Inbox size={19} aria-hidden="true" />
+            </button>
+          </div>
 
           <h1 className={useBrandHeader ? 'app-title app-title-brand' : 'app-title'}>
             {useBrandHeader ? (
@@ -1269,15 +1280,6 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           </h1>
 
           <div className="header-actions header-main-actions">
-            <button
-              type="button"
-              className={`icon-button header-inbox-button ${activePage === 'inbox' ? 'active' : ''}`.trim()}
-              onClick={() => showPage('inbox')}
-              aria-current={activePage === 'inbox' ? 'page' : undefined}
-              aria-label={activePage === 'inbox' ? 'Capture Inbox open' : 'Open Capture Inbox'}
-            >
-              <Inbox size={19} aria-hidden="true" />
-            </button>
             <button
               type="button"
               className={`icon-button header-search-button ${activePage === 'search' ? 'active' : ''}`.trim()}

@@ -627,6 +627,8 @@ class RecordBase(BaseModel):
     purchase_date: date | None = None
     renewal_date: date | None = None
     birthday: str | None = Field(default=None, max_length=10)
+    birthday_inferred_birth_year: int | None = Field(default=None, ge=1, le=9999)
+    relationship_context: str | None = Field(default=None, max_length=80)
     location_hint: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=1000)
     tags: list[str] = Field(default_factory=list, max_length=12)
@@ -637,6 +639,7 @@ class RecordBase(BaseModel):
         "subtitle",
         "owner_name",
         "provider_or_brand",
+        "relationship_context",
         "location_hint",
         "notes",
         mode="before",
@@ -708,6 +711,17 @@ class RecordBase(BaseModel):
     def validate_birthday_subject(self) -> "RecordBase":
         if self.birthday is not None and self.record_type not in {RecordType.PERSON, RecordType.PET}:
             raise ValueError("Birthday is available only for Person and Pet items.")
+        if self.birthday_inferred_birth_year is not None:
+            if self.record_type not in {RecordType.PERSON, RecordType.PET}:
+                raise ValueError("A calculated birth year is available only for Person and Pet items.")
+            if self.birthday is None or not self.birthday.startswith("--"):
+                raise ValueError("A calculated birth year requires a birthday with an unknown year.")
+            try:
+                parse_birthday_value(f"{self.birthday_inferred_birth_year:04d}{self.birthday[1:]}")
+            except BirthdayValueError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.relationship_context is not None and self.record_type != RecordType.PERSON:
+            raise ValueError("Relationship is available only for Person items.")
         return self
 
 
@@ -732,6 +746,8 @@ class RecordUpdate(BaseModel):
     purchase_date: date | None = None
     renewal_date: date | None = None
     birthday: str | None = Field(default=None, max_length=10)
+    birthday_inferred_birth_year: int | None = Field(default=None, ge=1, le=9999)
+    relationship_context: str | None = Field(default=None, max_length=80)
     location_hint: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=1000)
     tags: list[str] | None = Field(default=None, max_length=12)
@@ -743,6 +759,7 @@ class RecordUpdate(BaseModel):
         "category",
         "owner_name",
         "provider_or_brand",
+        "relationship_context",
         "location_hint",
         "notes",
         mode="before",

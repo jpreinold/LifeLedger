@@ -18,7 +18,6 @@ import {
   formatRecordDate,
   formatRecordKeyDate,
   formatRecordTimestamp,
-  getRecordProviderLine,
   getRecordStatusClass,
   getRecordStatusLabel,
 } from '../lib/recordDisplay'
@@ -117,7 +116,6 @@ export function RecordDetailDrawer({
   const dynamicRevealTimersRef = useRef<Record<string, number>>({})
   const definition = getRecordTypeDefinition(record.record_type)
   const Icon = definition.icon
-  const providerLine = getRecordProviderLine(record)
   const keyDate = formatRecordKeyDate(record)
   const updatedLabel = formatRecordTimestamp(record.updated_at)
   const dynamicFieldCount = getVisibleDynamicFieldCount(record.dynamic_fields)
@@ -494,8 +492,8 @@ export function RecordDetailDrawer({
                 { label: 'Category', value: categoryPresentation },
                 { label: definition.labels.owner_name ?? productTerms.owner, value: record.owner_name },
                 { label: definition.labels.provider_or_brand ?? productTerms.provider, value: record.provider_or_brand },
-                { label: 'Birthday', value: formatBirthdayDetail(record.birthday ?? null) },
-                { label: 'Summary', value: providerLine },
+                { label: 'Relationship', value: record.relationship_context },
+                { label: 'Birthday', value: formatBirthdayDetail(record.birthday ?? null, record.birthday_inferred_birth_year) },
                 { label: definition.labels.location_hint ?? 'Location', value: record.location_hint },
               ]}
             />
@@ -514,7 +512,7 @@ export function RecordDetailDrawer({
 
             <DynamicFieldsSection
               error={fieldError}
-              fields={record.dynamic_fields.filter((field) => field.key !== 'birthday')}
+              fields={record.dynamic_fields.filter((field) => !['birthday', 'relationship_context'].includes(field.key))}
               revealedFields={revealedFields}
               revealingFieldId={revealingFieldId}
               removingFieldId={removingFieldId}
@@ -877,12 +875,12 @@ function DynamicFieldsSection({
   )
 }
 
-function formatBirthdayDetail(value: string | null) {
+function formatBirthdayDetail(value: string | null, inferredBirthYear?: number | null) {
   if (!value) return null
   const yearless = /^--(\d{2})-(\d{2})$/.exec(value)
   const complete = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!yearless && !complete) return value
-  const year = complete ? Number(complete[1]) : null
+  const year = complete ? Number(complete[1]) : inferredBirthYear ?? null
   const month = Number((complete ?? yearless)![complete ? 2 : 1])
   const day = Number((complete ?? yearless)![complete ? 3 : 2])
   const today = new Date()
@@ -895,9 +893,9 @@ function formatBirthdayDetail(value: string | null) {
   const next = thisYear < new Date(today.getFullYear(), today.getMonth(), today.getDate())
     ? dateForYear(today.getFullYear() + 1)
     : thisYear
-  const birthdayLabel = year === null
+  const birthdayLabel = complete === null
     ? dateForYear(2000).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
-    : new Date(year, month - 1, day).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+    : new Date(Number(complete[1]), month - 1, day).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
   const nextLabel = next.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
   return `${birthdayLabel} · next ${nextLabel} · ${year === null ? 'age unknown' : `turning ${next.getFullYear() - year}`}`
 }

@@ -391,8 +391,8 @@ export function RecordForm({
     setEditingDetail(null)
   }
 
-  function updateField(field: keyof RecordInput, value: string | null) {
-    setForm((current) => ({ ...current, [field]: value }))
+  function updateField(field: keyof RecordInput, value: string | number | null) {
+    setForm((current) => ({ ...current, [field]: value } as RecordInput))
   }
 
 
@@ -536,7 +536,6 @@ export function RecordForm({
             {!record ? (
               <SuggestedDetailsSection
                 details={definition.suggestedDetails.filter((detail) => detail.showByDefault && !detail.recordField && !detail.protectedField)}
-                personBirthday={form.record_type === 'person'}
                 values={suggestedDetailValues}
                 onChange={updateSuggestedDetail}
               />
@@ -708,11 +707,9 @@ export function RecordForm({
 function SuggestedDetailsSection({
   details,
   onChange,
-  personBirthday,
   values,
 }: {
   details: SuggestedDetailDefinition[]
-  personBirthday: boolean
   values: Record<string, DynamicFieldValue>
   onChange: (key: string, value: DynamicFieldValue) => void
 }) {
@@ -728,24 +725,16 @@ function SuggestedDetailsSection({
       <div className="record-form-grid">
         {details.map((detail) => (
           <div className="suggested-detail-input" key={detail.key}>
-            {personBirthday && detail.key === 'birthday' ? (
-              <PersonBirthdayInput
-                label={detail.label}
-                value={values[detail.key] ?? null}
-                onChange={(value) => onChange(detail.key, value)}
-              />
-            ) : (
-              <DraftValueControl
-                choices={detail.selectOptions}
-                format={detail.dataType}
-                label={detail.label}
-                placeholder={detail.placeholder}
-                value={values[detail.key] ?? null}
-                onChange={(value) => onChange(detail.key, value)}
-              />
-            )}
+            <DraftValueControl
+              choices={detail.selectOptions}
+              format={detail.dataType}
+              label={detail.label}
+              placeholder={detail.placeholder}
+              value={values[detail.key] ?? null}
+              onChange={(value) => onChange(detail.key, value)}
+            />
             {detail.protectedByDefault ? <small className="protected-field-edit-status">Stored as a protected detail and excluded from search.</small> : null}
-            {detail.helperText && !(personBirthday && detail.key === 'birthday') ? <small className="field-helper">{detail.helperText}</small> : null}
+            {detail.helperText ? <small className="field-helper">{detail.helperText}</small> : null}
           </div>
         ))}
       </div>
@@ -1252,7 +1241,7 @@ function RecordFieldGrid({
   fields: RecordField[]
   form: RecordInput
   onBirthdayValidityChange?: (isValid: boolean) => void
-  onChange: (field: keyof RecordInput, value: string | null) => void
+  onChange: (field: keyof RecordInput, value: string | number | null) => void
 }) {
   const visibleFields = fields.filter((field) => field !== 'location_hint' || form.record_type !== 'subscription')
 
@@ -1265,12 +1254,16 @@ function RecordFieldGrid({
       {visibleFields.map((field) =>
         field === 'birthday' ? (
           <PersonBirthdayInput
+            inferredBirthYear={form.birthday_inferred_birth_year ?? null}
             key={field}
             onValidityChange={onBirthdayValidityChange}
             subjectName={form.title}
             value={form.birthday}
             onChange={(value) => onChange('birthday', typeof value === 'string' ? value : null)}
+            onInferredBirthYearChange={(value) => onChange('birthday_inferred_birth_year', value)}
           />
+        ) : field === 'relationship_context' ? (
+          <RecordRelationshipField form={form} key={field} onChange={onChange} />
         ) : dateFields.includes(field) ? (
           <RecordDateField field={field} form={form} key={field} onChange={onChange} />
         ) : (
@@ -1290,7 +1283,7 @@ function RecordTextField({
   field: RecordField
   form: RecordInput
   definitionType: RecordType
-  onChange: (field: keyof RecordInput, value: string | null) => void
+  onChange: (field: keyof RecordInput, value: string | number | null) => void
 }) {
   const definition = getRecordTypeDefinition(definitionType)
 
@@ -1314,7 +1307,7 @@ function RecordDateField({
 }: {
   field: RecordField
   form: RecordInput
-  onChange: (field: keyof RecordInput, value: string | null) => void
+  onChange: (field: keyof RecordInput, value: string | number | null) => void
 }) {
   return (
     <label>
@@ -1337,7 +1330,7 @@ function RecordTextArea({
   field: RecordField
   form: RecordInput
   definitionType: RecordType
-  onChange: (field: keyof RecordInput, value: string | null) => void
+  onChange: (field: keyof RecordInput, value: string | number | null) => void
 }) {
   return (
     <label>
@@ -1349,6 +1342,33 @@ function RecordTextArea({
         rows={4}
         placeholder="Optional safe notes"
       />
+    </label>
+  )
+}
+
+function RecordRelationshipField({
+  form,
+  onChange,
+}: {
+  form: RecordInput
+  onChange: (field: keyof RecordInput, value: string | number | null) => void
+}) {
+  const choices = ['Friend', 'Family', 'Partner', 'Coworker', 'Neighbor', 'Acquaintance', 'Other']
+  const value = form.relationship_context ?? ''
+
+  return (
+    <label>
+      <span>Relationship <small>Optional</small></span>
+      <input
+        list="person-relationship-options"
+        maxLength={80}
+        placeholder="Friend, family, coworker…"
+        value={value}
+        onChange={(event) => onChange('relationship_context', event.target.value || null)}
+      />
+      <datalist id="person-relationship-options">
+        {choices.map((option) => <option value={option} key={option} />)}
+      </datalist>
     </label>
   )
 }
@@ -1375,6 +1395,7 @@ function getFieldLabel(field: RecordField, type: RecordType) {
     purchase_date: 'Purchase date',
     renewal_date: 'Renewal date',
     birthday: 'Birthday',
+    relationship_context: 'Relationship',
     location_hint: 'Location hint',
     notes: 'Notes',
     tags: 'Tags',

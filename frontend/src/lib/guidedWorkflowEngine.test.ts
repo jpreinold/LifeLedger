@@ -108,7 +108,7 @@ describe('guided workflow recovery', () => {
     expect(createItem).toHaveBeenCalledWith(expect.objectContaining({
       record_type: 'passport',
       title: 'Jamie',
-      owner_name: 'Jamie',
+      owner_name: null,
       expiration_date: '2032-10-01',
     }), 'passport-attempt:item')
     expect(saveProtected).toHaveBeenCalledWith('passport-1', { document_number: 'P1234567' }, false)

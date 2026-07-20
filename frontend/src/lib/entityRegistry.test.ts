@@ -60,4 +60,15 @@ describe('entity capability registry', () => {
     const legacy = recordToInput({ ...input, title: 'Mazda3', category: 'Vehicle' })
     expect(legacy.category).toBe('Vehicle')
   })
+
+  it('keeps profile fields first-class and omits audited duplicate identity fields', () => {
+    const person = getEntityDefinition('person')
+    expect(person.fields).toContain('relationship_context')
+    expect(person.defaultSuggestedFields).toContain('relationship_context')
+    expect(person.dynamicFieldPresets.map((field) => field.key)).not.toContain('preferred_name')
+    expect(person.dynamicFieldPresets.map((field) => field.key)).not.toContain('relationship_context')
+
+    expect(getEntityDefinition('passport').fields).not.toContain('owner_name')
+    expect(getEntityDefinition('driver_license').fields).not.toContain('owner_name')
+  })
 })

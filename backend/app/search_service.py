@@ -272,6 +272,7 @@ class SearchProjectionService:
         collector.add_metadata(record.record_type.value.replace("_", " "), "Matched record type")
         collector.add_metadata(record.owner_name, "Matched owner")
         collector.add_metadata(record.provider_or_brand, "Matched provider")
+        collector.add_metadata(record.relationship_context, "Matched relationship")
         collector.add_metadata(record.location_hint, "Matched location")
         for tag in record.tags:
             collector.add_metadata(tag, f"Matched tag: {tag}")

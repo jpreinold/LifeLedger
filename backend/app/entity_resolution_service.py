@@ -69,7 +69,7 @@ class EntityResolutionService:
                     display_title=item.title,
                     item_type=item.record_type,
                     safe_aliases=aliases,
-                    relationship_context=_safe_dynamic_text(item, "relationship_context"),
+                    relationship_context=item.relationship_context or _safe_dynamic_text(item, "relationship_context"),
                     relevant_responsibility_id=related.id if related else None,
                     relevant_responsibility_title=related.title if related else None,
                     relevant_dates=_safe_record_dates(item, related),

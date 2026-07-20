@@ -33,6 +33,7 @@ export type RecordField =
   | 'purchase_date'
   | 'renewal_date'
   | 'birthday'
+  | 'relationship_context'
   | 'location_hint'
   | 'notes'
   | 'tags'
@@ -224,8 +225,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     category: 'People',
     defaultStatus: 'active',
     suggestedDetails: [
-      detail('preferred_name', 'Preferred name', 'short_text', 100, { placeholder: 'Name they prefer' }),
-      detail('relationship_context', 'Relationship', 'select', 110, { selectOptions: ['Friend', 'Family', 'Coworker', 'Neighbor', 'Other'] }),
+      detail('relationship_context', 'Relationship', 'select', 110, { recordField: 'relationship_context', placeholder: 'Choose a relationship', showByDefault: true, section: 'overview', selectOptions: ['Friend', 'Family', 'Partner', 'Coworker', 'Neighbor', 'Acquaintance', 'Other'] }),
       detail('birthday', 'Birthday', 'short_text', 120, { recordField: 'birthday', placeholder: 'Month and day', helperText: 'A year is optional. LifeLedger never invents one.', showByDefault: true, section: 'overview' }),
       detail('aliases', 'Aliases', 'short_text', 130, { placeholder: 'Other names, separated by commas' }),
       detail('notes', 'Notes', 'long_text', 200, { recordField: 'notes', placeholder: 'A short, useful note' }),
@@ -294,7 +294,6 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     category: 'Identity',
     defaultStatus: 'active',
     suggestedDetails: [
-      detail('owner_name', 'Holder', 'short_text', 100, { recordField: 'owner_name', placeholder: 'Full name', section: 'overview' }),
       detail('expiration_date', 'Expiration date', 'date', 110, { recordField: 'expiration_date', showByDefault: true, section: 'overview' }),
       detail('provider_or_brand', 'Issuing country', 'short_text', 120, { recordField: 'provider_or_brand', placeholder: 'United States', showByDefault: true, section: 'overview' }),
       detail('issue_date', 'Issue date', 'date', 130, { recordField: 'issue_date' }),
@@ -328,7 +327,6 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     category: 'Identity',
     defaultStatus: 'active',
     suggestedDetails: [
-      detail('owner_name', 'Holder', 'short_text', 100, { recordField: 'owner_name', placeholder: 'Full name', section: 'overview' }),
       detail('expiration_date', 'Expiration date', 'date', 110, { recordField: 'expiration_date', showByDefault: true, section: 'overview' }),
       detail('provider_or_brand', 'Issuing state or authority', 'short_text', 120, { recordField: 'provider_or_brand', placeholder: 'Maryland', showByDefault: true, section: 'overview' }),
       detail('issue_date', 'Issue date', 'date', 130, { recordField: 'issue_date' }),

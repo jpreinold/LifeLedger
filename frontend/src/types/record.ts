@@ -84,6 +84,8 @@ export interface LifeRecord {
   purchase_date: string | null
   renewal_date: string | null
   birthday?: string | null
+  birthday_inferred_birth_year?: number | null
+  relationship_context?: string | null
   location_hint: string | null
   notes: string | null
   tags: string[]
@@ -108,6 +110,8 @@ export interface RecordInput {
   purchase_date: string | null
   renewal_date: string | null
   birthday: string | null
+  birthday_inferred_birth_year?: number | null
+  relationship_context?: string | null
   location_hint: string | null
   notes: string | null
   tags: string[]

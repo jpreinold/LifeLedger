@@ -71,6 +71,12 @@ def update_record(
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     updates = payload.model_dump(exclude_unset=True)
+    if (
+        "birthday" in updates
+        and "birthday_inferred_birth_year" not in updates
+        and (updates["birthday"] is None or not str(updates["birthday"]).startswith("--"))
+    ):
+        updates["birthday_inferred_birth_year"] = None
     for required_field in ("record_type", "title", "category", "status"):
         if updates.get(required_field) is None:
             updates.pop(required_field, None)

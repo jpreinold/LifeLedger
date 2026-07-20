@@ -573,7 +573,9 @@ def test_entity_resolution_exact_alias_type_and_archived_filtering(tmp_path):
     services["records"].update_record(archived.model_copy(update={"status": RecordStatus.ARCHIVED}))
     candidates = services["entities"].retrieve("user-a", "Al's birthday", item_types={RecordType.PERSON})
     assert [item.entity_id for item in candidates] == [active.id]
+    assert active.relationship_context == "Friend"
     assert candidates[0].safe_aliases == ["Al", "Lex"]
+    assert candidates[0].relationship_context == "Friend"
     dumped = candidates[0].model_dump(mode="json")
     assert "protected" not in json.dumps(dumped).casefold()
 

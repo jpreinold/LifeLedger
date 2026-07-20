@@ -30,7 +30,7 @@ export type GuidedWorkflowId = (typeof guidedWorkflowIds)[number]
 export type GuidedWorkflowStep = 'item' | 'details' | 'responsibility' | 'document' | 'review'
 export type GuidedWorkflowValues = Record<string, string>
 export type GuidedInputType = 'text' | 'date' | 'number' | 'money' | 'select' | 'password' | 'url' | 'textarea'
-export type GuidedRecordField = Exclude<keyof RecordInput, 'record_type' | 'category' | 'tags'>
+export type GuidedRecordField = Exclude<keyof RecordInput, 'record_type' | 'category' | 'tags' | 'birthday_inferred_birth_year'>
 
 export interface GuidedWorkflowField {
   id: string
@@ -135,7 +135,6 @@ export const guidedWorkflowRegistry: Record<GuidedWorkflowId, GuidedWorkflowDefi
       label: 'Passport holder',
       placeholder: 'Full name',
       reviewLabel: 'Passport holder',
-      mirrorRecordField: 'owner_name',
     },
     requiredSteps: ['item', 'details', 'responsibility', 'document', 'review'],
     fields: [
