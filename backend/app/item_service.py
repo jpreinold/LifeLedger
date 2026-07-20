@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
 from app.models import DynamicRecordField, Record
+from app.person_birthday_service import PersonBirthdayService, parse_person_birthday
 from app.records_repository import RecordRepository
 from app.schemas import DynamicFieldType, LinkedEntityType, RecordStatus, RecordType, normalize_dynamic_field_value
 from app.search_service import SearchProjectionService
@@ -138,9 +139,15 @@ def allowed_detail_keys(item_type: RecordType) -> set[str]:
 class ItemApplicationService:
     """The only normal-item mutation boundary used by assistant execution."""
 
-    def __init__(self, records: RecordRepository, search: SearchProjectionService):
+    def __init__(
+        self,
+        records: RecordRepository,
+        search: SearchProjectionService,
+        birthdays: PersonBirthdayService | None = None,
+    ):
         self.records = records
         self.search = search
+        self.birthdays = birthdays
 
     def create_item(
         self,
@@ -155,6 +162,8 @@ class ItemApplicationService:
         item_id = str(uuid5(NAMESPACE_URL, f"lifeledger:item-service:{user_id}:{idempotency_key}"))
         existing = self.records.get_record(user_id, item_id)
         if existing is not None:
+            if self.birthdays is not None:
+                self.birthdays.synchronize(existing, now=now)
             self.search.sync_entity_observed(user_id, LinkedEntityType.RECORD, existing.id, operation="assistant_item_replay")
             return existing, True
 
@@ -184,6 +193,8 @@ class ItemApplicationService:
             **record_values,
         )
         saved = self.records.create_record(item)
+        if self.birthdays is not None:
+            self.birthdays.synchronize(saved, now=current)
         self.search.sync_entity_observed(user_id, LinkedEntityType.RECORD, saved.id, operation="assistant_item_create")
         return saved, False
 
@@ -206,6 +217,8 @@ class ItemApplicationService:
         if spec.record_field:
             previous = getattr(item, spec.record_field)
             if _json_value(previous) == _json_value(normalized):
+                if self.birthdays is not None:
+                    self.birthdays.synchronize(item, now=current)
                 return item, True
             if previous not in (None, "") and not allow_replace:
                 raise ItemDetailConflict(f"{spec.label} already has a different value.")
@@ -214,6 +227,8 @@ class ItemApplicationService:
             existing = next((field for field in item.dynamic_fields if field.key == detail_key), None)
             if existing is not None:
                 if _json_value(existing.value) == _json_value(normalized):
+                    if self.birthdays is not None:
+                        self.birthdays.synchronize(item, now=current)
                     return item, True
                 if existing.has_value and not allow_replace:
                     raise ItemDetailConflict(f"{spec.label} already has a different value.")
@@ -226,6 +241,8 @@ class ItemApplicationService:
             updated = item.model_copy(update={"dynamic_fields": fields, "updated_at": current})
 
         saved = self.records.update_record(updated)
+        if self.birthdays is not None:
+            self.birthdays.synchronize(saved, now=current)
         self.search.sync_entity_observed(user_id, LinkedEntityType.RECORD, saved.id, operation="assistant_item_detail")
         return saved, replay
 
@@ -294,25 +311,14 @@ class ItemApplicationService:
 
 def _normalize_detail_value(spec: DetailSpec, value: object):
     if spec.key == "birthday" and spec.field_type == DynamicFieldType.SHORT_TEXT:
-        text = str(value).strip()
-        if not _valid_person_birthday(text):
-            raise ItemDetailNotAllowed("Person birthdays must use YYYY-MM-DD or --MM-DD.")
-        return text
+        try:
+            return parse_person_birthday(value).stored_value
+        except ValueError as exc:
+            raise ItemDetailNotAllowed(str(exc)) from exc
     normalized = normalize_dynamic_field_value(spec.field_type, value, list(spec.select_options))
     if spec.record_field and spec.field_type == DynamicFieldType.DATE and isinstance(normalized, str):
         return date.fromisoformat(normalized)
     return normalized
-
-
-def _valid_person_birthday(value: str) -> bool:
-    try:
-        if value.startswith("--") and len(value) == 7:
-            date(2000, int(value[2:4]), int(value[5:7]))
-            return value[4] == "-"
-        date.fromisoformat(value)
-        return True
-    except (TypeError, ValueError):
-        return False
 
 
 def _safe_note(value: object) -> str:

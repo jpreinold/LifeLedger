@@ -111,22 +111,6 @@ class DeterministicInterpreter:
             for item in candidates
             if item.entity_type == "item" and item.item_type == RecordType.PERSON and _name_matches(name, item)
         ]
-        birthday_fields = {
-            "title": f"{name}'s birthday",
-            "category": "Family",
-            "due_date": _next_month_day(now.date(), now.month, now.day).isoformat(),
-            "repeat": "Yearly",
-            "priority": "Medium",
-            "reminder_lead_value": 7,
-            "reminder_lead_unit": "days",
-            "reminder_type": "birthday",
-            "birthday_details": {
-                "person_name": name,
-                "birth_month": now.month,
-                "birth_day": now.day,
-                "relationship": relationship,
-            },
-        }
         if len(people) > 1:
             return StructuredInterpretation(
                 supported=True,
@@ -139,11 +123,6 @@ class DeterministicInterpreter:
                         fields={"detail_key": "birthday", "value": birthday},
                         explanation=f"Save today's month and day as {name}'s birthday.",
                     ),
-                    ActionSeed(
-                        action_type=ActionType.CREATE_RESPONSIBILITY,
-                        fields=birthday_fields,
-                        explanation="Add an annual birthday responsibility with a seven-day reminder.",
-                    ),
                 ],
                 ambiguity_reasons=[f"Multiple people named {name} match this capture."],
                 missing_information=[f"Which {name} did you mean?"],
@@ -151,7 +130,7 @@ class DeterministicInterpreter:
         if len(people) == 1:
             target = people[0].entity_id
             return _interpretation(
-                f"Save {now.strftime('%B')} {now.day} as {name}'s birthday and add an annual reminder.",
+                f"Save {now.strftime('%B')} {now.day} as {name}'s birthday. LifeLedger will maintain the annual reminder.",
                 [
                     ActionSeed(
                         action_type=ActionType.UPDATE_ITEM_DETAIL,
@@ -160,31 +139,19 @@ class DeterministicInterpreter:
                         fields={"detail_key": "birthday", "value": birthday},
                         explanation=f"Save today's month and day as {name}'s birthday.",
                     ),
-                    ActionSeed(
-                        action_type=ActionType.CREATE_RESPONSIBILITY,
-                        target_item_id=target,
-                        fields=birthday_fields,
-                        explanation="Add an annual birthday responsibility with a seven-day reminder.",
-                    ),
                 ],
             )
         details = {"birthday": birthday}
         if relationship:
             details["relationship_context"] = relationship
         return _interpretation(
-            f"Create {name} as a Person, save the birthday, and add an annual reminder.",
+            f"Create {name} as a Person and save the birthday. LifeLedger will maintain the annual reminder.",
             [
                 ActionSeed(
                     action_type=ActionType.CREATE_ITEM,
                     item_type=RecordType.PERSON,
                     fields={"title": name, "details": details},
                     explanation=f"Create {name} as a Person.",
-                ),
-                ActionSeed(
-                    action_type=ActionType.CREATE_RESPONSIBILITY,
-                    target_item_action_index=0,
-                    fields=birthday_fields,
-                    explanation="Add an annual birthday responsibility with a seven-day reminder.",
                 ),
             ],
         )

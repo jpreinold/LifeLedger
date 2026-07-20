@@ -563,7 +563,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
       }
 
       recordCreationProgressRef.current.set(workflowId, progress)
-      await loadRecordData()
+      await Promise.all([loadRecordData(), loadReminderData()])
       const incomplete = protectedFailed || detailFailures > 0 || failedFiles.length > 0 || linkFailures > 0
       if (incomplete) {
         const failures = [
@@ -623,7 +623,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           protectedSaved = false
         }
       }
-      await loadRecordData()
+      await Promise.all([loadRecordData(), loadReminderData()])
       setViewingRecord((current) => (current?.record.id === id ? { ...current, record: nextRecord } : current))
       if (!protectedSaved) {
         setError('Item updated, but protected details were not saved. Protected storage may not be configured.')
@@ -703,6 +703,13 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
     setViewingRecord((current) => (current?.record.id === updated.id ? { ...current, record: updated } : current))
     setEditingRecord((current) => (current?.id === updated.id ? updated : current))
     setRecordBackStack((current) => current.map((item) => (item.record.id === updated.id ? { ...item, record: updated } : item)))
+  }
+
+  function handleRecordChange(updated: LifeRecord) {
+    replaceRecord(updated)
+    if (updated.record_type === 'person') {
+      void loadReminderData()
+    }
   }
 
   async function handleEnableCalendarSync(id: string) {
@@ -890,7 +897,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       await recordsApi.remove(pendingRecordDelete.id)
-      await loadRecordData()
+      await Promise.all([loadRecordData(), loadReminderData()])
       setNotice('Item deleted.')
       setEditingRecord((current) => (current?.id === pendingRecordDelete.id ? null : current))
       setViewingRecord((current) => (current?.record.id === pendingRecordDelete.id ? null : current))
@@ -908,7 +915,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       const archived = await recordsApi.archive(record.id)
-      await loadRecordData()
+      await Promise.all([loadRecordData(), loadReminderData()])
       setViewingRecord({ record: archived, initialTab: 'details' })
       setNotice('Item archived.')
     } catch (requestError) {
@@ -922,7 +929,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
 
     try {
       const restored = await recordsApi.restore(record.id)
-      await loadRecordData()
+      await Promise.all([loadRecordData(), loadReminderData()])
       setViewingRecord({ record: restored, initialTab: 'details' })
       setNotice('Item restored.')
     } catch (requestError) {
@@ -1570,7 +1577,7 @@ export function ReminderApp({ onSignOut, userLabel }: ReminderAppProps) {
           onOpenLinkedRecord={openLinkedRecord}
           onOpenLinkedReminder={openLinkedReminder}
           onProtectedStatusChange={handleProtectedRecordStatusChange}
-          onRecordChange={replaceRecord}
+          onRecordChange={handleRecordChange}
           onRequestDelete={requestRecordDelete}
           onRestore={handleRestoreRecord}
         />

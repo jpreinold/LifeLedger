@@ -83,6 +83,7 @@ from app.maintenance import (
     prepare_maintenance_details,
 )
 from app.models import DynamicRecordField, GoogleCalendarConnection, GoogleOAuthState, LinkedItem, PushSubscription, Record, RecordAttachment, Reminder, ResponsibilityEvent
+from app.person_birthday_service import PersonBirthdayService, PersonBirthdayValueError, validate_person_birthday_field
 from app.preferences import default_digest_preferences
 from app.preferences_repository import PreferencesRepository
 from app.push_repository import PushSubscriptionRepository, push_subscription_id_for_endpoint
@@ -337,11 +338,20 @@ def get_responsibility_lifecycle_service(
         search_service,
     )
 
+def get_person_birthday_service(
+    reminder_repo: ReminderRepository = Depends(get_repository),
+    lifecycle: ResponsibilityLifecycleService = Depends(get_responsibility_lifecycle_service),
+    linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
+    search_service: SearchProjectionService = Depends(get_search_projection_service),
+) -> PersonBirthdayService:
+    return PersonBirthdayService(reminder_repo, lifecycle, linked_repo, search_service)
+
 def get_item_application_service(
     record_repo: RecordRepository = Depends(get_record_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> ItemApplicationService:
-    return ItemApplicationService(record_repo, search_service)
+    return ItemApplicationService(record_repo, search_service, birthdays)
 
 def get_relationship_application_service(
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),

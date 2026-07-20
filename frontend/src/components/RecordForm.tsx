@@ -29,6 +29,7 @@ import type { Reminder } from '../types/reminder'
 import { DetailDraftDrawer, DraftValueControl, type DetailDraft } from './DetailDraftDrawer'
 import { AddLinkedItemDrawer, LinkedItemsPanel, type LinkDraft } from './LinkedItemsPanel'
 import { RecordDocumentsPanel } from './RecordDocumentsPanel'
+import { PersonBirthdayInput } from './PersonBirthdayInput'
 import { SheetDrawer } from './SheetDrawer'
 
 export interface RecordCreationResult {
@@ -527,6 +528,7 @@ export function RecordForm({
             {!record ? (
               <SuggestedDetailsSection
                 details={definition.suggestedDetails.filter((detail) => detail.showByDefault && !detail.recordField && !detail.protectedField)}
+                personBirthday={form.record_type === 'person'}
                 values={suggestedDetailValues}
                 onChange={updateSuggestedDetail}
               />
@@ -698,9 +700,11 @@ export function RecordForm({
 function SuggestedDetailsSection({
   details,
   onChange,
+  personBirthday,
   values,
 }: {
   details: SuggestedDetailDefinition[]
+  personBirthday: boolean
   values: Record<string, DynamicFieldValue>
   onChange: (key: string, value: DynamicFieldValue) => void
 }) {
@@ -716,16 +720,24 @@ function SuggestedDetailsSection({
       <div className="record-form-grid">
         {details.map((detail) => (
           <div className="suggested-detail-input" key={detail.key}>
-            <DraftValueControl
-              choices={detail.selectOptions}
-              format={detail.dataType}
-              label={detail.label}
-              placeholder={detail.placeholder}
-              value={values[detail.key] ?? null}
-              onChange={(value) => onChange(detail.key, value)}
-            />
+            {personBirthday && detail.key === 'birthday' ? (
+              <PersonBirthdayInput
+                label={detail.label}
+                value={values[detail.key] ?? null}
+                onChange={(value) => onChange(detail.key, value)}
+              />
+            ) : (
+              <DraftValueControl
+                choices={detail.selectOptions}
+                format={detail.dataType}
+                label={detail.label}
+                placeholder={detail.placeholder}
+                value={values[detail.key] ?? null}
+                onChange={(value) => onChange(detail.key, value)}
+              />
+            )}
             {detail.protectedByDefault ? <small className="protected-field-edit-status">Stored as a protected detail and excluded from search.</small> : null}
-            {detail.helperText ? <small className="field-helper">{detail.helperText}</small> : null}
+            {detail.helperText && !(personBirthday && detail.key === 'birthday') ? <small className="field-helper">{detail.helperText}</small> : null}
           </div>
         ))}
       </div>

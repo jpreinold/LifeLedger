@@ -35,7 +35,7 @@ export interface ResponsibilityEvent {
   next_due_date: string | null
   completed_at: string | null
   note: string | null
-  source: 'user' | 'guided_workflow' | 'reconciliation'
+  source: 'user' | 'guided_workflow' | 'reconciliation' | 'assistant_capture' | 'system'
   schema_version: number
   created_at: string
   responsibility_title_snapshot: string | null

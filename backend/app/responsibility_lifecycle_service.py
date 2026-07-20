@@ -311,6 +311,7 @@ class ResponsibilityLifecycleService:
         *,
         idempotency_key: str | None,
         now: datetime,
+        sync_item_date: bool = True,
     ) -> LifecycleOperationResult:
         occurrence_id = current_occurrence_id(reminder)
         operation_key = scoped_operation_key(
@@ -338,7 +339,7 @@ class ResponsibilityLifecycleService:
             item_date_sync_key=target.key if target else None,
         )
         saved = self.history_repo.commit_reminder_event(self.reminder_repo, reminder, versioned, event)
-        return self._finalize(saved, event, sync_item_date=True)
+        return self._finalize(saved, event, sync_item_date=sync_item_date)
 
     def reopen(
         self,

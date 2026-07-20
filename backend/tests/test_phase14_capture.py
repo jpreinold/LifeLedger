@@ -34,6 +34,7 @@ from app.deterministic_interpreter import DeterministicInterpreter
 from app.entity_resolution_service import EntityResolutionService
 from app.item_service import ItemApplicationService, ItemDetailConflict
 from app.linked_items_repository import LocalLinkedItemRepository
+from app.person_birthday_service import PersonBirthdayService
 from app.reconciliation_repository import LocalReconciliationRepository
 from app.reconciliation_service import ReconciliationService
 from app.records_repository import LocalRecordRepository
@@ -60,9 +61,10 @@ def build_services(tmp_path, *, provider=None, settings=None):
     reconciliation = ReconciliationService(LocalReconciliationRepository(tmp_path / "reconciliation.json"))
     search = SearchProjectionService(search_repo, records, reminders, attachments, links, reconciliation)
     lifecycle = ResponsibilityLifecycleService(reminders, history, records, links, attachments, search)
+    birthdays = PersonBirthdayService(reminders, lifecycle, links, search)
     relationship_service = RelationshipApplicationService(links, records, reminders, attachments, search)
     responsibility_service = ResponsibilityApplicationService(reminders, lifecycle, relationship_service, links)
-    items = ItemApplicationService(records, search)
+    items = ItemApplicationService(records, search, birthdays)
     assistant = LocalAssistantRepository(tmp_path / "assistant.json")
     entities = EntityResolutionService(records, reminders, links, assistant, SearchQueryService(search_repo))
     policy = ActionPolicyService()
@@ -86,6 +88,7 @@ def build_services(tmp_path, *, provider=None, settings=None):
         "capture": capture,
         "assistant": assistant,
         "items": items,
+        "birthdays": birthdays,
         "records": records,
         "reminders": reminders,
         "history": history,
@@ -189,10 +192,7 @@ def test_ready_proposal_can_be_safely_edited_and_revalidated_before_execution(tm
 def test_person_birthday_creates_person_month_day_and_annual_responsibility(tmp_path):
     services = build_services(tmp_path)
     detail = create_and_interpret(services, "It's my friend Alex's birthday today.")
-    assert [item.action_type for item in detail.proposal.proposed_actions] == [
-        ActionType.CREATE_ITEM,
-        ActionType.CREATE_RESPONSIBILITY,
-    ]
+    assert [item.action_type for item in detail.proposal.proposed_actions] == [ActionType.CREATE_ITEM]
     completed = services["capture"].approve_proposal("user-a", detail.proposal.proposal_id, now=NOW)
     assert completed.status == ProposalStatus.COMPLETED
     people = services["records"].list_records("user-a")
@@ -203,6 +203,7 @@ def test_person_birthday_creates_person_month_day_and_annual_responsibility(tmp_
     reminder = services["reminders"].list_reminders("user-a")[0]
     assert reminder.repeat == RepeatOption.YEARLY
     assert reminder.reminder_lead_value == 7
+    assert reminder.workflow_id.value == "person_birthday"
     assert len(services["history"].list_for_user("user-a")) == 1
 
 
@@ -213,6 +214,52 @@ def test_duplicate_birthday_capture_does_not_duplicate_responsibility(tmp_path):
     second = create_and_interpret(services, "It's Alex's birthday today.", "birthday-two")
     services["capture"].approve_proposal("user-a", second.proposal.proposal_id, now=NOW)
     assert len(services["reminders"].list_reminders("user-a")) == 1
+
+
+def test_person_birthday_year_updates_the_same_system_reminder(tmp_path):
+    services = build_services(tmp_path)
+    person, _ = services["items"].create_item(
+        user_id="user-a",
+        item_type=RecordType.PERSON,
+        title="Alex",
+        details={"birthday": "--07-18", "relationship_context": "Friend"},
+        idempotency_key="alex-birthday",
+        now=NOW,
+    )
+    original = services["reminders"].list_reminders("user-a")[0]
+    assert original.birthday_details.birth_year is None
+    assert original.birthday_details.age_turning_next_birthday is None
+    assert len(services["links"].list_links_for_entity("user-a", "record", person.id)) == 1
+
+    birthday = next(field for field in person.dynamic_fields if field.key == "birthday")
+    fields = [
+        field.model_copy(update={"value": "1990-07-18", "updated_at": NOW + timedelta(minutes=1)})
+        if field.field_id == birthday.field_id
+        else field
+        for field in person.dynamic_fields
+    ]
+    updated_person = services["records"].update_record(
+        person.model_copy(update={"title": "Alex Morgan", "dynamic_fields": fields, "updated_at": NOW + timedelta(minutes=1)})
+    )
+    updated = services["birthdays"].synchronize(updated_person, now=NOW + timedelta(minutes=1))
+
+    assert updated.id == original.id
+    assert updated.title == "Alex Morgan's birthday"
+    assert updated.birthday_details.birth_year == 1990
+    assert updated.birthday_details.age_turning_next_birthday == 36
+    assert len(services["reminders"].list_reminders("user-a")) == 1
+
+    without_birthday = services["records"].update_record(
+        updated_person.model_copy(
+            update={
+                "dynamic_fields": [field for field in fields if field.field_id != birthday.field_id],
+                "updated_at": NOW + timedelta(minutes=2),
+            }
+        )
+    )
+    archived = services["birthdays"].synchronize(without_birthday, now=NOW + timedelta(minutes=2))
+    assert archived.id == original.id
+    assert archived.archived_at == NOW + timedelta(minutes=2)
 
 
 def test_two_people_with_same_alias_require_focused_clarification(tmp_path):
@@ -575,6 +622,82 @@ def test_openai_provider_uses_no_store_no_tools_strict_schema_and_safety_identif
     assert client.payload["safety_identifier"] == "hashed-user"
     assert "tools" not in client.payload
     assert client.payload["text"]["format"]["strict"] is True
+
+
+def test_openai_provider_removes_redundant_person_birthday_reminder_action():
+    class BirthdayResponse(FakeResponse):
+        def json(self):
+            output = {
+                "supported": True,
+                "confidence": "high",
+                "summary": "Create Alex and a birthday reminder.",
+                "actions": [
+                    {
+                        "action_type": "create_item",
+                        "target_item_id": None,
+                        "target_responsibility_id": None,
+                        "target_item_action_index": None,
+                        "item_type": "person",
+                        "fields": {
+                            "title": "Alex",
+                            "details": [{
+                                "key": "birthday",
+                                "value": {"kind": "string", "string_value": "--07-18"},
+                            }],
+                        },
+                        "explanation": "Create Alex.",
+                    },
+                    {
+                        "action_type": "create_responsibility",
+                        "target_item_id": None,
+                        "target_responsibility_id": None,
+                        "target_item_action_index": 0,
+                        "item_type": None,
+                        "fields": {
+                            "title": "Alex's birthday",
+                            "category": "Family",
+                            "due_date": "2026-07-18",
+                            "repeat": "Yearly",
+                            "priority": "Medium",
+                            "reminder_lead_value": 7,
+                            "reminder_lead_unit": "days",
+                            "reminder_type": "birthday",
+                            "person_name": "Alex",
+                            "birth_month": 7,
+                            "birth_day": 18,
+                        },
+                        "explanation": "Create a birthday reminder.",
+                    },
+                ],
+                "ambiguity_reasons": [],
+                "conflict_warnings": [],
+                "missing_information": [],
+            }
+            return {
+                "id": "birthday-response",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps(output)}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+
+    class BirthdayClient(FakeClient):
+        def post(self, _url, **kwargs):
+            self.payload = kwargs["json"]
+            return BirthdayResponse()
+
+    settings = Settings(ai_provider=AI_PROVIDER_OPENAI, openai_api_key="test-key")
+    client = BirthdayClient()
+    result = OpenAIInterpretationProvider(settings, SecretProvider(settings), client=client).interpret_capture(
+        original_text="It's Alex's birthday on July 18.",
+        captured_at=NOW,
+        timezone_name="UTC",
+        locale="en-US",
+        entity_candidates=[],
+        safety_identifier="hashed-user",
+    )
+
+    assert [action.action_type for action in result.interpretation.actions] == [ActionType.CREATE_ITEM]
+    assert "maintain the linked annual reminder automatically" in result.interpretation.summary
+    assert "never also propose create_responsibility" in client.payload["input"][0]["content"][0]["text"]
 
 
 def test_invalid_openai_output_is_rejected_safely():

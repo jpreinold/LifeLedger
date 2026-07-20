@@ -64,6 +64,7 @@ def update_record(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     updates = payload.model_dump(exclude_unset=True)
@@ -74,6 +75,7 @@ def update_record(
         updates["tags"] = []
     updated = Record.model_validate({**record.model_dump(), **updates, "updated_at": utc_now()})
     saved = repo.update_record(updated)
+    birthdays.synchronize(saved, now=saved.updated_at)
     sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, saved.id, "record_update")
     return to_record_response(saved)
 
@@ -85,6 +87,7 @@ def add_record_field(
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     if len(record.dynamic_fields) >= 30:
@@ -110,12 +113,24 @@ def add_record_field(
         created_at=now,
         updated_at=now,
     )
+    try:
+        validate_person_birthday_field(
+            record,
+            field_key=field.key,
+            value=field_value,
+            is_sensitive=field.is_sensitive,
+            has_value=field.has_value,
+            today=now.date(),
+        )
+    except PersonBirthdayValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     updated_record = record.model_copy(update={"dynamic_fields": sorted_dynamic_fields([*record.dynamic_fields, field]), "updated_at": now})
     if field.is_sensitive and dynamic_value_has_content(field_value):
         updated_record = set_dynamic_sensitive_value(record, updated_record, field.field_id, field_value, encryption_service, now)
 
     saved = repo.update_record(updated_record)
+    birthdays.synchronize(saved, now=now)
     log_security_event(
         "record_dynamic_field_created",
         user_id=current_user.user_id,
@@ -137,6 +152,7 @@ def update_record_field(
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     existing = find_dynamic_field(record, field_id)
@@ -182,6 +198,17 @@ def update_record_field(
             "updated_at": now,
         }
     )
+    try:
+        validate_person_birthday_field(
+            record,
+            field_key=existing.key,
+            value=updated_field.value,
+            is_sensitive=updated_field.is_sensitive,
+            has_value=updated_field.has_value,
+            today=now.date(),
+        )
+    except PersonBirthdayValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     updated_record = record.model_copy(
         update={
             "dynamic_fields": sorted_dynamic_fields(replace_dynamic_field(record.dynamic_fields, updated_field)),
@@ -195,6 +222,7 @@ def update_record_field(
         updated_record = remove_dynamic_sensitive_value(record, updated_record, field_id, encryption_service, now)
 
     saved = repo.update_record(updated_record)
+    birthdays.synchronize(saved, now=now)
     log_security_event(
         "record_dynamic_field_updated",
         user_id=current_user.user_id,
@@ -247,6 +275,7 @@ def delete_record_field(
     repo: RecordRepository = Depends(get_record_repository),
     encryption_service: EncryptionService = Depends(get_encryption_service),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> RecordResponse:
     record = require_record(repo, current_user.user_id, record_id)
     existing = find_dynamic_field(record, field_id)
@@ -261,6 +290,7 @@ def delete_record_field(
         updated_record = remove_dynamic_sensitive_value(record, updated_record, field_id, encryption_service, now)
 
     saved = repo.update_record(updated_record)
+    birthdays.synchronize(saved, now=now)
     log_security_event(
         "record_dynamic_field_deleted",
         user_id=current_user.user_id,
@@ -277,11 +307,13 @@ def archive_record(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> RecordResponse:
     archived = repo.archive_record(current_user.user_id, record_id)
     if archived is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
+    birthdays.synchronize(archived, now=archived.updated_at)
     sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, archived.id, "record_archive")
     return to_record_response(archived)
 
@@ -291,11 +323,13 @@ def restore_record(
     current_user: UserContext = Depends(get_current_user),
     repo: RecordRepository = Depends(get_record_repository),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> RecordResponse:
     restored = repo.unarchive_record(current_user.user_id, record_id)
     if restored is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
+    birthdays.synchronize(restored, now=restored.updated_at)
     sync_search_entity_safe(search_service, current_user.user_id, LinkedEntityType.RECORD, restored.id, "record_restore")
     return to_record_response(restored)
 
@@ -308,8 +342,10 @@ def delete_record(
     linked_repo: LinkedItemRepository = Depends(get_linked_item_repository),
     document_storage=Depends(get_document_storage_service),
     search_service: SearchProjectionService = Depends(get_search_projection_service),
+    birthdays: PersonBirthdayService = Depends(get_person_birthday_service),
 ) -> Response:
-    require_record(repo, current_user.user_id, record_id)
+    record = require_record(repo, current_user.user_id, record_id)
+    birthdays.retire(record, now=utc_now())
     deleted_links = linked_repo.list_links_for_entity(current_user.user_id, LinkedEntityType.RECORD, record_id)
     cleanup_record_attachments_before_delete(
         current_user.user_id,

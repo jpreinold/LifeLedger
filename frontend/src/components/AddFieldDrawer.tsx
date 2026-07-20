@@ -8,6 +8,7 @@ import type { DynamicFieldPreset } from '../lib/recordTypes'
 import type { DynamicFieldType, DynamicFieldValue, DynamicRecordField, LifeRecord } from '../types/record'
 import { dynamicFieldTypes } from '../types/record'
 import { SheetDrawer } from './SheetDrawer'
+import { PersonBirthdayInput } from './PersonBirthdayInput'
 
 interface AddFieldDrawerProps {
   isOpen: boolean
@@ -238,6 +239,7 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
             ) : null}
             <DynamicValueControl
               field={customField}
+              personBirthday={record.record_type === 'person' && field?.key === 'birthday'}
               inputRef={firstInputRef}
               value={value}
               onChange={(nextValue) => {
@@ -261,6 +263,7 @@ export function AddFieldDrawer({ field = null, isOpen, record, suggestedFields, 
             </div>
             <DynamicValueControl
               field={selectedPreset}
+              personBirthday={record.record_type === 'person' && selectedPreset.key === 'birthday'}
               inputRef={firstInputRef}
               value={value}
               onChange={(nextValue) => {
@@ -280,13 +283,18 @@ function DynamicValueControl({
   field,
   inputRef,
   onChange,
+  personBirthday = false,
   value,
 }: {
   field: DynamicFieldPreset
   inputRef: MutableRefObject<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null>
   value: DynamicFieldValue
   onChange: (value: DynamicFieldValue) => void
+  personBirthday?: boolean
 }) {
+  if (personBirthday) {
+    return <PersonBirthdayInput value={value} onChange={onChange} />
+  }
   if (field.field_type === 'boolean') {
     return <SwitchRow checked={value === true} label="Value" onChange={onChange} />
   }

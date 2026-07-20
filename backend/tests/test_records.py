@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 import base64
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +10,7 @@ from app.auth import UserContext, get_current_user
 from app.config import load_settings
 from app.dynamo_repository import DynamoRecordRepository
 from app.encryption_service import EncryptionService
-from app.main import app, get_encryption_service, get_linked_item_repository, get_record_repository
+from app.main import app, get_encryption_service, get_linked_item_repository, get_person_birthday_service, get_record_repository
 from app.linked_items_repository import LocalLinkedItemRepository
 from app.models import Record
 from app.records_repository import LocalRecordRepository
@@ -27,9 +28,18 @@ def linked_repo(tmp_path):
 
 
 @pytest.fixture()
-def client(record_repo, linked_repo):
+def birthday_service():
+    service = Mock()
+    service.synchronize.return_value = None
+    service.retire.return_value = None
+    return service
+
+
+@pytest.fixture()
+def client(record_repo, linked_repo, birthday_service):
     app.dependency_overrides[get_record_repository] = lambda: record_repo
     app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
+    app.dependency_overrides[get_person_birthday_service] = lambda: birthday_service
 
     with TestClient(app) as test_client:
         yield test_client
@@ -38,7 +48,7 @@ def client(record_repo, linked_repo):
 
 
 @pytest.fixture()
-def encrypted_client(record_repo, linked_repo):
+def encrypted_client(record_repo, linked_repo, birthday_service):
     encryption_service = EncryptionService(
         load_settings(
             {
@@ -50,6 +60,7 @@ def encrypted_client(record_repo, linked_repo):
     app.dependency_overrides[get_record_repository] = lambda: record_repo
     app.dependency_overrides[get_linked_item_repository] = lambda: linked_repo
     app.dependency_overrides[get_encryption_service] = lambda: encryption_service
+    app.dependency_overrides[get_person_birthday_service] = lambda: birthday_service
 
     with TestClient(app) as test_client:
         yield test_client
@@ -400,6 +411,39 @@ def test_dynamic_record_field_crud_preserves_record_and_validates_types(client, 
     assert delete_response.status_code == 200
     assert delete_response.json()["dynamic_fields"] == []
     assert record_repo.get_record("local-dev-user", created["id"]) is not None
+
+
+def test_person_birthday_field_mutations_trigger_system_reminder_sync(client, birthday_service):
+    created = client.post(
+        "/records",
+        json=record_payload(record_type="person", title="Alex", category="People"),
+    ).json()
+
+    added = client.post(
+        f"/records/{created['id']}/fields",
+        json={"key": "birthday", "label": "Birthday", "field_type": "short_text", "value": "--07-18"},
+    )
+    assert added.status_code == 201
+    field = added.json()["dynamic_fields"][0]
+    synchronized = birthday_service.synchronize.call_args.args[0]
+    assert synchronized.record_type.value == "person"
+    assert next(item for item in synchronized.dynamic_fields if item.key == "birthday").value == "--07-18"
+
+    updated = client.put(
+        f"/records/{created['id']}/fields/{field['field_id']}",
+        json={"value": "1990-07-18"},
+    )
+    assert updated.status_code == 200
+    synchronized = birthday_service.synchronize.call_args.args[0]
+    assert next(item for item in synchronized.dynamic_fields if item.key == "birthday").value == "1990-07-18"
+    assert birthday_service.synchronize.call_count == 2
+
+    invalid = client.put(
+        f"/records/{created['id']}/fields/{field['field_id']}",
+        json={"value": "July 18"},
+    )
+    assert invalid.status_code == 422
+    assert birthday_service.synchronize.call_count == 2
 
 
 def test_dynamic_record_field_key_rejects_duplicate_retry_without_overwriting(client):

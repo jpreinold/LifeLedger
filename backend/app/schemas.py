@@ -83,6 +83,7 @@ class ResponsibilityEventSource(str, Enum):
     GUIDED_WORKFLOW = "guided_workflow"
     RECONCILIATION = "reconciliation"
     ASSISTANT_CAPTURE = "assistant_capture"
+    SYSTEM = "system"
 
 
 class LifecycleReconciliationStatus(str, Enum):

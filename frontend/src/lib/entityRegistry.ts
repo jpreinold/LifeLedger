@@ -225,7 +225,7 @@ export const entityCapabilityRegistry: Record<RecordType, EntityCapabilityDefini
     suggestedDetails: [
       detail('preferred_name', 'Preferred name', 'short_text', 100, { placeholder: 'Name they prefer' }),
       detail('relationship_context', 'Relationship', 'select', 110, { selectOptions: ['Friend', 'Family', 'Coworker', 'Neighbor', 'Other'] }),
-      detail('birthday', 'Birthday', 'short_text', 120, { placeholder: 'MM-DD or YYYY-MM-DD', helperText: 'A year is optional. LifeLedger never invents one.' }),
+      detail('birthday', 'Birthday', 'short_text', 120, { placeholder: 'Month and day', helperText: 'A year is optional. LifeLedger never invents one.', showByDefault: true }),
       detail('aliases', 'Aliases', 'short_text', 130, { placeholder: 'Other names, separated by commas' }),
       detail('notes', 'Notes', 'long_text', 200, { recordField: 'notes', placeholder: 'A short, useful note' }),
     ],

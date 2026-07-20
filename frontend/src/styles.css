@@ -2920,6 +2920,47 @@ textarea:focus-visible {
   gap: var(--space-3);
 }
 
+.person-birthday-input {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: var(--space-2);
+}
+
+.person-birthday-label {
+  color: var(--color-text);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.person-birthday-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(76px, 0.6fr) minmax(105px, 0.8fr);
+  gap: var(--space-2);
+}
+
+.person-birthday-fields label span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.person-birthday-fields label small {
+  color: var(--color-text-muted);
+  font-size: 0.64rem;
+  font-weight: 650;
+}
+
+@media (max-width: 460px) {
+  .person-birthday-fields {
+    grid-template-columns: minmax(0, 1.25fr) minmax(72px, 0.6fr);
+  }
+
+  .person-birthday-fields label:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
 .record-form-type-row,
 .record-safety-note {
   display: flex;

@@ -157,6 +157,35 @@ describe('Phase 10 product language and item flows', () => {
     expect(within(detailEditor).getByRole('switch', { name: 'Protect this detail' })).toBeInTheDocument()
   })
 
+  it('shows an optional person birthday and stores a yearless month and day', async () => {
+    const user = userEvent.setup()
+    const onCreate = vi.fn(async () => true)
+    render(
+      <RecordForm
+        isOpen
+        isSaving={false}
+        record={null}
+        records={[]}
+        recordType="person"
+        reminders={[]}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onUpdate={vi.fn()}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('Display name'), 'Alex')
+    await user.selectOptions(screen.getByLabelText('Month'), '7')
+    await user.type(screen.getByLabelText('Day'), '18')
+    expect(screen.getByLabelText(/Year/)).toHaveValue(null)
+    await user.click(screen.getByRole('button', { name: 'Add person' }))
+
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1))
+    expect((onCreate.mock.calls[0] as unknown[])[5]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'birthday', value: '--07-18' }),
+    ]))
+  })
+
   it('renders vehicle-specific fields including protected VIN support', () => {
     render(
       <RecordForm
